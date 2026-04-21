@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Nexus Finance Omni v58.0</title>
+    <title>Nexus Finance Omni v58.1</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -150,7 +150,7 @@
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
         <div class="px-6 py-5 flex justify-between items-center">
             <div>
-                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.0</span></h1>
+                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.1</span></h1>
                 <p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p>
             </div>
             <div class="flex gap-4">
@@ -281,7 +281,9 @@
                 <div class="cal-grid text-[8px] text-center font-black text-slate-400 mb-2">
                     <div>LUN</div><div>MAR</div><div>MIÉ</div><div>JUE</div><div>VIE</div><div>SÁB</div><div>DOM</div>
                 </div>
-                <div id="cal-grid-days" class="cal-grid"></div>
+                <div id="cal-grid-days" class="cal-grid">
+                    <!-- Inyectado por JS -->
+                </div>
             </div>
 
             <!-- Timeline Filtros y Lista -->
@@ -302,7 +304,9 @@
                             <p id="cal-total-due" class="text-sm font-black theme-val-exp tabular-nums">$0</p>
                         </div>
                     </div>
-                    <div id="calendar-timeline" class="pl-6 space-y-6"></div>
+                    <div id="calendar-timeline" class="pl-6 space-y-6">
+                        <!-- Timeline items rendered here -->
+                    </div>
                 </div>
             </div>
         </section>
@@ -372,6 +376,7 @@
                 </div>
             </div>
 
+            <!-- Proyección Anual -->
             <div id="stat-proj-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6">
                 <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-chart-line text-emerald-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Análisis y Proyección</h3></div>
                 <div class="overflow-x-auto hide-scrollbar">
@@ -386,6 +391,7 @@
                 </div>
             </div>
             
+            <!-- Evolución Anual -->
             <div id="stat-year-table-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6 hidden">
                 <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-calendar-days text-indigo-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Evolución Mensual del Año</h3></div>
                 <div class="overflow-x-auto hide-scrollbar">
@@ -904,7 +910,7 @@
         </div>
     </div>
 
-    <!-- SCRIPT MAESTRO (V58.0) -->
+    <!-- SCRIPT DE ARQUITECTURA MAESTRA -->
     <script>
         // ==========================================
         // 1. CONSTANTES GLOBALES Y ESTADO
@@ -917,7 +923,6 @@
         };
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
         
-        // Tasas de conversión base 1 USD
         const EXCHANGE_RATES = { USD: 1, COP: 3900, EUR: 0.92, AUD: 1.53, GBP: 0.79, CAD: 1.35, JPY: 150, MXN: 17, BRL: 4.95 };
 
         let currentUser = null;
@@ -936,7 +941,6 @@
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
                 document.getElementById('login-screen').classList.remove('hidden');
-                // Detectar si el usuario teclea en email para mostrar u ocultar campos de registro
                 document.getElementById('login-email').addEventListener('input', (e) => {
                     const em = e.target.value.trim().toLowerCase();
                     if(em && !localStorage.getItem(`nexus_profile_${em}`)) {
@@ -1025,7 +1029,6 @@
                 statsType: 'expense', activeCurrency: 'COP', calendarFilter: 'all'
             };
             
-            // Migración
             if (!state.settings.alertDays) state.settings.alertDays = 3;
             if (!state.settings.baseCurrency) state.settings.baseCurrency = 'COP';
             if (!state.calendarFilter) state.calendarFilter = 'all';
@@ -1350,7 +1353,6 @@
                 return;
             }
 
-            // Agrupar TODAS las cuentas por Divisa
             const groups = {};
             state.accounts.forEach(a => {
                 if(!groups[a.currency]) groups[a.currency] = [];
@@ -1422,11 +1424,30 @@
         async function callGeminiVisionAPI(base64Data, mimeType) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
             const expenseCats = state.categories.expense.join(", ");
+            
+            // INSTRUCCIÓN MEJORADA DE EXTRACCIÓN IA
+            const promptText = `Actúas como un extractor de datos OCR financiero avanzado. Tu objetivo es procesar este extracto bancario, factura o tabla extensa de transacciones.
+IGNORA cabeceras de marketing, logos y textos no transaccionales.
+RECORRE TODA LA TABLA y extrae CADA FILA como un objeto JSON independiente.
+
+Reglas de extracción por transacción:
+- date: Fecha de la transacción en formato YYYY-MM-DD. Si solo hay mes/día, infiere el año actual.
+- desc: Descripción limpia o nombre del comercio.
+- amount: El valor total de la compra o el valor cobrado en esa línea (número).
+- cat: Asigna estrictamente una de estas categorías: ${expenseCats}.
+- isCredit: true SI el cargo proviene de una tarjeta de crédito o es una compra a cuotas, de lo contrario false.
+- paidQuotas: Si indica "Cuota X de Y" o "X/Y", el valor X (cuotas pagadas hasta ahora). Si no aplica, 0.
+- totalQuotas: El valor Y de las cuotas totales. Si no aplica, 0.
+- interest: Si la línea desglosa un cobro por interés, comisión o seguro, colócalo aquí (número).
+- pending: Si el extracto muestra un saldo pendiente ("Capital por facturar" o "Saldo"), ponlo aquí. De lo contrario, calcula (amount * (totalQuotas - paidQuotas)) si es razonable, o deja 0.
+
+IMPORTANTE: Devuelve únicamente el Array de objetos JSON, válido y sin formato extra. Asegúrate de procesar filas consecutivas correctamente.`;
+
             const payload = { 
                 contents: [{ 
                     role: "user", 
                     parts: [ 
-                        { text: `Instrucción IA Financiera: Extrae TODAS las transacciones del documento. Ignora logos/marketing. Extrae fecha exacta, concepto y monto. Determina la categoría más lógica (${expenseCats}). Si es compra a cuotas, devuelve isCredit=true e indica el número de cuotas pagadas (ej. si dice 2/12, paidQuotas=2, totalQuotas=12). Si hay cobros de intereses o seguros en la línea, extráelos. Retorna JSON Array estricto.` }, 
+                        { text: promptText }, 
                         { inlineData: { mimeType: mimeType, data: base64Data } } 
                     ] 
                 }], 
@@ -1437,7 +1458,7 @@
                         items: { 
                             type: "OBJECT", 
                             properties: { 
-                                date: { type: "STRING", description: "Fecha (YYYY-MM-DD)" }, 
+                                date: { type: "STRING" }, 
                                 desc: { type: "STRING" }, 
                                 amount: { type: "NUMBER" }, 
                                 cat: { type: "STRING" }, 
@@ -1519,11 +1540,22 @@
             reader.readAsDataURL(file);
         }
 
+        // RENDERIZADO DE TABLA DE IA MEJORADO
         function renderScannedTable() { 
             const tbody = document.getElementById('scan-results-table'); 
             tbody.innerHTML = tempScannedData.map((d, i) => { 
-                const un = Math.max(0, d.totalQuotas - d.paidQuotas); 
-                return `<tr class="border-b border-slate-50"><td class="px-4 py-3 font-bold text-slate-400">${i+1}</td><td class="px-4 py-3">${d.date}</td><td class="px-4 py-3 font-bold truncate max-w-[150px]">${d.desc}</td><td class="px-4 py-3 text-right font-mono">${fmt(d.amount)}</td><td class="px-4 py-3 text-center text-slate-500">${d.isCredit ? d.paidQuotas : '-'}</td><td class="px-4 py-3 text-center text-rose-500">${d.isCredit ? un : '-'}</td><td class="px-4 py-3 text-right font-mono text-amber-500">${(d.interest > 0) ? fmt(d.interest) : '-'}</td><td class="px-4 py-3 text-right font-mono font-bold ${d.isCredit && d.pending > 0 ? 'text-red-500' : 'text-slate-300'}">${(d.isCredit && d.pending > 0) ? fmt(d.pending) : '-'}</td></tr>`; 
+                const un = d.totalQuotas > 0 ? Math.max(0, d.totalQuotas - d.paidQuotas) : 0; 
+                return `
+                <tr class="border-b border-slate-50">
+                    <td class="px-4 py-3 font-bold text-slate-400">${i+1}</td>
+                    <td class="px-4 py-3">${d.date}</td>
+                    <td class="px-4 py-3 font-bold truncate max-w-[150px]">${d.desc}</td>
+                    <td class="px-4 py-3 text-right font-mono">${fmt(d.amount)}</td>
+                    <td class="px-4 py-3 text-center text-slate-500">${d.isCredit && d.totalQuotas > 0 ? d.paidQuotas : '-'}</td>
+                    <td class="px-4 py-3 text-center text-rose-500">${d.isCredit && d.totalQuotas > 0 ? un : '-'}</td>
+                    <td class="px-4 py-3 text-right font-mono text-amber-500">${(d.interest > 0) ? fmt(d.interest) : '-'}</td>
+                    <td class="px-4 py-3 text-right font-mono font-bold ${d.isCredit && d.pending > 0 ? 'text-red-500' : 'text-slate-300'}">${(d.isCredit && d.pending > 0) ? fmt(d.pending) : '-'}</td>
+                </tr>`; 
             }).join(''); 
         }
         
@@ -1864,139 +1896,77 @@
         // ==========================================
         // 12. TAB DE CUENTAS (ACCOUNTS HUB)
         // ==========================================
+        // function renderAccountsTab() está consolidada en updateDashboard.
+        // Pero la agregaremos explícitamente para el click de la pestaña
         function renderAccountsTab() { 
-            const sC = document.getElementById('acc-hub-summary'); 
-            const lC = document.getElementById('acc-hub-list'); 
-            const aA = getActiveAccounts(); 
+            const cont = document.getElementById('acc-hub-list');
+            const sum = document.getElementById('acc-hub-summary');
+            
+            if(!state.accounts || state.accounts.length === 0) {
+                if (cont) cont.innerHTML = `<div class="text-center p-8 border border-dashed rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas registradas</p></div>`;
+                return;
+            }
+
+            const groups = {};
             let l=0, c=0, i=0; 
-            
-            aA.forEach(a => { 
-                if(a.type==='liquid') l+=a.balance; 
-                if(a.type==='credit') c+=a.balance; 
-                if(a.type==='investment') i+=a.balance; 
-            }); 
-            
-            sC.innerHTML=`
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(l)}</p></div>
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(c)}</p></div>
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(i)}</p></div>
-            `; 
-            
-            const tI={liquid:{title:'Liquidez / Efectivo',color:'theme-text',bg:'bg-slate-50',icon:'fa-money-bill-wave'},credit:{title:'Tarjetas de Crédito / Pasivos',color:'theme-val-exp',bg:'bg-red-50',icon:'fa-credit-card'},investment:{title:'Inversiones / Activos',color:'theme-val-inc',bg:'bg-emerald-50',icon:'fa-arrow-trend-up'}}; 
-            
-            lC.innerHTML=Object.keys(tI).map(t=>{
-                const a=aA.filter(x=>x.type===t); 
-                if(a.length===0) return ''; 
-                return `
-                <div class="space-y-4">
-                    <div class="flex items-center gap-2 border-b border-slate-100/50 pb-2">
-                        <div class="w-6 h-6 rounded-full ${tI[t].bg} ${tI[t].color} flex items-center justify-center"><i class="fa-solid ${tI[t].icon} text-[10px]"></i></div>
-                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500">${tI[t].title}</h3>
+
+            state.accounts.forEach(a => {
+                if(!groups[a.currency]) groups[a.currency] = [];
+                groups[a.currency].push(a);
+
+                if(a.currency === state.activeCurrency) {
+                    if(a.type==='liquid') l+=a.balance; 
+                    if(a.type==='credit') c+=a.balance; 
+                    if(a.type==='investment') i+=a.balance; 
+                }
+            });
+
+            if (sum) {
+                sum.innerHTML=`
+                    <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(l)}</p></div>
+                    <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(c)}</p></div>
+                    <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(i)}</p></div>
+                `; 
+            }
+
+            let html = '';
+            for(let curr in groups) {
+                const accs = groups[curr];
+                let total = 0;
+                accs.forEach(a => {
+                    if(a.type === 'credit') total -= a.balance;
+                    else total += a.balance;
+                });
+
+                html += `
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 mb-4">
+                    <div class="flex justify-between items-center border-b border-slate-100/50 pb-3">
+                        <h3 class="text-xs font-black uppercase tracking-widest text-slate-500"><i class="fa-solid fa-coins mr-2"></i>Bóveda ${curr}</h3>
+                        <span class="text-sm font-black ${total >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(total, curr)}</span>
                     </div>
                     <div class="space-y-3">
-                        ${a.map(x=>{
-                            if(t==='credit'){
-                                const av=(x.limit||0)-x.balance;
-                                return `
-                                <div class="theme-card p-6 rounded-[2rem] border shadow-sm group relative overflow-hidden space-y-4">
-                                    <div class="flex justify-between items-start">
-                                        <div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${x.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Corte: ${x.cutoffDay||'N/A'} | Pago Máx: ${x.payDay||'N/A'} | Tasa: ${x.rate||0}% E.M.</p></div>
-                                        <div class="text-right"><p class="text-[9px] font-bold text-slate-400 uppercase">Saldo Endeudado</p><p class="text-lg font-black theme-val-exp">-${fmt(x.balance)}</p></div>
-                                    </div>
-                                    <div class="flex justify-between items-center pt-3 border-t border-slate-50/50">
-                                        <div><p class="text-[9px] font-bold text-slate-400 uppercase">Cupo Disponible</p><p class="text-sm font-black theme-val-inc">${fmt(Math.max(0,av))}</p></div>
-                                        <div class="flex gap-2">
-                                            <button onclick="editAccount('${x.id}')" class="bg-slate-100 text-slate-500 w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                                            <button onclick="openCCPurchaseModal('${x.id}')" class="bg-red-50 theme-val-exp px-4 py-3 rounded-2xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-cart-shopping mr-1"></i> Comprar</button>
-                                        </div>
-                                    </div>
-                                </div>`;
-                            } else {
-                                return `
-                                <div class="theme-card p-6 rounded-[2rem] border shadow-sm flex justify-between items-center group relative overflow-hidden">
-                                    <div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${x.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">ID: ${x.id}</p></div>
-                                    <div class="flex items-center gap-4"><p class="text-lg font-black ${t==='investment'?'theme-val-inc':'theme-text'}">${fmt(x.balance)}</p><button onclick="editAccount('${x.id}')" class="bg-slate-100 text-slate-500 w-8 h-8 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button></div>
-                                </div>`;
-                            }
-                        }).join('')}
-                    </div>
-                </div>`;
-            }).join('');
-        }
-
-        function openAccountModal() { document.getElementById('new-account-modal').classList.remove('hidden'); document.getElementById('acc-form-title').innerText = "Nueva Cuenta"; document.getElementById('fa-id').value = ''; document.getElementById('fa-name').value = ''; document.getElementById('fa-currency').value = state.activeCurrency; document.getElementById('fa-balance').value = ''; document.getElementById('fa-limit').value = ''; document.getElementById('fa-cutoff').value = ''; document.getElementById('fa-payday').value = ''; document.getElementById('fa-rate').value = ''; document.getElementById('fa-type').value = 'liquid'; toggleCreditFields(); }
-        function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); document.getElementById('acc-form-title').innerText = "Editar Cuenta"; document.getElementById('fa-id').value = acc.id; document.getElementById('fa-name').value = acc.name; document.getElementById('fa-currency').value = acc.currency || 'COP'; document.getElementById('fa-balance').value = acc.balance; document.getElementById('fa-type').value = acc.type; toggleCreditFields(); if(acc.type === 'credit') { document.getElementById('fa-limit').value = acc.limit || 0; document.getElementById('fa-cutoff').value = acc.cutoffDay || 1; document.getElementById('fa-payday').value = acc.payDay || 15; document.getElementById('fa-rate').value = acc.rate || 0; } }
-        function closeAccountModal() { document.getElementById('new-account-modal').classList.add('hidden'); }
-        function toggleCreditFields() { const type = document.getElementById('fa-type').value; const cf = document.getElementById('credit-fields'); const lbl = document.getElementById('fa-balance-lbl'); if (type === 'credit') { cf.classList.remove('hidden'); lbl.innerText = 'Deuda Actual (Saldo Endeudado)'; document.getElementById('fa-limit').required = true; document.getElementById('fa-rate').required = true; } else { cf.classList.add('hidden'); lbl.innerText = 'Balance Inicial'; document.getElementById('fa-limit').required = false; document.getElementById('fa-rate').required = false; } }
-        
-        function saveAccount(e) {
-            e.preventDefault();
-            const id = document.getElementById('fa-id').value;
-            const name = document.getElementById('fa-name').value.trim();
-            const currency = document.getElementById('fa-currency').value;
-            const balance = parseFloat(document.getElementById('fa-balance').value) || 0;
-            const type = document.getElementById('fa-type').value;
-
-            if(!name) return;
-
-            const accountData = { name, currency, balance, type };
-            if (type === 'credit') {
-                accountData.limit = parseFloat(document.getElementById('fa-limit').value) || 0;
-                accountData.cutoffDay = parseInt(document.getElementById('fa-cutoff').value) || 1;
-                accountData.payDay = parseInt(document.getElementById('fa-payday').value) || 15;
-                accountData.rate = parseFloat(document.getElementById('fa-rate').value) || 0;
+                `;
+                
+                accs.forEach(a => {
+                    const typeIcon = a.type === 'liquid' ? 'fa-wallet text-slate-400' : (a.type === 'credit' ? 'fa-credit-card text-red-400' : 'fa-arrow-trend-up text-emerald-400');
+                    const sign = a.type === 'credit' ? '-' : '';
+                    const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text';
+                    
+                    html += `
+                    <div onclick="openAccountHistory('${a.id}')" class="flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-100">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid ${typeIcon} text-[10px]"></i></div>
+                            <div>
+                                <p class="text-[11px] font-black uppercase theme-text">${a.name}</p>
+                                <p class="text-[8px] font-bold text-slate-400 uppercase">${a.type}</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-black ${color}">${sign}${fmt(a.balance, curr)}</span>
+                    </div>`;
+                });
+                html += `</div></div>`;
             }
-
-            if(id) { 
-                const idx = state.accounts.findIndex(a => a.id === id);
-                if(idx !== -1) state.accounts[idx] = { ...state.accounts[idx], ...accountData };
-            } else { 
-                state.accounts.push({ id: 'acc_' + Date.now(), ...accountData });
-            }
-
-            saveState(); closeAccountModal(); 
-            if (currency !== state.activeCurrency) {
-                document.getElementById('global-currency').value = currency;
-                changeGlobalCurrency(currency);
-            } else {
-                renderAccountsTab(); updateDashboard();
-            }
-        }
-
-        // COMPRAS TC
-        function openCCPurchaseModal(cardId) { document.getElementById('cc-purchase-modal').classList.remove('hidden'); document.getElementById('cc-p-cardid').value = cardId; document.getElementById('cc-p-desc').value = ''; document.getElementById('cc-p-amount').value = ''; document.getElementById('cc-p-term').value = '1'; document.getElementById('cc-p-date').value = new Date().toISOString().split('T')[0]; }
-        function closeCCPurchaseModal() { document.getElementById('cc-purchase-modal').classList.add('hidden'); }
-        function saveCCPurchase(e) { 
-            e.preventDefault(); const cardId = document.getElementById('cc-p-cardid').value; const desc = document.getElementById('cc-p-desc').value.trim(); const amount = parseFloat(document.getElementById('cc-p-amount').value); const term = parseInt(document.getElementById('cc-p-term').value); const date = document.getElementById('cc-p-date').value; 
-            const card = state.accounts.find(a => a.id === cardId); if(!card || isNaN(amount) || isNaN(term)) return; 
-            const available = (card.limit || 0) - card.balance; 
-            if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo. ¿Sobregiro?`)) return; } 
-            card.balance += amount; 
-            state.tx.push({ id: Date.now().toString(), type: 'expense', amount: amount, cat: '🛍️ Compras', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: state.activeCurrency }); 
-            state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, rate: card.rate || 0, term: term, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: state.activeCurrency }); 
-            saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
-        }
-
-        // HISTORIAL DE CUENTA
-        function openAccountHistory(id) {
-            const acc = state.accounts.find(a => a.id === id);
-            if(!acc) return;
-            currentHistAccId = id;
-            document.getElementById('account-history-modal').classList.remove('hidden');
-            document.getElementById('hist-acc-name').innerText = acc.name;
-            document.getElementById('hist-acc-balance').innerText = fmt(acc.balance, acc.currency);
-            setHistFilter('all');
-        }
-        function closeAccountHistory() { document.getElementById('account-history-modal').classList.add('hidden'); currentHistAccId = null; }
-        function setHistFilter(period) { currentHistPeriod = period; ['all', '30d', 'month', 'year'].forEach(p => { const el = document.getElementById('hf-' + p); if(el) el.classList.remove('active'); }); const elAct = document.getElementById('hf-' + period); if(elAct) elAct.classList.add('active'); renderAccountHistoryList(); }
-        function renderAccountHistoryList() {
-            if(!currentHistAccId) return;
-            const listCont = document.getElementById('hist-acc-list'); const now = new Date();
-            let accTx = state.tx.filter(t => t.accId === currentHistAccId);
-            accTx = accTx.filter(t => { const d = new Date(t.date); if(currentHistPeriod === '30d') return d >= new Date(now.getTime() - 30 * 86400000); if(currentHistPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); if(currentHistPeriod === 'year') return d.getFullYear() === now.getFullYear(); return true; });
-            accTx.sort((a,b) => new Date(b.date) - new Date(a.date));
-            if(accTx.length === 0) { listCont.innerHTML = `<div class="text-center p-8 bg-slate-50/50 rounded-2xl border border-slate-100/50"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Sin movimientos</p></div>`; return; }
-            listCont.innerHTML = accTx.map(t => { const isInc = t.type === 'income'; const isExpOrAp = t.type === 'expense' || t.type === 'afterpay'; const sign = isExpOrAp ? '-' : '+'; const colorText = isInc ? 'theme-val-inc' : isExpOrAp ? 'theme-val-exp' : 'theme-text'; const iconBg = isInc ? 'bg-emerald-50 text-emerald-600' : isExpOrAp ? 'bg-slate-100/50 text-slate-600' : 'bg-indigo-50 text-indigo-600'; return `<div class="theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iconBg}"><i class="fa-solid ${isInc?'fa-arrow-up':isExpOrAp?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO', {day:'2-digit', month:'short', year:'numeric'})} • ${t.cat.substring(2)}</p></div></div><p class="font-black text-sm ${colorText}">${sign}${fmt(t.amount, t.currency)}</p></div>`; }).join('');
+            if (cont) cont.innerHTML = html;
         }
 
         // ==========================================
