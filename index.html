@@ -1,493 +1,1957 @@
-```react
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { 
-  Line, Bar, Doughnut 
-} from 'react-chartjs-2';
-import { 
-  Chart as ChartJS, 
-  CategoryScale, 
-  LinearScale, 
-  PointElement, 
-  LineElement, 
-  BarElement, 
-  ArcElement, 
-  Title, 
-  Tooltip, 
-  Legend, 
-  Filler 
-} from 'chart.js';
-import { 
-  Wallet, TrendingUp, TrendingDown, LayoutDashboard, Database, Briefcase, 
-  Settings, Plus, Minus, ArrowLeftRight, Layers, ChevronRight, Trash2, 
-  ArrowLeft, ShieldCheck, Zap, Receipt, Landmark, PieChart, Calendar,
-  Edit3, Play, Palette, Tags, LogOut
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Nexus Finance Omni v51.0</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icono.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* TEMAS DINÁMICOS MEDIANTE CSS VARIABLES */
+        :root {
+            --app-bg: #f8fafc;
+            --card-bg: #ffffff;
+            --app-text: #0f172a;
+            --val-inc: #10b981;
+            --val-exp: #ef4444;
+            --nexus-black: #000000;
+        }
 
-ChartJS.register(
-  CategoryScale, LinearScale, PointElement, LineElement, 
-  BarElement, ArcElement, Title, Tooltip, Legend, Filler
-);
+        body { 
+            background-color: var(--app-bg); 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.3s ease;
+        }
 
-// --- FIREBASE CONFIG ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : { apiKey: "demo", authDomain: "demo", projectId: "demo", storageBucket: "demo", messagingSenderId: "0", appId: "0" };
+        /* Clases utilitarias enlazadas a la configuración visual */
+        .theme-bg { background-color: var(--app-bg) !important; }
+        .theme-card { background-color: var(--card-bg) !important; transition: background-color 0.3s ease; }
+        .theme-text { color: var(--app-text) !important; transition: color 0.3s ease; }
+        .theme-val-inc { color: var(--val-inc) !important; transition: color 0.3s ease; }
+        .theme-val-exp { color: var(--val-exp) !important; transition: color 0.3s ease; }
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-v51';
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: slideIn 0.4s cubic-bezier(0, 0, 0.2, 1); }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUpNumpad { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
-// --- CONSTANTS ---
-const DEFAULT_CATEGORIES = {
-  income: ["💰 Salario", "💼 Freelance", "📈 Inversión", "🏦 Intereses", "🔄 Varios"],
-  expense: ["🏠 Vivienda", "🍎 Comida", "🚗 Transporte", "🍿 Ocio", "🏥 Salud", "🛍️ Compras", "💳 Pago Deuda", "🛍️ Afterpay", "🔄 Varios"],
-  transfer: ["🔀 Traspaso"]
-};
+        .wealth-card { 
+            background: var(--nexus-black); 
+            color: #ffffff; 
+            border-radius: 2.5rem; 
+            padding: 2.5rem;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
 
-const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
-const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+        .glass-btn {
+            background: var(--card-bg);
+            border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 24px;
+            padding: 20px 10px;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        .glass-btn:active { transform: scale(0.95); opacity: 0.8; }
 
-// --- MAIN APP ---
+        .v-btn { transition: all 0.2s; border-bottom: 3px solid transparent; font-size: 10px; font-weight: 900; text-transform: uppercase; color: #94a3b8; }
+        .v-btn.active { color: var(--app-text); border-bottom-color: var(--app-text); }
+        .is-red-mode .v-btn.active { color: var(--val-exp); border-bottom-color: var(--val-exp); }
 
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('home');
-  const [state, setState] = useState({
-    tx: [],
-    accounts: [],
-    loans: [],
-    settings: { apLimit: 5000000, apPayDay: 5 },
-    categories: DEFAULT_CATEGORIES,
-    theme: DEFAULT_THEME,
-    context: 'day'
-  });
+        .form-input { padding: 16px; background: #f1f5f9; border-radius: 16px; outline: none; font-weight: bold; font-size: 14px; color: #0f172a; width: 100%; border: 1px solid transparent; transition: border 0.2s;}
+        .form-input:focus { border-color: #cbd5e1; }
 
-  // UI States
-  const [numpad, setNumpad] = useState({ isOpen: false, targetId: null, value: "", type: 'currency' });
-  const [modals, setModals] = useState({ tx: null, loan: false, account: null, receipt: null, finances: null });
-  const [form, setForm] = useState({ amount: "", cat: "", accId: "", note: "", date: new Date().toISOString().split('T')[0], type: 'expense' });
+        .filter-chip { padding: 8px 16px; border-radius: 20px; font-size: 10px; font-weight: 900; text-transform: uppercase; background: var(--card-bg); border: 1px solid rgba(0,0,0,0.1); color: #64748b; transition: all 0.2s; }
+        .filter-chip.active { background: var(--app-text); color: var(--app-bg); border-color: var(--app-text); }
+        .is-red-mode .filter-chip.active { background: var(--val-exp); color: #fff; border-color: var(--val-exp); }
 
-  // 1. Auth Sync
-  useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    };
-    initAuth();
-    return onAuthStateChanged(auth, u => { setUser(u); setLoading(false); });
-  }, []);
-
-  // 2. Data Cloud Sync
-  useEffect(() => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'core_state');
-    const unsub = onSnapshot(docRef, (snap) => {
-      if (snap.exists()) setState(prev => ({ ...prev, ...snap.data() }));
-      else setDoc(docRef, state);
-    });
-    return () => unsub();
-  }, [user]);
-
-  const updateCloud = async (newState) => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'core_state');
-    await setDoc(docRef, newState);
-  };
-
-  // --- ACTIONS ---
-
-  const handleSaveTx = async (e) => {
-    e.preventDefault();
-    const amount = parseFloat(form.amount) || 0;
-    if (amount <= 0) return;
-
-    const newTx = {
-      id: Date.now().toString(),
-      ...form,
-      amount,
-      date: new Date(form.date).toISOString()
-    };
-
-    const nextAccounts = state.accounts.map(acc => {
-      if (acc.id === form.accId) {
-        return { ...acc, balance: form.type === 'income' ? acc.balance + amount : acc.balance - amount };
-      }
-      return acc;
-    });
-
-    const newState = { ...state, tx: [newTx, ...state.tx], accounts: nextAccounts };
-    setState(newState);
-    await updateCloud(newState);
-    setModals({ ...modals, tx: null });
-  };
-
-  const deleteTx = async (id) => {
-    const target = state.tx.find(t => t.id === id);
-    if (!target) return;
-
-    const nextAccounts = state.accounts.map(acc => {
-      if (acc.id === target.accId) {
-        return { ...acc, balance: target.type === 'income' ? acc.balance - target.amount : acc.balance + target.amount };
-      }
-      return acc;
-    });
-
-    const newState = { ...state, tx: state.tx.filter(t => t.id !== id), accounts: nextAccounts };
-    setState(newState);
-    await updateCloud(newState);
-    setModals({ ...modals, receipt: null });
-  };
-
-  const simulateData = async () => {
-    const d = (days) => new Date(Date.now() - days * 86400000).toISOString();
-    const demoAcc = [
-      { id: 'a1', name: 'Nequi', balance: 2500000, type: 'liquid' },
-      { id: 'a2', name: 'Bancolombia', balance: 8400000, type: 'liquid' },
-      { id: 'a3', name: 'Tarjeta Nu', balance: 1200000, type: 'credit', limit: 5000000 },
-      { id: 'a4', name: 'Hapi Inversión', balance: 15000000, type: 'investment' }
-    ];
-
-    const demoTx = [];
-    for(let i=0; i<30; i++) {
-      demoTx.push({
-        id: `sim_${i}`,
-        type: Math.random() > 0.3 ? 'expense' : 'income',
-        amount: 20000 + Math.random() * 500000,
-        cat: Math.random() > 0.5 ? '🍎 Comida' : '💰 Salario',
-        accId: 'a1',
-        date: d(i),
-        note: 'Simulación Nexus AI'
-      });
-    }
-
-    const next = { ...state, accounts: demoAcc, tx: demoTx };
-    setState(next);
-    await updateCloud(next);
-  };
-
-  // --- CALCULATIONS ---
-
-  const metrics = useMemo(() => {
-    const now = new Date();
-    const assets = state.accounts.filter(a => a.type !== 'credit').reduce((s, a) => s + (a.balance || 0), 0);
-    const debts = state.accounts.filter(a => a.type === 'credit').reduce((s, a) => s + (a.balance || 0), 0);
-    
-    const ctxTx = state.tx.filter(t => {
-      const d = new Date(t.date);
-      if (state.context === 'day') return d.toDateString() === now.toDateString();
-      if (state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      return d.getFullYear() === now.getFullYear();
-    });
-
-    const inc = ctxTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const exp = ctxTx.filter(t => t.type === 'expense' || t.type === 'afterpay').reduce((s, t) => s + t.amount, 0);
-
-    return { assets, debts, net: assets - debts, inc, exp, ctxTx };
-  }, [state]);
-
-  // --- RENDER TABS ---
-
-  const renderHome = () => (
-    <div className="space-y-8 animate-slideIn">
-      <div className="wealth-card">
-        <div className="relative z-10 space-y-8">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Patrimonio Auditado</p>
-              <h2 className="text-4xl font-black tabular-nums tracking-tighter">{fmt.format(metrics.net)}</h2>
-            </div>
-            <div className="text-right">
-              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1">
-                <Zap size={10} fill="currentColor" /> SINCRO CLOUD
-              </span>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-8 pt-8 border-t border-white/10">
-            <div><p className="text-[8px] font-black text-white/50 uppercase mb-1">Ingresos ({state.context})</p><p className="text-lg font-black text-emerald-400">+{fmt.format(metrics.inc)}</p></div>
-            <div><p className="text-[8px] font-black text-white/50 uppercase mb-1">Gastos ({state.context})</p><p className="text-lg font-black text-red-500">-{fmt.format(metrics.exp)}</p></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { id: 'analysis', icon: <TrendingUp />, label: 'Analítica', color: 'text-indigo-500' },
-          { id: 'database', icon: <Database />, label: 'Registros', color: 'text-purple-500' },
-          { id: 'loans', icon: <Landmark />, label: 'Deudas', color: 'text-amber-500' },
-          { id: 'afterpay', icon: <Layers />, label: 'Afterpay', color: 'text-teal-500' },
-          { id: 'report', icon: <Briefcase />, label: 'Directiva', color: 'text-emerald-500' },
-          { id: 'finances', icon: <ShieldCheck />, label: 'Finanzas', color: 'text-blue-500' },
-          { id: 'accounts', icon: <Wallet />, label: 'Cuentas', color: 'text-slate-600' },
-          { id: 'settings', icon: <Settings />, label: 'Ajustes', color: 'text-slate-400' }
-        ].map(item => (
-          <button key={item.id} onClick={() => setActiveTab(item.id)} className="glass-btn">
-            <span className={item.color}>{item.icon}</span>
-            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">{item.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-3">
-        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest ml-2">Cuentas Propias</p>
-        {state.accounts.map(acc => (
-          <div key={acc.id} className={`theme-card p-5 rounded-[1.5rem] border flex justify-between items-center shadow-sm border-l-8 ${acc.type === 'credit' ? 'border-red-500' : 'border-blue-500'}`}>
-            <div>
-              <h4 className="text-xs font-black uppercase theme-text">{acc.name}</h4>
-              <p className="text-[8px] font-bold text-slate-400 uppercase">{acc.type}</p>
-            </div>
-            <p className={`text-sm font-black ${acc.type === 'credit' ? 'text-red-500' : 'theme-text'}`}>{fmt.format(acc.balance)}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderDatabase = () => (
-    <div className="space-y-6 animate-slideIn">
-      <div className="flex items-center gap-4">
-        <button onClick={() => setActiveTab('home')} className="w-10 h-10 theme-card border rounded-full flex items-center justify-center theme-text"><ArrowLeft size={16} /></button>
-        <h2 className="text-2xl font-black uppercase italic tracking-tighter text-purple-600">Base de Datos</h2>
-      </div>
-      <div className="space-y-3">
-        {state.tx.map(t => {
-          const acc = state.accounts.find(a => a.id === t.accId);
-          return (
-            <div key={t.id} onClick={() => setModals({ ...modals, receipt: t })} className={`theme-card p-5 rounded-2xl flex justify-between items-center border shadow-sm cursor-pointer active:scale-95 transition-all border-l-4 ${acc?.type === 'credit' ? 'border-l-red-500' : 'border-l-blue-500'}`}>
-              <div className="flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                  {t.type === 'income' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                </div>
-                <div>
-                  <p className="text-xs font-black uppercase theme-text truncate max-w-[120px]">{t.note || t.cat.substring(2)}</p>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase">{new Date(t.date).toLocaleDateString()}</p>
-                </div>
-              </div>
-              <p className={`text-sm font-black ${t.type === 'income' ? 'text-emerald-500' : 'text-red-500'}`}>
-                {t.type === 'income' ? '+' : '-'}{fmt.format(t.amount)}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  const renderAfterpay = () => {
-    const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
-    const totalPending = apTx.reduce((s, t) => s + (t.amount * (4 - (t.apPaid || 0)) / 4), 0);
-    return (
-      <div className="space-y-8 animate-slideIn">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setActiveTab('home')} className="w-10 h-10 theme-card border rounded-full flex items-center justify-center"><ArrowLeft size={16} /></button>
-          <h2 className="text-2xl font-black uppercase italic tracking-tighter text-teal-600">Afterpay Hub</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-teal-50 p-6 rounded-[2rem] border border-teal-100 text-center shadow-sm">
-            <p className="text-[9px] font-black uppercase text-teal-800 opacity-50">Pasivo Diferido</p>
-            <h3 className="text-2xl font-black text-teal-600 mt-2">{fmt.format(totalPending)}</h3>
-          </div>
-          <div className="theme-card p-6 rounded-[2rem] border text-center shadow-sm">
-            <p className="text-[9px] font-black uppercase text-slate-400">Cupo Afterpay</p>
-            <h3 className="text-2xl font-black theme-text mt-2">{fmt.format(state.settings.apLimit - totalPending)}</h3>
-          </div>
-        </div>
-        <div className="theme-card p-8 rounded-[2.5rem] border shadow-sm space-y-4">
-          <h3 className="text-[10px] font-black uppercase tracking-widest theme-text opacity-50">Calendario de Pagos</h3>
-          <div className="space-y-3">
-            {apTx.map(t => (
-              <div key={t.id} className="flex justify-between items-center p-4 bg-slate-50/50 rounded-2xl border">
-                <div><p className="text-xs font-black theme-text">{t.note}</p><p className="text-[8px] font-bold text-slate-400">{t.apFreq}</p></div>
-                <div className="text-right"><p className="text-sm font-black text-teal-600">{fmt.format(t.amount / 4)}</p><p className="text-[8px] font-bold text-slate-300">CUOTA {t.apPaid + 1}/4</p></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderBoard = () => {
-    const trendData = {
-      labels: ['E', 'F', 'M', 'A', 'M', 'J'],
-      datasets: [{ label: 'Tendencia', data: [12, 19, 13, 15, 22, 30], borderColor: state.theme.inc, tension: 0.4, fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)' }]
-    };
-    return (
-      <div className="space-y-8 animate-slideIn">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setActiveTab('home')} className="w-10 h-10 theme-card border rounded-full flex items-center justify-center"><ArrowLeft size={16} /></button>
-          <h2 className="text-2xl font-black uppercase italic tracking-tighter text-emerald-600">Junta Directiva</h2>
-        </div>
-        <div className="theme-card p-8 rounded-[2.5rem] border shadow-sm h-[250px]">
-          <h3 className="text-[10px] font-black uppercase text-center opacity-40 mb-4">Tendencia Patrimonial</h3>
-          <Line data={trendData} options={{ maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }} />
-        </div>
-        <div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100 text-xs text-emerald-900 leading-relaxed font-medium">
-          <b>Resumen Ejecutivo:</b> El patrimonio auditado en la nube refleja un crecimiento del 14% este periodo. El ratio de liquidez se mantiene estable sobre 1.5x.
-        </div>
-      </div>
-    );
-  };
-
-  // --- MODALS ---
-
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-900">
-        <div className="text-center space-y-6">
-          <Zap size={48} className="text-indigo-500 animate-pulse mx-auto" />
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-indigo-400">Autenticando Nexus Omni Cloud...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ backgroundColor: state.theme.bg }} className="min-h-screen transition-colors duration-500 pb-40">
-      
-      {/* Header */}
-      <header className="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
-        <div className="px-6 py-5 flex justify-between items-center">
-          <h1 className="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span className="text-indigo-600">v51</span></h1>
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-[8px] font-black text-slate-400">CLOUD_VAULT</p>
-              <p className="text-[10px] font-bold theme-text">{user.uid.substring(0,6).toUpperCase()}</p>
-            </div>
-            <button onClick={() => auth.signOut()} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400"><LogOut size={16} /></button>
-          </div>
-        </div>
-        {activeTab === 'home' && (
-          <div className="flex border-t border-slate-50/50">
-            {['day', 'month', 'year'].map(c => (
-              <button key={c} onClick={() => setState({ ...state, context: c })} className={`v-btn flex-1 py-4 ${state.context === c ? 'active' : ''}`}>
-                {c === 'day' ? 'Hoy' : c === 'month' ? 'Este Mes' : 'Este Año'}
-              </button>
-            ))}
-          </div>
-        )}
-      </header>
-
-      <main className="p-6 max-w-xl mx-auto">
-        {activeTab === 'home' && renderHome()}
-        {activeTab === 'database' && renderDatabase()}
-        {activeTab === 'afterpay' && renderAfterpay()}
-        {activeTab === 'report' && renderBoard()}
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
         
-        {/* Simple placeholder for other tabs to keep the UI clean */}
-        {!['home', 'database', 'afterpay', 'report'].includes(activeTab) && (
-          <div className="animate-slideIn text-center py-20 space-y-4">
-             <div className="flex items-center gap-4 mb-10">
-                <button onClick={() => setActiveTab('home')} className="w-10 h-10 theme-card border rounded-full flex items-center justify-center theme-text"><ArrowLeft size={16} /></button>
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter theme-text">{activeTab}</h2>
-              </div>
-             {activeTab === 'settings' ? (
-                <div className="space-y-4">
-                  <button onClick={simulateData} className="w-full bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase text-xs shadow-lg"><Play size={14} className="inline mr-2"/> Inyectar Datos de Simulación</button>
-                  <button onClick={() => handleUpdateState({ tx: [], accounts: [], loans: [] })} className="w-full bg-red-50 text-red-600 p-5 rounded-2xl font-black uppercase text-[10px] border border-red-100">Resetear Cloud Vault</button>
-                </div>
-             ) : (
-                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Módulo Cloud en Sincronización...</p>
-             )}
-          </div>
-        )}
-      </main>
+        .view-transition { animation: slideIn 0.3s cubic-bezier(0, 0, 0.2, 1); }
+        
+        /* Estilos del Teclado Numérico */
+        .numpad-key { background: #ffffff; border-radius: 16px; font-size: 24px; font-weight: 600; color: #0f172a; display: flex; align-items: center; justify-content: center; height: 60px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: all 0.1s;}
+        .numpad-key:active { background: #e2e8f0; transform: scale(0.95); }
+        .numpad-modal-content { animation: slideUpNumpad 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+    </style>
+</head>
+<body class="pb-40">
 
-      {/* Floating Action Menu */}
-      <div className="fixed bottom-24 right-6 flex flex-col gap-4 z-40">
-        <button onClick={() => {
-          setForm({ ...form, type: 'income', accId: state.accounts[0]?.id || "" });
-          setModals({ ...modals, tx: 'income' });
-        }} className="w-14 h-14 bg-emerald-500 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform"><Plus /></button>
-        <button onClick={() => {
-          setForm({ ...form, type: 'expense', accId: state.accounts[0]?.id || "" });
-          setModals({ ...modals, tx: 'expense' });
-        }} className="w-14 h-14 bg-red-500 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform"><Minus /></button>
-      </div>
-
-      {/* Bottom Nav Bar */}
-      <nav className="fixed bottom-0 left-0 w-full theme-card border-t p-6 pb-8 safe-bottom shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-30 flex justify-around">
-        <button onClick={() => setActiveTab('home')} className={activeTab === 'home' ? 'text-indigo-600' : 'text-slate-300'}><LayoutDashboard /></button>
-        <button onClick={() => setActiveTab('database')} className={activeTab === 'database' ? 'text-indigo-600' : 'text-slate-300'}><Database /></button>
-        <button onClick={() => setActiveTab('report')} className={activeTab === 'report' ? 'text-indigo-600' : 'text-slate-300'}><Briefcase /></button>
-        <button onClick={() => setActiveTab('settings')} className={activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-300'}><Settings /></button>
-      </nav>
-
-      {/* Form Modal */}
-      {modals.tx && (
-        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-end justify-center">
-          <div className="theme-card w-full max-w-lg rounded-t-[2.5rem] p-8 space-y-6 animate-slideUp">
-            <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-black uppercase theme-text tracking-tighter">Nuevo {modals.tx}</h3>
-              <button onClick={() => setModals({ ...modals, tx: null })}><Trash2 size={20} className="text-slate-300" /></button>
+    <!-- CABECERA DE CONTEXTO TEMPORAL -->
+    <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
+        <div class="px-6 py-5 flex justify-between items-center">
+            <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span id="version-tag" class="text-slate-400">v51.0</span></h1>
+            <div class="flex gap-4">
+                <span class="text-[10px] font-black uppercase bg-slate-100 text-slate-500 px-3 py-1 rounded-full">COP</span>
             </div>
-            <form onSubmit={handleSaveTx} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (COP)</label>
-                <input type="text" readOnly onClick={() => setNumpad({ isOpen: true, targetId: 'amount', value: form.amount, type: 'currency' })} value={form.amount ? fmt.format(parseFloat(form.amount)) : ""} className="form-input text-3xl font-black text-center" placeholder="$0" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label>
-                  <select value={form.cat} onChange={e => setForm({...form, cat: e.target.value})} className="form-input text-xs" required>
-                    <option value="">Seleccionar...</option>
-                    {state.categories[modals.tx === 'income' ? 'income' : 'expense'].map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta</label>
-                  <select value={form.accId} onChange={e => setForm({...form, accId: e.target.value})} className="form-input text-xs" required>
-                    <option value="">Seleccionar...</option>
-                    {state.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-xl">Guardar en Cloud</button>
-            </form>
-          </div>
         </div>
-      )}
-
-      {/* Receipt Modal */}
-      {modals.receipt && (
-        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden animate-slideUp">
-            <div className="p-8 text-center border-b border-dashed">
-              <Receipt size={40} className="mx-auto text-indigo-500 mb-4" />
-              <h3 className="text-[10px] font-black uppercase text-slate-400 mb-1">{modals.receipt.cat}</h3>
-              <h2 className={`text-3xl font-black ${modals.receipt.type === 'income' ? 'text-emerald-500' : 'text-red-500'}`}>{fmt.format(modals.receipt.amount)}</h2>
-            </div>
-            <div className="p-8 space-y-3">
-              <div className="flex justify-between text-[10px] uppercase font-black text-slate-400"><span>Fecha</span><span className="theme-text">{new Date(modals.receipt.date).toLocaleString()}</span></div>
-              <div className="flex justify-between text-[10px] uppercase font-black text-slate-400"><span>Referencia</span><span className="theme-text">{modals.receipt.id}</span></div>
-            </div>
-            <div className="p-6 bg-slate-50 flex gap-3">
-              <button onClick={() => deleteTx(modals.receipt.id)} className="w-12 h-12 bg-red-50 text-red-500 rounded-xl flex items-center justify-center"><Trash2 size={18}/></button>
-              <button onClick={() => setModals({ ...modals, receipt: null })} className="flex-1 bg-slate-900 text-white font-black uppercase text-xs rounded-xl">Cerrar Detalle</button>
-            </div>
-          </div>
+        <div id="period-nav" class="flex border-t border-slate-50/50">
+            <button onclick="setContext('day')" id="btn-day" class="v-btn flex-1 py-4">Hoy</button>
+            <button onclick="setContext('month')" id="btn-month" class="v-btn flex-1 py-4">Este Mes</button>
+            <button onclick="setContext('year')" id="btn-year" class="v-btn flex-1 py-4">Este Año</button>
         </div>
-      )}
+    </header>
 
-      <NumpadModal 
-        isOpen={numpad.isOpen} 
-        initialValue={numpad.value}
-        onClose={() => setNumpad({ ...numpad, isOpen: false })}
-        onConfirm={(val) => {
-          setForm({ ...form, amount: val });
-          setNumpad({ ...numpad, isOpen: false });
-        }}
-      />
+    <main class="p-6 max-w-xl mx-auto">
 
+        <!-- VISTA PRINCIPAL: HOME / DASHBOARD / PERIODOS -->
+        <section id="tab-home" class="tab-content active space-y-8">
+            <!-- Wealth Card General -->
+            <div class="wealth-card">
+                <div class="relative z-10 space-y-8">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p id="wealth-title" class="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Patrimonio Auditado</p>
+                            <h2 id="net-worth" class="text-4xl font-black tabular-nums tracking-tighter">$0</h2>
+                        </div>
+                        <div class="text-right">
+                            <span class="bg-white/10 px-4 py-1.5 rounded-full text-[9px] font-black uppercase italic tracking-widest">Score: <span id="nexus-score">--</span></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-8 pt-8 border-t border-white/10">
+                        <div><p class="text-[8px] font-black text-white/50 uppercase mb-1">Ingresos</p><p id="total-inc" class="text-lg font-black theme-val-inc">+$0</p></div>
+                        <div><p class="text-[8px] font-black text-white/50 uppercase mb-1">Gastos</p><p id="total-exp" class="text-lg font-black theme-val-exp">-$0</p></div>
+                    </div>
+                </div>
+                <i class="fa-solid fa-fingerprint absolute right-[-20px] bottom-[-20px] opacity-10 text-9xl"></i>
+            </div>
+
+            <!-- CONTENEDOR DÍA (HOY) -->
+            <div id="view-day" class="space-y-8">
+                <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-6">
+                    <h3 class="text-[10px] font-black opacity-30 uppercase italic tracking-widest theme-text">Evolución 7 Días</h3>
+                    <div class="h-[200px]"><canvas id="chart-7days"></canvas></div>
+                </div>
+
+                <div class="grid grid-cols-4 gap-3">
+                    <button onclick="switchTab('analysis')" class="glass-btn"><i class="fa-solid fa-chart-pie text-indigo-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Analítica</span></button>
+                    <button onclick="switchTab('database')" class="glass-btn"><i class="fa-solid fa-database text-purple-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Registros</span></button>
+                    <button onclick="switchTab('loans')" class="glass-btn"><i class="fa-solid fa-landmark text-amber-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Deudas</span></button>
+                    <button onclick="switchTab('afterpay')" class="glass-btn"><i class="fa-solid fa-layer-group text-teal-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Afterpay</span></button>
+                    <button onclick="switchTab('report')" class="glass-btn"><i class="fa-solid fa-briefcase text-emerald-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Directiva</span></button>
+                    <button onclick="switchTab('finances')" class="glass-btn"><i class="fa-solid fa-building-columns text-blue-500 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Finanzas</span></button>
+                    <button onclick="switchTab('accounts')" class="glass-btn"><i class="fa-solid fa-wallet text-slate-600 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Cuentas</span></button>
+                    <button onclick="switchTab('settings')" class="glass-btn"><i class="fa-solid fa-gears text-slate-400 text-xl mb-1"></i><span class="text-[8px] font-black uppercase tracking-widest text-slate-400">Config</span></button>
+                </div>
+
+                <div id="accounts-container" class="space-y-6"></div>
+            </div>
+
+            <!-- CONTENEDOR PERIODO (MES / AÑO) -->
+            <div id="view-period" class="space-y-8 hidden">
+                <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-6">
+                    <h3 id="period-chart-title" class="text-[10px] font-black opacity-30 uppercase italic tracking-widest theme-text">Evolución del Periodo</h3>
+                    <div class="h-[200px]"><canvas id="chart-period"></canvas></div>
+                </div>
+                <div class="space-y-4">
+                    <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
+                        <button onclick="setPeriodFilter('type', 'all')" class="filter-chip active" id="f-type-all">Todos</button>
+                        <button onclick="setPeriodFilter('type', 'income')" class="filter-chip" id="f-type-income">Ingresos</button>
+                        <button onclick="setPeriodFilter('type', 'expense')" class="filter-chip" id="f-type-expense">Gastos</button>
+                        <button onclick="setPeriodFilter('type', 'transfer')" class="filter-chip" id="f-type-transfer">Transfer.</button>
+                    </div>
+                    <select id="period-cat-filter" onchange="setPeriodFilter('cat', this.value)" class="form-input text-xs font-black py-3">
+                        <option value="all">Todas las Categorías</option>
+                    </select>
+                </div>
+                <div id="period-list" class="space-y-3 pb-24"></div>
+                <div class="fixed bottom-0 left-0 w-full theme-card border-t p-6 pb-8 safe-bottom shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-30">
+                    <div class="max-w-xl mx-auto flex justify-between items-center">
+                        <div><p class="text-[9px] font-black uppercase tracking-widest text-slate-400">Subtotal Filtro</p><p id="period-subtotal" class="text-2xl font-black tabular-nums theme-text">$0</p></div>
+                        <div class="text-right text-[10px] font-bold uppercase text-slate-300"><p>In: <span id="period-sub-inc" class="theme-val-inc">0</span></p><p>Out: <span id="period-sub-exp" class="theme-val-exp">0</span></p></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VISTA: BASE DE DATOS VISUAL (AUDITORÍA) -->
+        <section id="tab-database" class="tab-content space-y-8 pb-12">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-4">
+                    <button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button>
+                    <h2 class="text-2xl font-black uppercase italic tracking-tighter text-purple-600">Auditoría Global</h2>
+                </div>
+            </div>
+            
+            <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
+                <div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-filter text-slate-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest theme-text opacity-50">Filtros Activos</h3></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Desde (Inicio)</label><input type="date" id="db-filter-start" class="form-input text-xs" onchange="renderDatabase()"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hasta (Fin)</label><input type="date" id="db-filter-end" class="form-input text-xs" onchange="renderDatabase()"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Naturaleza</label>
+                        <select id="db-filter-type" class="form-input text-xs" onchange="updateDbCatFilter()">
+                            <option value="all">Todas</option><option value="income">Ingresos (+)</option><option value="expense">Gastos (-)</option><option value="transfer">Transferencias</option><option value="afterpay">Afterpay</option>
+                        </select>
+                    </div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label>
+                        <select id="db-filter-cat" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option></select>
+                    </div>
+                </div>
+                <div class="flex justify-end pt-2 border-t border-slate-100/50"><button onclick="resetDbFilters()" class="text-[10px] font-black uppercase tracking-widest text-slate-400">Limpiar Filtros <i class="fa-solid fa-rotate-right ml-1"></i></button></div>
+            </div>
+
+            <div class="flex justify-between items-center px-2">
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Registros Encontrados: <span id="db-count" class="theme-text">0</span></p>
+                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total: <span id="db-total" class="theme-text">$0</span></p>
+            </div>
+            
+            <div id="db-list" class="space-y-3"></div>
+        </section>
+
+        <!-- INTERFAZ: ESTADÍSTICAS -->
+        <section id="tab-analysis" class="tab-content space-y-8 pb-12">
+            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-600">Analítica Pro</h2></div>
+            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Basado en el filtro: <span id="stat-period-label" class="text-indigo-500"></span></p>
+
+            <div id="stat-kpi-container" class="grid grid-cols-2 gap-4">
+                <div class="theme-card p-6 rounded-3xl border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Burn Rate Diario</p><h4 id="stat-burn" class="text-lg font-black tabular-nums theme-text">--</h4></div>
+                <div class="theme-card p-6 rounded-3xl border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Eficiencia Ahorro</p><h4 id="stat-save" class="text-lg font-black tabular-nums theme-val-inc">--%</h4></div>
+            </div>
+
+            <div id="stat-top-container" class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-6">
+                <div class="flex justify-between items-center border-b border-slate-100/50 pb-4">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest theme-text">Top 10 Usos</h3>
+                    <div class="flex bg-slate-100/50 p-1 rounded-lg">
+                        <button onclick="setStatsType('expense')" id="btn-stat-exp" class="px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm theme-val-exp transition-all">Gastos</button>
+                        <button onclick="setStatsType('income')" id="btn-stat-inc" class="px-3 py-1.5 text-[9px] font-black uppercase rounded-md text-slate-400 transition-all">Ingresos</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto hide-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead><tr class="uppercase text-[8px] font-black text-slate-400 tracking-widest"><th class="py-2">Categoría</th><th class="py-2 text-right">Monto (COP)</th><th class="py-2 text-right">%</th></tr></thead>
+                        <tbody id="stat-top-table" class="divide-y divide-slate-50/50"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Proyección Anual -->
+            <div id="stat-proj-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6">
+                <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-chart-line text-emerald-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Análisis y Proyección</h3></div>
+                <div class="overflow-x-auto hide-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead><tr class="uppercase text-[8px] font-black text-slate-500 tracking-widest border-b border-white/10"><th class="py-3">Métrica</th><th class="py-3 text-right">Real</th><th class="py-3 text-right text-emerald-400">Proy. Anual</th></tr></thead>
+                        <tbody class="divide-y divide-white/5">
+                            <tr><td class="py-4 font-bold text-[10px] uppercase">Ingresos</td><td id="tbl-real-inc" class="py-4 text-right font-mono font-bold text-emerald-300">--</td><td id="tbl-proj-inc" class="py-4 text-right font-mono font-bold">--</td></tr>
+                            <tr><td class="py-4 font-bold text-[10px] uppercase">Gastos</td><td id="tbl-real-exp" class="py-4 text-right font-mono font-bold text-red-400">--</td><td id="tbl-proj-exp" class="py-4 text-right font-mono font-bold">--</td></tr>
+                            <tr><td class="py-4 font-black text-[10px] uppercase text-white">Flujo Neto</td><td id="tbl-real-net" class="py-4 text-right font-mono font-black text-white">--</td><td id="tbl-proj-net" class="py-4 text-right font-mono font-black text-emerald-400">--</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Evolución Anual (Visible sólo en modo 'year') -->
+            <div id="stat-year-table-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6 hidden">
+                <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-calendar-days text-indigo-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Evolución Mensual del Año</h3></div>
+                <div class="overflow-x-auto hide-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead><tr class="uppercase text-[8px] font-black text-slate-500 tracking-widest border-b border-white/10"><th class="py-3">Mes</th><th class="py-3 text-right text-emerald-400">Ingresos</th><th class="py-3 text-right text-red-400">Gastos</th><th class="py-3 text-right text-white">Acumulado</th></tr></thead>
+                        <tbody id="stat-year-tbody" class="divide-y divide-white/5"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN DE DEUDAS -->
+        <section id="tab-loans" class="tab-content space-y-8">
+            <div id="loans-view-list" class="view-transition space-y-6">
+                <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase text-amber-600 tracking-tighter">Deuda</h2></div>
+                
+                <div id="loans-summary-container" class="bg-amber-50 p-6 rounded-[2rem] border border-amber-100 shadow-sm relative overflow-hidden hidden">
+                    <i class="fa-solid fa-file-invoice-dollar absolute right-[-10px] bottom-[-10px] text-6xl text-amber-500 opacity-10"></i>
+                    <div class="flex justify-between items-center mb-4 pb-4 border-b border-amber-200 relative z-10">
+                        <div><p class="text-[9px] font-black uppercase text-amber-800 opacity-50">Ingreso Mes</p><p id="ls-income" class="text-lg font-black theme-val-inc mt-1">--</p></div>
+                        <div class="text-right"><p class="text-[9px] font-black uppercase text-amber-800 opacity-50">Carga de Deuda</p><p id="ls-ratio" class="text-lg font-black text-amber-700 mt-1">--</p></div>
+                    </div>
+                    <p id="ls-narrative" class="text-xs text-amber-900 font-medium leading-relaxed relative z-10"></p>
+                </div>
+
+                <div id="loans-list" class="space-y-4 pb-20"></div>
+            </div>
+
+            <div id="loans-view-detail" class="hidden view-transition space-y-6 pb-20">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-4">
+                        <button onclick="hideLoanDetail()" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left text-amber-600"></i></button>
+                        <h2 id="det-loan-title" class="text-xl font-black uppercase text-amber-600 tracking-tighter truncate max-w-[200px]">Detalle</h2>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 p-6 rounded-[2rem] border border-amber-100 shadow-sm relative overflow-hidden">
+                    <i class="fa-solid fa-scale-balanced absolute right-[-10px] bottom-[-10px] text-6xl text-amber-500 opacity-10"></i>
+                    <p id="det-loan-paragraph" class="text-xs text-amber-900 font-medium leading-relaxed relative z-10"></p>
+                </div>
+
+                <div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden">
+                    <div class="p-6 border-b border-slate-100/50 flex justify-between items-center">
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500">Plan de Amortización</h3>
+                        <span class="text-[8px] font-black bg-slate-100/50 px-2 py-1 rounded text-slate-500">Sist. Francés</span>
+                    </div>
+                    <div class="overflow-x-auto hide-scrollbar">
+                        <table class="w-full text-left text-xs whitespace-nowrap theme-text">
+                            <thead>
+                                <tr class="uppercase text-[8px] font-black text-slate-400 tracking-widest border-b border-slate-100/50">
+                                    <th class="px-4 py-3">Fecha</th><th class="px-4 py-3 text-right">Capital</th><th class="px-4 py-3 text-right">Interés</th><th class="px-4 py-3 text-right">Cuota Fija</th><th class="px-4 py-3 text-right text-amber-600">Saldo Pend.</th>
+                                </tr>
+                            </thead>
+                            <tbody id="det-loan-table" class="divide-y divide-slate-50/50"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- AFTERPAY ENGINE -->
+        <section id="tab-afterpay" class="tab-content space-y-8">
+            <div class="flex items-center gap-4"><button onclick="switchTab('home')" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase text-teal-600 tracking-tighter">Afterpay Hub</h2></div>
+            
+            <div id="ap-summary-container" class="bg-teal-50 p-6 rounded-[2rem] border border-teal-100 shadow-sm relative overflow-hidden">
+                <i class="fa-solid fa-chart-pie absolute right-[-10px] bottom-[-10px] text-6xl text-teal-500 opacity-10"></i>
+                <div class="flex justify-between items-center mb-4 pb-4 border-b border-teal-200/50 relative z-10">
+                    <div><p class="text-[9px] font-black uppercase text-teal-800 opacity-50">Ingreso Semanal</p><p id="aps-weekly-inc" class="text-lg font-black theme-val-inc mt-1">--</p></div>
+                    <div class="text-right"><p class="text-[9px] font-black uppercase text-teal-800 opacity-50">Carga de Deuda</p><p id="aps-ratio" class="text-lg font-black text-teal-700 mt-1">--</p></div>
+                </div>
+                <p id="aps-narrative" class="text-xs text-teal-900 font-medium leading-relaxed relative z-10"></p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-teal-50 p-6 rounded-[2rem] text-center border border-teal-100 shadow-sm"><p class="text-[9px] font-black opacity-40 uppercase text-teal-800 tracking-widest">Pendiente Total</p><h3 id="ap-total-pending" class="text-2xl font-black text-teal-600 mt-2 tabular-nums">$0</h3></div>
+                <div class="theme-card p-6 rounded-[2rem] text-center border shadow-sm"><p class="text-[9px] font-black opacity-40 uppercase tracking-widest theme-text">Disponible</p><h3 id="ap-available" class="text-xl font-black theme-text mt-2 tabular-nums">$0</h3></div>
+                <div class="bg-slate-900 text-white p-6 rounded-[2rem] text-center col-span-2 shadow-lg flex justify-between items-center"><div><p class="text-[8px] font-black opacity-40 uppercase tracking-widest text-left">Fin del Diferido Proyectado</p><h3 id="ap-last-date" class="text-lg font-black mt-1 text-emerald-400">--</h3></div><i class="fa-solid fa-calendar-check text-3xl opacity-20"></i></div>
+            </div>
+
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-center theme-text opacity-50 mb-6">Consumo por Categoría</h3>
+                <div class="h-[180px]"><canvas id="ap-chart-cat"></canvas></div>
+            </div>
+
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100/50 pb-4"><h3 class="text-[10px] font-black uppercase tracking-widest theme-text">Calendario de Pagos</h3><span class="text-[8px] font-black uppercase bg-teal-50 text-teal-600 px-3 py-1 rounded-full">Proyección</span></div>
+                <div id="ap-schedule-list" class="space-y-3 max-h-[300px] overflow-y-auto hide-scrollbar pb-4"></div>
+            </div>
+
+            <div class="space-y-4">
+                <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Compras Vigentes</h3>
+                <div id="ap-active-list" class="space-y-3 pb-12"></div>
+            </div>
+        </section>
+
+        <!-- INFORME DIRECTIVA -->
+        <section id="tab-report" class="tab-content space-y-8 pb-12">
+            <div class="flex items-center gap-4 mb-2">
+                <button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button>
+                <h2 class="text-2xl font-black uppercase italic tracking-tighter text-emerald-600">Junta Directiva</h2>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Activos Totales</p><h4 id="rep-assets" class="text-lg font-black theme-text tabular-nums">--</h4></div>
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Pasivos Totales</p><h4 id="rep-liabilities" class="text-lg font-black theme-val-exp tabular-nums">--</h4></div>
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Tasa Retención</p><h4 id="rep-savings" class="text-lg font-black theme-val-inc tabular-nums">--</h4></div>
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Ratio Deuda/Ingreso</p><h4 id="rep-health" class="text-lg font-black text-amber-500 tabular-nums">--</h4></div>
+            </div>
+
+            <div class="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100 shadow-sm relative overflow-hidden">
+                <i class="fa-solid fa-bullseye absolute right-[-20px] bottom-[-20px] text-8xl text-emerald-500 opacity-10"></i>
+                <h3 class="text-[10px] font-black uppercase text-emerald-800 tracking-widest mb-4 relative z-10">Resumen Ejecutivo</h3>
+                <div id="rep-narrative" class="text-xs text-emerald-900 font-medium leading-relaxed space-y-4 relative z-10"></div>
+            </div>
+
+            <div class="theme-card p-8 rounded-[2.5rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Tendencia Operativa (6 Meses)</h3>
+                <div class="h-[200px]"><canvas id="report-chart-trend"></canvas></div>
+            </div>
+
+            <div class="theme-card p-8 rounded-[2.5rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Estructura de Egresos</h3>
+                <div class="h-[200px]"><canvas id="report-chart-vs"></canvas></div>
+            </div>
+
+            <div class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-4">
+                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Recomendación Estratégica</h3>
+                <div id="rep-action-plan" class="text-xs text-slate-200 font-medium leading-relaxed space-y-3"></div>
+            </div>
+        </section>
+
+        <!-- HUB FINANZAS PRO -->
+        <section id="tab-finances" class="tab-content space-y-8 pb-12">
+            <div id="finances-menu" class="view-transition space-y-8">
+                <div class="flex items-center gap-4 mb-2">
+                    <button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button>
+                    <h2 class="text-2xl font-black uppercase italic tracking-tighter text-blue-600">Finanzas Pro</h2>
+                </div>
+                
+                <div class="space-y-4">
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2">Estados Financieros</h3>
+                    <div class="grid grid-cols-1 gap-3">
+                        <button onclick="openFinanceReport('balance')" class="p-6 theme-card rounded-[2rem] border shadow-sm flex items-center justify-between active:scale-95 transition-transform"><div class="flex items-center gap-4"><div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center"><i class="fa-solid fa-scale-balanced"></i></div><div class="text-left"><h4 class="text-sm font-black uppercase theme-text">Balance General</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Activos vs Pasivos y Patrimonio</p></div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
+                        <button onclick="openFinanceReport('pnl')" class="p-6 theme-card rounded-[2rem] border shadow-sm flex items-center justify-between active:scale-95 transition-transform"><div class="flex items-center gap-4"><div class="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center"><i class="fa-solid fa-file-invoice-dollar"></i></div><div class="text-left"><h4 class="text-sm font-black uppercase theme-text">Estado de Resultados (P&L)</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Ingresos vs Egresos (YTD)</p></div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
+                    </div>
+
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mt-6">Inteligencia y KPIs</h3>
+                    <div class="grid grid-cols-1 gap-3">
+                        <button onclick="openFinanceReport('ratios')" class="p-6 theme-card rounded-[2rem] border shadow-sm flex items-center justify-between active:scale-95 transition-transform"><div class="flex items-center gap-4"><div class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center"><i class="fa-solid fa-chart-pie"></i></div><div class="text-left"><h4 class="text-sm font-black uppercase theme-text">Indicadores Financieros</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Liquidez, Solvencia y Cobertura</p></div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="finances-detail" class="hidden view-transition space-y-6 pb-20">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-4">
+                        <button onclick="closeFinanceReport()" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left text-blue-600"></i></button>
+                        <h2 id="fin-det-title" class="text-xl font-black uppercase text-blue-600 tracking-tighter truncate">--</h2>
+                    </div>
+                </div>
+                <div id="fin-det-content" class="space-y-4"></div>
+            </div>
+        </section>
+
+        <!-- CENTRO DE CUENTAS -->
+        <section id="tab-accounts" class="tab-content space-y-8 pb-12">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-4">
+                    <button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button>
+                    <h2 class="text-2xl font-black uppercase italic tracking-tighter theme-text">Centro de Cuentas</h2>
+                </div>
+                <button onclick="openAccountModal()" class="w-10 h-10 bg-slate-900 text-white rounded-full shadow-lg active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3" id="acc-hub-summary"></div>
+            <div id="acc-hub-list" class="space-y-6 pb-12"></div>
+        </section>
+
+        <!-- CONFIGURACIONES EXTENDIDAS -->
+        <section id="tab-settings" class="tab-content space-y-8 pb-20">
+            <div class="flex items-center gap-4"><button onclick="switchTab('home')" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase theme-text">Configuración</h2></div>
+
+            <!-- INTEGRACIÓN APPLE SHORTCUTS (NUEVO FASE 2) -->
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-blue-500 mb-4"><i class="fa-brands fa-apple mr-2"></i>Apple Shortcuts API</h3>
+                <p class="text-xs text-slate-500 font-medium text-center leading-relaxed">Utiliza Atajos de iOS para registrar transacciones con Siri en 1 segundo usando el siguiente esquema de URL. Nexus interceptará el link y guardará el dato automáticamente.</p>
+                <div class="bg-slate-900 rounded-xl p-3 text-[10px] font-mono text-emerald-400 overflow-x-auto whitespace-nowrap">
+                    ?action=addTx&type=expense&amount=15000&cat=comida
+                </div>
+                <p class="text-[9px] text-slate-400 text-center uppercase font-bold tracking-widest">Tipos: income, expense</p>
+            </div>
+
+            <!-- PERSONALIZACIÓN VISUAL -->
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-indigo-500 mb-4"><i class="fa-solid fa-palette mr-2"></i>Personalización Visual</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400">Fondo General (App)</label><input type="color" id="set-theme-bg" class="w-full h-12 p-1 rounded-xl cursor-pointer border-none bg-slate-50" onchange="updateThemeSettings()"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400">Fondo Tarjetas</label><input type="color" id="set-theme-card" class="w-full h-12 p-1 rounded-xl cursor-pointer border-none bg-slate-50" onchange="updateThemeSettings()"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400">Color de Texto Principal</label><input type="color" id="set-theme-text" class="w-full h-12 p-1 rounded-xl cursor-pointer border-none bg-slate-50" onchange="updateThemeSettings()"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400">Color Valores Positivos</label><input type="color" id="set-theme-inc" class="w-full h-12 p-1 rounded-xl cursor-pointer border-none bg-slate-50" onchange="updateThemeSettings()"></div>
+                    <div class="col-span-2"><label class="text-[10px] font-black uppercase text-slate-400">Color Valores Negativos</label><input type="color" id="set-theme-exp" class="w-full h-12 p-1 rounded-xl cursor-pointer border-none bg-slate-50" onchange="updateThemeSettings()"></div>
+                </div>
+                <button onclick="resetTheme()" class="w-full mt-4 bg-slate-100 text-slate-600 p-4 rounded-2xl font-black uppercase text-[10px] active:scale-95 transition-transform"><i class="fa-solid fa-rotate-left mr-2"></i> Restaurar Tema Default</button>
+            </div>
+
+            <!-- GESTIÓN DE CATEGORÍAS -->
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-purple-500 mb-4"><i class="fa-solid fa-tags mr-2"></i>Motor de Categorías</h3>
+                <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2 border-b border-slate-100/50">
+                    <button onclick="setCatManageType('income')" class="filter-chip active" id="btn-cat-manage-income">Ingresos</button>
+                    <button onclick="setCatManageType('expense')" class="filter-chip" id="btn-cat-manage-expense">Gastos</button>
+                    <button onclick="setCatManageType('transfer')" class="filter-chip" id="btn-cat-manage-transfer">Transf.</button>
+                </div>
+                <div id="settings-cat-list" class="space-y-2 max-h-48 overflow-y-auto hide-scrollbar"></div>
+                <button onclick="addNewCategory()" class="w-full bg-slate-900 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 transition-transform mt-2"><i class="fa-solid fa-plus mr-2"></i> Añadir Nueva Categoría</button>
+            </div>
+
+            <!-- MOTOR AFTERPAY -->
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <div class="flex items-center gap-2 mb-4 justify-center"><i class="fa-solid fa-layer-group text-teal-500"></i><h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-teal-800">Motor Afterpay</h3></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Límite de Crédito (Tope COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="set-ap-limit" class="form-input text-lg font-black text-center cursor-pointer" onchange="updateSettings()" placeholder="Toca para ingresar"></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Día de Pago Global (Sincronización)</label>
+                    <select id="set-ap-day" class="form-input text-center" onchange="updateSettings()">
+                        <option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+                <h3 class="text-[10px] font-black uppercase opacity-40 tracking-widest text-center mb-4 theme-text">Gestión de Datos (Backup)</h3>
+                <button onclick="exportBackup()" class="w-full bg-black text-white p-4 rounded-2xl font-black uppercase text-[10px] active:scale-95 transition-transform shadow-md"><i class="fa-solid fa-download mr-2"></i> Guardar Respaldo Local</button>
+                <div class="relative mt-4">
+                    <input type="file" accept=".json" onchange="importBackup(event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                    <button class="w-full bg-indigo-50 text-indigo-600 border border-indigo-100 p-4 rounded-2xl font-black uppercase text-[10px] pointer-events-none"><i class="fa-solid fa-upload mr-2"></i> Cargar Respaldo</button>
+                </div>
+            </div>
+
+            <div class="bg-red-50 p-8 rounded-[2rem] border border-red-100 space-y-4 text-center">
+                 <h3 class="text-[10px] font-black uppercase text-red-400 tracking-widest mb-2">Zona de Peligro</h3>
+                <button onclick="resetFactory()" class="w-full bg-white text-red-600 p-4 rounded-2xl font-black uppercase text-[10px] shadow-sm border border-red-200 active:scale-95 transition-transform">Destruir Toda la Base de Datos</button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ACCIONES FLOTANTES -->
+    <div id="fab-main" class="fixed bottom-10 right-6 flex flex-col gap-4 z-40 transition-opacity duration-300">
+        <button onclick="openForm('income')" class="w-14 h-14 bg-emerald-500 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+        <button onclick="openForm('expense')" class="w-14 h-14 bg-red-500 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl active:scale-90 transition-transform"><i class="fa-solid fa-minus"></i></button>
+        <button onclick="openForm('transfer')" class="w-14 h-14 bg-indigo-500 text-white rounded-full shadow-2xl flex items-center justify-center text-xl active:scale-90 transition-transform"><i class="fa-solid fa-right-left"></i></button>
+        <button onclick="openForm('afterpay')" class="w-14 h-14 bg-teal-500 text-white rounded-full shadow-2xl flex items-center justify-center text-xl active:scale-90 transition-transform"><i class="fa-solid fa-layer-group"></i></button>
     </div>
-  );
-}
 
-```
+    <div id="fab-loans" class="fixed bottom-10 right-6 flex flex-col gap-4 z-40 hidden transition-opacity duration-300">
+        <button onclick="openLoanForm()" class="w-14 h-14 bg-amber-500 text-white rounded-full shadow-2xl flex items-center justify-center text-xl active:scale-90 transition-transform"><i class="fa-solid fa-file-signature"></i></button>
+    </div>
+
+    <!-- MODAL TRANSACCIONES GENERALES -->
+    <div id="tx-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-2"><h3 id="form-title" class="text-2xl font-black uppercase tracking-tighter theme-text">Nuevo Registro</h3><button type="button" onclick="closeForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <form id="data-form" onsubmit="saveTransaction(event)" class="space-y-4">
+                <input type="hidden" id="f-type">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer" placeholder="Toca para ingresar"></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input"></select></div>
+                <div id="ap-freq-container" class="hidden"><label class="text-[10px] font-black uppercase text-teal-600 ml-2">Frecuencia de Pagos (Pay in 4)</label><select id="f-ap-freq" class="form-input border-teal-200 bg-teal-50 text-teal-900"><option value="weekly">Semanales (4 Cuotas)</option><option value="fortnightly">Quincenales (4 Cuotas)</option></select></div>
+                <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta Origen / Destino</label><select id="f-account" class="form-input"></select></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota Adicional</label><input type="text" id="f-note" class="form-input text-xs" placeholder="Ej: Pago"></div>
+                </div>
+                <button type="submit" id="btn-save" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Registro</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVA DEUDA -->
+    <div id="loan-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase text-amber-600 tracking-tighter">Nueva Deuda</h3><button type="button" onclick="closeLoanForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <form onsubmit="saveLoan(event)" class="space-y-4">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre / Entidad</label><input type="text" id="fl-name" required class="form-input text-sm" placeholder="Ej: Tarjeta Crédito Bancolombia"></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Total (COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fl-amount" required class="form-input text-2xl font-black text-center text-black cursor-pointer" placeholder="Toca para ingresar"></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tasa % Mensual</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fl-rate" required class="form-input text-xs cursor-pointer" placeholder="Ej: 1.5"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Plazo (Meses)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fl-term" required class="form-input text-xs cursor-pointer" placeholder="Ej: 24"></div>
+                </div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha de Desembolso / Compra</label><input type="date" id="fl-date" required class="form-input text-xs"></div>
+                <button type="submit" class="w-full bg-amber-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Crear Deuda</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL NUEVA CUENTA / EDITAR CUENTA -->
+    <div id="new-account-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-2">
+                <h3 id="acc-form-title" class="text-2xl font-black uppercase theme-text tracking-tighter">Nueva Cuenta</h3>
+                <button type="button" onclick="closeAccountModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="saveAccount(event)" class="space-y-4">
+                <input type="hidden" id="fa-id">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre de la Cuenta</label><input type="text" id="fa-name" required class="form-input text-sm" placeholder="Ej: NuBank, Davivienda..."></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2" id="fa-balance-lbl">Balance Inicial / Saldo Endeudado (COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fa-balance" required class="form-input text-2xl font-black text-center text-black cursor-pointer" placeholder="Toca para ingresar"></div>
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Naturaleza</label>
+                    <select id="fa-type" class="form-input" required onchange="toggleCreditFields()">
+                        <option value="liquid">Liquidez (Efectivo/Débito)</option>
+                        <option value="credit">Pasivo (Tarjeta Crédito)</option>
+                        <option value="investment">Inversión (Acciones/CDT)</option>
+                    </select>
+                </div>
+                
+                <div id="credit-fields" class="hidden space-y-4 pt-4 border-t border-slate-100/50 animate-slideUp">
+                    <div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-credit-card text-red-500"></i><h4 class="text-[10px] font-black uppercase text-red-500 tracking-widest">Configuración Tarjeta de Crédito</h4></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cupo Total (Límite COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fa-limit" class="form-input text-lg font-black text-center text-red-600 cursor-pointer" placeholder="Toca para ingresar límite"></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Día de Corte</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-cutoff" class="form-input text-sm cursor-pointer" placeholder="Ej: 15"></div>
+                        <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Día de Pago Máx.</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-payday" class="form-input text-sm cursor-pointer" placeholder="Ej: 30"></div>
+                    </div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tasa de Interés (E.M %)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-rate" class="form-input text-sm cursor-pointer" placeholder="Ej: 2.15"></div>
+                </div>
+
+                <button type="submit" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Cuenta</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL COMPRA TARJETA DE CRÉDITO -->
+    <div id="cc-purchase-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-2">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center"><i class="fa-solid fa-cart-shopping"></i></div>
+                    <h3 class="text-xl font-black uppercase text-red-600 tracking-tighter leading-tight">Compra <br><span class="text-[10px] text-slate-400">Tarjeta Crédito</span></h3>
+                </div>
+                <button type="button" onclick="closeCCPurchaseModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="saveCCPurchase(event)" class="space-y-4">
+                <input type="hidden" id="cc-p-cardid">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Comercio / Descripción</label><input type="text" id="cc-p-desc" required class="form-input text-sm" placeholder="Ej: Tiquetes, Amazon, Mercado..."></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Valor Total (COP)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="cc-p-amount" required class="form-input text-3xl font-black text-center text-red-600 cursor-pointer" placeholder="Toca para ingresar"></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">A Cuántas Cuotas?</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="cc-p-term" required class="form-input text-sm cursor-pointer" placeholder="Ej: 12"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha de Compra</label><input type="date" id="cc-p-date" required class="form-input text-xs"></div>
+                </div>
+                <button type="submit" class="w-full bg-red-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Registrar Compra a Cuotas</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL HISTORIAL DE CUENTA -->
+    <div id="account-history-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-start mb-2 shrink-0">
+                <div>
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Auditoría de Cuenta</h3>
+                    <h2 id="hist-acc-name" class="text-2xl font-black uppercase tracking-tighter theme-text">--</h2>
+                    <p id="hist-acc-balance" class="text-lg font-black theme-text mt-1">--</p>
+                </div>
+                <button onclick="closeAccountHistory()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2 shrink-0">
+                <button onclick="setHistFilter('all')" class="filter-chip active" id="hf-all">Histórico</button>
+                <button onclick="setHistFilter('30d')" class="filter-chip" id="hf-30d">Últ. 30 Días</button>
+                <button onclick="setHistFilter('month')" class="filter-chip" id="hf-month">Este Mes</button>
+                <button onclick="setHistFilter('year')" class="filter-chip" id="hf-year">Este Año</button>
+            </div>
+            <div id="hist-acc-list" class="space-y-3 overflow-y-auto hide-scrollbar flex-1 pb-4"></div>
+        </div>
+    </div>
+
+    <!-- MODAL GLOBAL: APEX NUMPAD INTELLIGENT -->
+    <div id="numpad-modal" class="fixed inset-0 z-[60] hidden bg-slate-900/60 backdrop-blur-md flex flex-col justify-end">
+        <div class="bg-slate-100 w-full max-w-md mx-auto rounded-t-[2.5rem] overflow-hidden numpad-modal-content shadow-2xl flex flex-col h-[75vh]">
+            <div class="bg-white p-6 pb-8 rounded-b-[2rem] shadow-sm shrink-0">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Entrada de Valor</p>
+                    <button type="button" onclick="closeNumpad()" class="text-slate-400"><i class="fa-solid fa-xmark text-xl"></i></button>
+                </div>
+                <p id="numpad-display" class="text-4xl font-black text-slate-800 text-center truncate py-4 border-b-2 border-slate-100 min-h-[80px] flex items-center justify-center">$0</p>
+            </div>
+            <div class="p-6 grid grid-cols-3 gap-3 flex-1 content-start">
+                <button type="button" onclick="numpadPress('1')" class="numpad-key">1</button>
+                <button type="button" onclick="numpadPress('2')" class="numpad-key">2</button>
+                <button type="button" onclick="numpadPress('3')" class="numpad-key">3</button>
+                <button type="button" onclick="numpadPress('4')" class="numpad-key">4</button>
+                <button type="button" onclick="numpadPress('5')" class="numpad-key">5</button>
+                <button type="button" onclick="numpadPress('6')" class="numpad-key">6</button>
+                <button type="button" onclick="numpadPress('7')" class="numpad-key">7</button>
+                <button type="button" onclick="numpadPress('8')" class="numpad-key">8</button>
+                <button type="button" onclick="numpadPress('9')" class="numpad-key">9</button>
+                <button type="button" onclick="numpadPress('.')" class="numpad-key font-black text-slate-400">.</button>
+                <button type="button" onclick="numpadPress('0')" class="numpad-key">0</button>
+                <button type="button" onclick="numpadBackspace()" class="numpad-key text-slate-400"><i class="fa-solid fa-delete-left"></i></button>
+            </div>
+            <div class="p-6 pt-0 bg-slate-100 shrink-0 pb-safe">
+                <button type="button" onclick="numpadConfirm()" class="w-full bg-slate-900 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-transform"><i class="fa-solid fa-check mr-2 text-emerald-400"></i> Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- BASE DE DATOS Y ESTADO ---
+        const DEFAULT_CATEGORIES = {
+            income: ["💰 Salario", "💼 Freelance", "📈 Inversión", "🏦 Intereses", "🔄 Varios"],
+            expense: ["🏠 Vivienda", "🍎 Comida", "🚗 Transporte", "🍿 Ocio", "🏥 Salud", "🛍️ Compras", "💳 Pago Deuda", "🛍️ Afterpay", "🔄 Varios"],
+            transfer: ["🔀 Entre Cuentas Propias", "⬇️ Retiro Efectivo", "⬆️ Depósito Bancario"]
+        };
+
+        const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
+
+        let state = JSON.parse(localStorage.getItem('nexus_v50_db')) || {
+            tx: [],
+            loans: [],
+            accounts: [],
+            settings: { apLimit: 5000000, apPayDay: 5 },
+            categories: DEFAULT_CATEGORIES,
+            theme: DEFAULT_THEME,
+            context: 'day', 
+            activeTab: 'home',
+            periodFilter: { type: 'all', cat: 'all' },
+            statsType: 'expense' 
+        };
+
+        // Migración para usuarios previos
+        if (!state.categories) state.categories = DEFAULT_CATEGORIES;
+        if (!state.theme) state.theme = DEFAULT_THEME;
+
+        const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits: 0 });
+        let charts = {};
+
+        // --- SISTEMA APEX NUMPAD ---
+        let numpadTargetId = null;
+        let numpadCurrentValue = "";
+        let numpadFormatType = 'currency';
+
+        function openNumpad(targetId) {
+            numpadTargetId = targetId;
+            const targetEl = document.getElementById(targetId);
+            numpadCurrentValue = targetEl.value ? targetEl.value.toString() : "";
+            numpadFormatType = targetEl.dataset.type || 'currency';
+            document.getElementById('numpad-modal').classList.remove('hidden');
+            updateNumpadDisplay();
+        }
+
+        function numpadPress(char) {
+            if (char === '.' && numpadCurrentValue.includes('.')) return; 
+            if (numpadCurrentValue === "0" && char !== '.') numpadCurrentValue = char;
+            else numpadCurrentValue += char;
+            updateNumpadDisplay();
+            if(navigator.vibrate) navigator.vibrate(20);
+        }
+
+        function numpadBackspace() {
+            numpadCurrentValue = numpadCurrentValue.slice(0, -1);
+            updateNumpadDisplay();
+            if(navigator.vibrate) navigator.vibrate(20);
+        }
+
+        function updateNumpadDisplay() {
+            const display = document.getElementById('numpad-display');
+            if (numpadCurrentValue === "" || numpadCurrentValue === "-") {
+                display.innerText = numpadFormatType === 'currency' ? "$0" : "0";
+                return;
+            }
+            let valFloat = parseFloat(numpadCurrentValue);
+            if(isNaN(valFloat)) valFloat = 0;
+            if (numpadFormatType === 'currency') {
+                if(numpadCurrentValue.endsWith('.')) display.innerText = fmt.format(valFloat) + ",00"; 
+                else display.innerText = fmt.format(valFloat);
+            } else {
+                display.innerText = numpadCurrentValue;
+            }
+        }
+
+        function closeNumpad() {
+            document.getElementById('numpad-modal').classList.add('hidden');
+            numpadTargetId = null;
+        }
+
+        function numpadConfirm() {
+            if (numpadTargetId) {
+                const targetEl = document.getElementById(numpadTargetId);
+                targetEl.value = numpadCurrentValue; 
+                targetEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            closeNumpad();
+            if(navigator.vibrate) navigator.vibrate(50);
+        }
+
+        // --- MOTOR APPLE SHORTCUTS API (NUEVO FASE 2) ---
+        function processShortcutsAPI() {
+            const params = new URLSearchParams(window.location.search);
+            const action = params.get('action');
+            
+            if (action === 'addTx') {
+                const type = params.get('type');
+                const amount = parseFloat(params.get('amount'));
+                const catStr = params.get('cat');
+                const note = params.get('note') || 'Vía Apple Shortcuts';
+                
+                if (type && amount && catStr) {
+                    // Match inteligente de categoría (ignora mayúsculas/minúsculas y emojis)
+                    let actualCat = state.categories[type]?.find(c => c.toLowerCase().includes(catStr.toLowerCase())) || state.categories[type][0];
+                    
+                    // Cuenta por defecto (primera líquida o la primera que encuentre)
+                    const acc = state.accounts.find(a => a.type === 'liquid') || state.accounts[0];
+                    
+                    if(acc) {
+                        if(type === 'income') acc.balance += amount;
+                        if(type === 'expense' || type === 'afterpay') acc.balance -= amount;
+                        
+                        state.tx.push({
+                            id: Date.now().toString(),
+                            type, amount, cat: actualCat, accId: acc.id,
+                            date: new Date().toISOString(),
+                            note
+                        });
+                        saveState();
+                        alert(`⚡ Automatización: Registro de $${amount} añadido exitosamente vía Shortcuts.`);
+                    }
+                }
+                // Limpiar la URL sin recargar la página
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+
+        window.onload = () => {
+            if(!state.tx || state.tx.length === 0) seedDemoData();
+            applyThemeCSS();
+            initNexus();
+            processShortcutsAPI(); // <-- Invocación de motor API
+        };
+
+        function seedDemoData() {
+            state.accounts = [
+                { id: 'a1', name: 'Banco Principal', balance: 18500000, type: 'liquid' },
+                { id: 'a2', name: 'Efectivo', balance: 1400000, type: 'liquid' },
+                { id: 'a3', name: 'Tarjeta Crédito', balance: 0, type: 'credit', limit: 10000000, cutoffDay: 15, payDay: 30, rate: 2.1 },
+                { id: 'a4', name: 'Inversiones', balance: 45000000, type: 'investment' }
+            ];
+            const d = (days) => new Date(Date.now() - days * 86400000).toISOString();
+            for(let i=0; i<150; i++) {
+                const isInc = Math.random() > 0.8;
+                state.tx.push({
+                    id: (Date.now() + i).toString(),
+                    amount: isInc ? 3000000 + Math.random()*5000000 : 50000 + Math.random()*800000,
+                    type: isInc ? 'income' : 'expense',
+                    cat: isInc ? state.categories.income[0] : state.categories.expense[Math.floor(Math.random()*4)],
+                    accId: 'a1',
+                    date: d(Math.floor(Math.random()*90)),
+                    note: `Demo TX #${i}`
+                });
+            }
+            state.tx.push({ id: 'ap1', type: 'afterpay', amount: 450000, cat: '🛍️ Afterpay', accId: 'a3', date: d(3), note: 'Zapatos Nike', apFreq: 'weekly', apPaid: 1 });
+            state.loans.push({ id: 'L1', name: "Crédito Automotriz", total: 45000000, rate: 1.1, term: 60, isBNPL: false, date: d(180) }); 
+            saveState();
+        }
+
+        function saveState() { localStorage.setItem('nexus_v50_db', JSON.stringify(state)); }
+
+        // --- MOTOR DE TEMAS ---
+        function applyThemeCSS() {
+            document.documentElement.style.setProperty('--app-bg', state.theme.bg);
+            document.documentElement.style.setProperty('--card-bg', state.theme.card);
+            document.documentElement.style.setProperty('--app-text', state.theme.text);
+            document.documentElement.style.setProperty('--val-inc', state.theme.inc);
+            document.documentElement.style.setProperty('--val-exp', state.theme.exp);
+        }
+
+        function updateThemeSettings() {
+            state.theme.bg = document.getElementById('set-theme-bg').value;
+            state.theme.card = document.getElementById('set-theme-card').value;
+            state.theme.text = document.getElementById('set-theme-text').value;
+            state.theme.inc = document.getElementById('set-theme-inc').value;
+            state.theme.exp = document.getElementById('set-theme-exp').value;
+            saveState();
+            applyThemeCSS();
+            // Re-renderizamos los gráficos visibles para actualizar colores
+            if(state.activeTab === 'home') render7DaysChart();
+            if(state.activeTab === 'report') renderReport();
+            if(state.activeTab === 'afterpay') renderAfterpay();
+        }
+
+        function resetTheme() {
+            state.theme = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
+            saveState();
+            applyThemeCSS();
+            renderSettingsTab();
+        }
+
+        // --- GESTIÓN DE CATEGORÍAS ---
+        let currentCatManageType = 'income';
+
+        function renderSettingsCategories() {
+            const listCont = document.getElementById('settings-cat-list');
+            const cats = state.categories[currentCatManageType] || [];
+            listCont.innerHTML = cats.map(c => `
+                <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100/50">
+                    <span class="text-xs font-black theme-text">${c}</span>
+                    ${!c.includes('Afterpay') ? `<button onclick="deleteCategory('${c}')" class="text-red-500 w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function setCatManageType(type) {
+            currentCatManageType = type;
+            ['income', 'expense', 'transfer'].forEach(t => document.getElementById('btn-cat-manage-' + t).classList.remove('active'));
+            document.getElementById('btn-cat-manage-' + type).classList.add('active');
+            renderSettingsCategories();
+        }
+
+        function addNewCategory() {
+            const name = prompt("Escribe el nombre de la nueva categoría (Ej: 🍔 Comida):");
+            if(name && name.trim().length > 0) {
+                if(!state.categories[currentCatManageType].includes(name)) {
+                    state.categories[currentCatManageType].push(name.trim());
+                    saveState();
+                    renderSettingsCategories();
+                    populateFilters();
+                }
+            }
+        }
+
+        function deleteCategory(name) {
+            if(confirm(`¿Seguro que deseas eliminar la categoría '${name}'?`)) {
+                state.categories[currentCatManageType] = state.categories[currentCatManageType].filter(c => c !== name);
+                saveState();
+                renderSettingsCategories();
+                populateFilters();
+            }
+        }
+
+        // --- NAVEGACIÓN Y CONTEXTO ---
+        function initNexus() {
+            applyThemeCSS();
+            setContext(state.context);
+            switchTab(state.activeTab);
+            populateFilters();
+        }
+
+        function setContext(ctx) {
+            state.context = ctx;
+            document.querySelectorAll('.v-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + ctx).classList.add('active');
+            
+            if(ctx !== 'day') document.body.classList.add('is-red-mode');
+            else document.body.classList.remove('is-red-mode');
+            
+            if(ctx === 'day') {
+                document.getElementById('view-day').classList.remove('hidden');
+                document.getElementById('view-period').classList.add('hidden');
+                if(state.activeTab !== 'loans' && state.activeTab === 'home') document.getElementById('fab-main').classList.remove('hidden');
+                document.getElementById('wealth-title').innerText = "Patrimonio Hoy";
+            } else {
+                document.getElementById('view-day').classList.add('hidden');
+                document.getElementById('view-period').classList.remove('hidden');
+                document.getElementById('fab-main').classList.add('hidden');
+                document.getElementById('wealth-title').innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año";
+            }
+
+            state.periodFilter = { type: 'all', cat: 'all' }; 
+            updateDashboard();
+            if(state.activeTab === 'analysis') renderAnalysis();
+        }
+
+        function switchTab(id) {
+            state.activeTab = id;
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-' + id).classList.add('active');
+
+            const periodNav = document.getElementById('period-nav');
+            if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database'].includes(id)) {
+                periodNav.classList.add('hidden');
+            } else {
+                periodNav.classList.remove('hidden');
+            }
+
+            const fabMain = document.getElementById('fab-main');
+            const fabLoans = document.getElementById('fab-loans');
+            
+            if(id === 'loans') {
+                fabMain.classList.add('hidden');
+                fabLoans.classList.remove('hidden');
+                renderLoansList();
+                document.getElementById('loans-view-list').classList.remove('hidden');
+                document.getElementById('loans-view-detail').classList.add('hidden');
+            } else if (id === 'home' && state.context === 'day') {
+                fabMain.classList.remove('hidden');
+                fabLoans.classList.add('hidden');
+            } else {
+                fabMain.classList.add('hidden');
+                fabLoans.classList.add('hidden');
+            }
+            
+            if(id === 'analysis') renderAnalysis();
+            if(id === 'afterpay') renderAfterpay();
+            if(id === 'report') renderReport();
+            if(id === 'accounts') renderAccountsTab();
+            if(id === 'settings') renderSettingsTab();
+            if(id === 'database') initDatabaseTab();
+        }
+
+        // --- MANEJO DE FORMULARIOS CORE ---
+        function openForm(type) {
+            document.getElementById('tx-modal').classList.remove('hidden');
+            document.getElementById('f-type').value = type;
+            document.getElementById('f-amount').value = '';
+            document.getElementById('f-note').value = '';
+            document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+
+            const titleMap = { income: 'Nuevo Ingreso', expense: 'Nuevo Gasto', transfer: 'Transferencia', afterpay: 'Compra Afterpay' };
+            document.getElementById('form-title').innerText = titleMap[type] || 'Nuevo Registro';
+
+            const catSelect = document.getElementById('f-cat');
+            catSelect.innerHTML = '';
+            const cats = state.categories[type] || ['🛍️ Afterpay'];
+            cats.forEach(c => { catSelect.innerHTML += `<option value="${c}">${c}</option>`; });
+
+            const accSelect = document.getElementById('f-account');
+            accSelect.innerHTML = '';
+            state.accounts.forEach(a => {
+                accSelect.innerHTML += `<option value="${a.id}">${a.name} (${fmt.format(a.balance)})</option>`;
+            });
+
+            if (type === 'afterpay') document.getElementById('ap-freq-container').classList.remove('hidden');
+            else document.getElementById('ap-freq-container').classList.add('hidden');
+        }
+
+        function closeForm() {
+            document.getElementById('tx-modal').classList.add('hidden');
+        }
+
+        function saveTransaction(e) {
+            e.preventDefault();
+            const type = document.getElementById('f-type').value;
+            const amount = parseFloat(document.getElementById('f-amount').value);
+            const cat = document.getElementById('f-cat').value;
+            const accId = document.getElementById('f-account').value;
+            const date = document.getElementById('f-date').value;
+            const note = document.getElementById('f-note').value;
+
+            if(!amount || amount <= 0) return;
+
+            const acc = state.accounts.find(a => a.id === accId);
+            if(acc) {
+                if(type === 'income') acc.balance += amount;
+                if(type === 'expense' || type === 'afterpay') acc.balance -= amount;
+            }
+
+            const newTx = {
+                id: Date.now().toString(),
+                type, amount, cat, accId,
+                date: new Date(date).toISOString(),
+                note
+            };
+
+            if (type === 'afterpay') { newTx.apFreq = document.getElementById('f-ap-freq').value; newTx.apPaid = 0; }
+
+            state.tx.push(newTx);
+            saveState();
+            closeForm();
+            updateDashboard();
+            if(state.activeTab === 'accounts') renderAccountsTab();
+            if(state.activeTab === 'database') renderDatabase();
+        }
+
+        // --- DASHBOARD PRINCIPAL ---
+        function updateDashboard() {
+            const globalInc = state.tx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+            const globalExp = state.tx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+            const pendingAp = state.tx.filter(t=>t.type==='afterpay').reduce((s,t)=> s + (t.amount * (4 - (t.apPaid||0)) / 4), 0);
+            const netWorth = state.accounts.reduce((s,a) => s + (a.type === 'credit' ? -a.balance : a.balance), 0) + globalInc - globalExp - pendingAp;
+            
+            document.getElementById('net-worth').innerText = fmt.format(netWorth);
+            document.getElementById('nexus-score').innerText = Math.floor(720 + (netWorth/25000000));
+
+            const contextTx = getContextTx();
+
+            const ctxInc = contextTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+            const ctxExp = contextTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+            document.getElementById('total-inc').innerText = "+" + fmt.format(ctxInc);
+            document.getElementById('total-exp').innerText = "-" + fmt.format(ctxExp);
+
+            if(state.context === 'day') { renderAccounts(); render7DaysChart(); } 
+            else { renderPeriodChart(contextTx); renderPeriodList(contextTx); }
+        }
+
+        function getContextTx() {
+            const now = new Date();
+            return state.tx.filter(t => {
+                const d = new Date(t.date);
+                if(state.context === 'day') return d.toDateString() === now.toDateString();
+                if(state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                return d.getFullYear() === now.getFullYear();
+            });
+        }
+
+        function renderAccounts() {
+            const cont = document.getElementById('accounts-container');
+            const types = { liquid: 'Liquidez', credit: 'Pasivos', investment: 'Inversión' };
+            cont.innerHTML = Object.keys(types).map(type => {
+                const accs = state.accounts.filter(a => a.type === type);
+                if(accs.length === 0) return '';
+                return `<div class="space-y-3"><div class="text-[9px] font-black uppercase text-slate-400 tracking-widest ml-2">${types[type]}</div>${accs.map(a => `<div onclick="openAccountHistory('${a.id}')" class="theme-card p-6 rounded-[1.5rem] border border-slate-100/50 flex justify-between items-center shadow-sm cursor-pointer active:scale-95 transition-transform"><span class="text-[11px] font-black uppercase theme-text">${a.name}</span><span class="text-sm font-black ${type==='credit'?'theme-val-exp':'theme-text'}">${type==='credit'?'-':''}${fmt.format(a.balance)}</span></div>`).join('')}</div>`;
+            }).join('');
+        }
+
+        // --- MÓDULO: ANALÍTICA PRO ---
+        function renderAnalysis() {
+            const contextTx = getContextTx().filter(t => t.type !== 'afterpay');
+            document.getElementById('stat-period-label').innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
+            
+            const inc = contextTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
+            const exp = contextTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+            
+            let days = 1; const now = new Date();
+            if (state.context === 'month') days = now.getDate() || 1;
+            if (state.context === 'year') { 
+                const startOfYear = new Date(now.getFullYear(), 0, 1); 
+                days = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24)) + 1; 
+            }
+            
+            document.getElementById('stat-burn').innerText = fmt.format(exp / days);
+            const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0;
+            document.getElementById('stat-save').innerText = saveEff + '%';
+            document.getElementById('stat-save').className = `text-lg font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
+
+            // Top 10
+            const typeTx = contextTx.filter(t => t.type === state.statsType);
+            const totalType = typeTx.reduce((s,t) => s + t.amount, 0);
+            const catGroup = {};
+            typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount);
+            const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
+            const tbody = document.getElementById('stat-top-table');
+            
+            if (sortedCats.length === 0) tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos en este periodo</td></tr>`;
+            else {
+                tbody.innerHTML = sortedCats.map(c => {
+                    const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0;
+                    return `<tr class="border-b border-slate-50/50 last:border-0"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt.format(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold">${perc}%</td></tr>`;
+                }).join('');
+            }
+
+            document.getElementById('btn-stat-exp').className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`;
+            document.getElementById('btn-stat-inc').className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
+
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            const projFactor = state.context === 'month' ? (daysInMonth / days) : (365 / days);
+            const projInc = inc * projFactor;
+            const projExp = exp * projFactor;
+
+            document.getElementById('tbl-real-inc').innerText = fmt.format(inc);
+            document.getElementById('tbl-proj-inc').innerText = fmt.format(projInc);
+            document.getElementById('tbl-real-exp').innerText = fmt.format(exp);
+            document.getElementById('tbl-proj-exp').innerText = fmt.format(projExp);
+            document.getElementById('tbl-real-net').innerText = fmt.format(inc - exp);
+            document.getElementById('tbl-proj-net').innerText = fmt.format(projInc - projExp);
+            
+            const yearTableCont = document.getElementById('stat-year-table-container');
+            if(state.context === 'year') {
+                yearTableCont.classList.remove('hidden');
+                let htmlRows = '';
+                let acuNet = 0;
+                for(let m = 0; m <= now.getMonth(); m++) {
+                    const mTx = state.tx.filter(t => {
+                        const d = new Date(t.date);
+                        return d.getFullYear() === now.getFullYear() && d.getMonth() === m && t.type !== 'afterpay';
+                    });
+                    const mInc = mTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
+                    const mExp = mTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+                    acuNet += (mInc - mExp);
+                    
+                    const mName = new Date(now.getFullYear(), m, 1).toLocaleDateString('es-CO', {month:'short'});
+                    htmlRows += `
+                        <tr class="border-b border-white/5 last:border-0">
+                            <td class="py-3 font-bold text-[10px] uppercase">${mName}</td>
+                            <td class="py-3 text-right font-mono font-bold text-emerald-300">${fmt.format(mInc)}</td>
+                            <td class="py-3 text-right font-mono font-bold text-red-400">${fmt.format(mExp)}</td>
+                            <td class="py-3 text-right font-mono font-black ${acuNet >= 0 ? 'text-white' : 'text-slate-400'}">${fmt.format(acuNet)}</td>
+                        </tr>
+                    `;
+                }
+                document.getElementById('stat-year-tbody').innerHTML = htmlRows;
+            } else {
+                yearTableCont.classList.add('hidden');
+            }
+        }
+        function setStatsType(type) { state.statsType = type; saveState(); renderAnalysis(); }
+
+        // --- MÓDULO: CENTRO DE CUENTAS ---
+        function renderAccountsTab() {
+            const sumCont = document.getElementById('acc-hub-summary');
+            const listCont = document.getElementById('acc-hub-list');
+            let liq = 0, cre = 0, inv = 0;
+            state.accounts.forEach(a => { if(a.type === 'liquid') liq += a.balance; if(a.type === 'credit') cre += a.balance; if(a.type === 'investment') inv += a.balance; });
+
+            sumCont.innerHTML = `
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt.format(liq)}</p></div>
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt.format(cre)}</p></div>
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt.format(inv)}</p></div>
+            `;
+
+            const typesInfo = { liquid: { title: 'Liquidez / Efectivo', color: 'theme-text', bg: 'bg-slate-50', icon: 'fa-money-bill-wave' }, credit: { title: 'Tarjetas de Crédito / Pasivos', color: 'theme-val-exp', bg: 'bg-red-50', icon: 'fa-credit-card' }, investment: { title: 'Inversiones / Activos', color: 'theme-val-inc', bg: 'bg-emerald-50', icon: 'fa-arrow-trend-up' } };
+
+            listCont.innerHTML = Object.keys(typesInfo).map(type => {
+                const accs = state.accounts.filter(a => a.type === type);
+                if(accs.length === 0) return '';
+                return `
+                <div class="space-y-4">
+                    <div class="flex items-center gap-2 border-b border-slate-100/50 pb-2">
+                        <div class="w-6 h-6 rounded-full ${typesInfo[type].bg} ${typesInfo[type].color} flex items-center justify-center"><i class="fa-solid ${typesInfo[type].icon} text-[10px]"></i></div>
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500">${typesInfo[type].title}</h3>
+                    </div>
+                    <div class="space-y-3">
+                        ${accs.map(a => {
+                            if (type === 'credit') {
+                                const available = (a.limit || 0) - a.balance;
+                                return `
+                                <div class="theme-card p-6 rounded-[2rem] border shadow-sm group relative overflow-hidden space-y-4">
+                                    <div class="flex justify-between items-start">
+                                        <div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Corte: ${a.cutoffDay||'N/A'} | Pago Máx: ${a.payDay||'N/A'} | Tasa: ${a.rate||0}% E.M.</p></div>
+                                        <div class="text-right"><p class="text-[9px] font-bold text-slate-400 uppercase">Saldo Endeudado</p><p class="text-lg font-black theme-val-exp">-${fmt.format(a.balance)}</p></div>
+                                    </div>
+                                    <div class="flex justify-between items-center pt-3 border-t border-slate-50/50">
+                                        <div><p class="text-[9px] font-bold text-slate-400 uppercase">Cupo Disponible para Compras</p><p class="text-sm font-black theme-val-inc">${fmt.format(Math.max(0, available))}</p><p class="text-[8px] font-bold text-slate-300 uppercase">Límite Total: ${fmt.format(a.limit||0)}</p></div>
+                                        <div class="flex gap-2">
+                                            <button onclick="editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                                            <button onclick="openCCPurchaseModal('${a.id}')" class="bg-red-50 theme-val-exp px-4 py-3 rounded-2xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-cart-shopping mr-1"></i> Comprar</button>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            } else {
+                                return `
+                                <div class="theme-card p-6 rounded-[2rem] border shadow-sm flex justify-between items-center group relative overflow-hidden">
+                                    <div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">ID: ${a.id}</p></div>
+                                    <div class="flex items-center gap-4">
+                                        <p class="text-lg font-black ${type==='investment'?'theme-val-inc':'theme-text'}">${fmt.format(a.balance)}</p>
+                                        <button onclick="editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-8 h-8 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                                    </div>
+                                </div>`;
+                            }
+                        }).join('')}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function openAccountModal() {
+            document.getElementById('new-account-modal').classList.remove('hidden');
+            document.getElementById('acc-form-title').innerText = "Nueva Cuenta";
+            document.getElementById('fa-id').value = '';
+            document.getElementById('fa-name').value = '';
+            document.getElementById('fa-balance').value = '';
+            document.getElementById('fa-limit').value = '';
+            document.getElementById('fa-cutoff').value = '';
+            document.getElementById('fa-payday').value = '';
+            document.getElementById('fa-rate').value = '';
+            document.getElementById('fa-type').value = 'liquid';
+            toggleCreditFields();
+        }
+
+        function editAccount(id) {
+            const acc = state.accounts.find(a => a.id === id);
+            if(!acc) return;
+            openAccountModal();
+            document.getElementById('acc-form-title').innerText = "Editar Cuenta";
+            document.getElementById('fa-id').value = acc.id;
+            document.getElementById('fa-name').value = acc.name;
+            document.getElementById('fa-balance').value = acc.balance;
+            document.getElementById('fa-type').value = acc.type;
+            toggleCreditFields();
+            if(acc.type === 'credit') {
+                document.getElementById('fa-limit').value = acc.limit || 0;
+                document.getElementById('fa-cutoff').value = acc.cutoffDay || 1;
+                document.getElementById('fa-payday').value = acc.payDay || 15;
+                document.getElementById('fa-rate').value = acc.rate || 0;
+            }
+        }
+
+        function closeAccountModal() { document.getElementById('new-account-modal').classList.add('hidden'); }
+        function toggleCreditFields() {
+            const type = document.getElementById('fa-type').value;
+            const cf = document.getElementById('credit-fields');
+            const lbl = document.getElementById('fa-balance-lbl');
+            if (type === 'credit') { cf.classList.remove('hidden'); lbl.innerText = 'Deuda Actual (Saldo Endeudado COP)'; document.getElementById('fa-limit').required = true; document.getElementById('fa-rate').required = true; } 
+            else { cf.classList.add('hidden'); lbl.innerText = 'Balance Inicial (COP)'; document.getElementById('fa-limit').required = false; document.getElementById('fa-rate').required = false; }
+        }
+
+        function saveAccount(e) {
+            e.preventDefault();
+            const id = document.getElementById('fa-id').value;
+            const name = document.getElementById('fa-name').value.trim();
+            const balance = parseFloat(document.getElementById('fa-balance').value) || 0;
+            const type = document.getElementById('fa-type').value;
+
+            if(!name) return;
+
+            const accountData = { name, balance, type };
+            if (type === 'credit') {
+                accountData.limit = parseFloat(document.getElementById('fa-limit').value) || 0;
+                accountData.cutoffDay = parseInt(document.getElementById('fa-cutoff').value) || 1;
+                accountData.payDay = parseInt(document.getElementById('fa-payday').value) || 15;
+                accountData.rate = parseFloat(document.getElementById('fa-rate').value) || 0;
+            }
+
+            if(id) { // Modificar
+                const idx = state.accounts.findIndex(a => a.id === id);
+                if(idx !== -1) state.accounts[idx] = { ...state.accounts[idx], ...accountData };
+            } else { // Nuevo
+                state.accounts.push({ id: 'acc_' + Date.now(), ...accountData });
+            }
+
+            saveState(); closeAccountModal(); renderAccountsTab(); updateDashboard();
+        }
+
+        // --- MÓDULO: BASE DE DATOS VISUAL ---
+        function initDatabaseTab() {
+            const now = new Date();
+            const start = new Date(); start.setDate(now.getDate() - 30);
+            document.getElementById('db-filter-start').value = start.toISOString().split('T')[0];
+            document.getElementById('db-filter-end').value = now.toISOString().split('T')[0];
+            updateDbCatFilter(); // Llena categorías y renderiza
+        }
+
+        function resetDbFilters() {
+            const now = new Date();
+            const start = new Date(); start.setDate(now.getDate() - 30);
+            document.getElementById('db-filter-start').value = start.toISOString().split('T')[0];
+            document.getElementById('db-filter-end').value = now.toISOString().split('T')[0];
+            document.getElementById('db-filter-type').value = 'all';
+            updateDbCatFilter();
+        }
+
+        function updateDbCatFilter() {
+            const type = document.getElementById('db-filter-type').value;
+            const select = document.getElementById('db-filter-cat');
+            select.innerHTML = '<option value="all">Todas</option>';
+            if (type === 'all') {
+                const allCats = [...state.categories.income, ...state.categories.expense, ...state.categories.transfer];
+                allCats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+            } else {
+                const cats = state.categories[type] || [];
+                cats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+            }
+            renderDatabase();
+        }
+
+        function renderDatabase() {
+            const start = new Date(document.getElementById('db-filter-start').value);
+            const end = new Date(document.getElementById('db-filter-end').value);
+            end.setHours(23, 59, 59); // Fin del día
+            const type = document.getElementById('db-filter-type').value;
+            const cat = document.getElementById('db-filter-cat').value;
+
+            let filteredTx = state.tx.filter(t => {
+                const d = new Date(t.date);
+                if (d < start || d > end) return false;
+                if (type !== 'all' && t.type !== type) return false;
+                if (cat !== 'all' && t.cat !== cat) return false;
+                return true;
+            });
+
+            filteredTx.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            const countEl = document.getElementById('db-count');
+            const totalEl = document.getElementById('db-total');
+            const listCont = document.getElementById('db-list');
+
+            countEl.innerText = filteredTx.length;
+            
+            // Calculamos total solo para ingresos y gastos para dar una idea
+            const totalVal = filteredTx.reduce((sum, t) => {
+                if(t.type === 'income') return sum + t.amount;
+                if(t.type === 'expense' || t.type === 'afterpay') return sum - t.amount;
+                return sum;
+            }, 0);
+            
+            totalEl.innerText = fmt.format(totalVal);
+            totalEl.className = totalVal >= 0 ? "theme-val-inc" : "theme-val-exp";
+
+            if (filteredTx.length === 0) {
+                listCont.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Ningún registro coincide con la búsqueda</p></div>`;
+                return;
+            }
+
+            listCont.innerHTML = filteredTx.map(t => {
+                const isInc = t.type === 'income';
+                const isExpOrAp = t.type === 'expense' || t.type === 'afterpay'; 
+                const sign = isExpOrAp ? '-' : '+';
+                const colorText = isInc ? 'theme-val-inc' : isExpOrAp ? 'theme-val-exp' : 'theme-text';
+                const iconBg = isInc ? 'bg-emerald-50 text-emerald-600' : isExpOrAp ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-600';
+                const iconSymbol = isInc ? 'fa-arrow-up' : isExpOrAp ? 'fa-arrow-down' : 'fa-right-left';
+                const accName = state.accounts.find(a => a.id === t.accId)?.name || 'Desconocida';
+
+                return `
+                <div class="theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${iconBg} shrink-0"><i class="fa-solid ${iconSymbol} text-xs"></i></div>
+                        <div>
+                            <p class="text-xs font-black uppercase theme-text truncate max-w-[120px] sm:max-w-[180px]">${t.note || t.cat.substring(2)}</p>
+                            <p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO', {day:'2-digit', month:'short', year:'numeric'})} • ${accName}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 shrink-0">
+                        <p class="font-black text-sm ${colorText}">${sign}${fmt.format(t.amount)}</p>
+                        <button onclick="deleteDatabaseRecord('${t.id}')" class="text-slate-300 hover:text-red-500 transition-colors w-8 h-8 flex items-center justify-center"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function deleteDatabaseRecord(id) {
+            const tx = state.tx.find(t => t.id === id);
+            if(!tx) return;
+            if(confirm("¿Eliminar este registro de forma permanente? El saldo en tu cuenta será revertido automáticamente.")) {
+                // Revertir en la cuenta
+                const acc = state.accounts.find(a => a.id === tx.accId);
+                if(acc) {
+                    if(tx.type === 'income') acc.balance -= tx.amount;
+                    if(tx.type === 'expense' || tx.type === 'afterpay') acc.balance += tx.amount;
+                }
+                // Borrar
+                state.tx = state.tx.filter(t => t.id !== id);
+                saveState();
+                renderDatabase();
+                updateDashboard();
+            }
+        }
+
+        // --- SISTEMAS DE REPORTES Y GRAFICOS RESTANTES ---
+        function render7DaysChart() {
+            const ctx = document.getElementById('chart-7days').getContext('2d');
+            if(charts.d7) charts.d7.destroy();
+            const dataIn = [], dataOut = [], labels = [];
+            for(let i=6; i>=0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                labels.push(d.toLocaleDateString('es', {weekday:'short'}));
+                const dayTx = state.tx.filter(t => new Date(t.date).toDateString() === d.toDateString() && t.type !== 'afterpay');
+                dataIn.push(dayTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0));
+                dataOut.push(dayTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0));
+            }
+            charts.d7 = new Chart(ctx, { type: 'line', data: { labels, datasets: [{ data: dataIn, borderColor: state.theme.inc, tension: 0.4 }, { data: dataOut, borderColor: state.theme.exp, tension: 0.4 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}} }});
+        }
+
+        function renderPeriodChart(contextTx) {
+            const ctx = document.getElementById('chart-period').getContext('2d');
+            if(charts.period) charts.period.destroy();
+            const grp = {};
+            contextTx.forEach(t => {
+                if(t.type === 'afterpay') return;
+                const k = state.context === 'month' ? new Date(t.date).getDate() : new Date(t.date).getMonth() + 1;
+                grp[k] = (grp[k]||0) + (t.type==='income' ? t.amount : -t.amount);
+            });
+            const labels = Object.keys(grp).sort((a,b)=>a-b);
+            charts.period = new Chart(ctx, { type: 'bar', data: { labels, datasets: [{ data: labels.map(l=>grp[l]), backgroundColor: labels.map(l=>grp[l]>0?state.theme.inc:state.theme.exp), borderRadius: 4 }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}} }});
+        }
+
+        function populateFilters() {
+            const select = document.getElementById('period-cat-filter');
+            select.innerHTML = '<option value="all">Todas las Categorías</option>';
+            const allCats = [...state.categories.income, ...state.categories.expense, ...state.categories.transfer];
+            allCats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+        }
+
+        function setPeriodFilter(key, val) {
+            state.periodFilter[key] = val;
+            if(key === 'type') {
+                document.querySelectorAll('#view-period .filter-chip').forEach(b => b.classList.remove('active'));
+                document.getElementById('f-type-' + val).classList.add('active');
+                const select = document.getElementById('period-cat-filter');
+                select.innerHTML = '<option value="all">Todas las Categorías</option>';
+                const cats = val === 'all' ? [...state.categories.income, ...state.categories.expense, ...state.categories.transfer] : (state.categories[val]||[]);
+                cats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`);
+                state.periodFilter.cat = 'all'; 
+            }
+            updateDashboard();
+        }
+
+        function renderPeriodList(contextTx) {
+            const list = document.getElementById('period-list');
+            const finalTx = contextTx.filter(t => {
+                if(t.type === 'afterpay') return false; 
+                if(state.periodFilter.type !== 'all' && t.type !== state.periodFilter.type) return false;
+                if(state.periodFilter.cat !== 'all' && t.cat !== state.periodFilter.cat) return false;
+                return true;
+            });
+            finalTx.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            list.innerHTML = finalTx.map(t => `
+                <div class="theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}">
+                            <i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i>
+                        </div>
+                        <div><p class="text-xs font-black uppercase theme-text">${t.cat.substring(2)}</p><p class="text-[9px] font-bold opacity-40 theme-text">${new Date(t.date).toLocaleDateString()}</p></div>
+                    </div>
+                    <p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}$${fmt.format(t.amount)}</p>
+                </div>
+            `).join('');
+
+            const subInc = finalTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+            const subExp = finalTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+            
+            document.getElementById('period-sub-inc').innerText = fmt.format(subInc);
+            document.getElementById('period-sub-exp').innerText = fmt.format(subExp);
+            document.getElementById('period-subtotal').innerText = fmt.format(subInc - subExp);
+            document.getElementById('period-subtotal').className = `text-2xl font-black tabular-nums ${(subInc - subExp) >= 0 ? 'theme-text' : 'theme-val-exp'}`;
+        }
+
+        // --- SISTEMA DE DEUDAS ---
+        function renderLoansList() {
+            const list = document.getElementById('loans-list');
+            const activeLoans = state.loans.filter(l => !l.isBNPL);
+            const normalLoans = activeLoans.filter(l => !l.isCC);
+            const ccLoans = activeLoans.filter(l => l.isCC);
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            const monthInc = state.tx.filter(t => t.type === 'income' && new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear).reduce((s,t) => s + t.amount, 0);
+            
+            let totalMonthlyQuotas = 0;
+            activeLoans.forEach(l => {
+                const P = l.total; const r = l.rate / 100; const n = l.term;
+                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                const startDate = new Date(l.date); const now = new Date();
+                let monthsPassed = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+                if(monthsPassed < n) totalMonthlyQuotas += A;
+            });
+
+            const summaryCont = document.getElementById('loans-summary-container');
+            if(activeLoans.length > 0) {
+                summaryCont.classList.remove('hidden');
+                document.getElementById('ls-income').innerText = fmt.format(monthInc);
+                const ratio = monthInc > 0 ? ((totalMonthlyQuotas / monthInc) * 100).toFixed(1) : 0;
+                document.getElementById('ls-ratio').innerText = ratio + "%"; 
+                let statusText = ratio > 30 ? "⚠️ Precaución: tu nivel de endeudamiento supera el 30% del ingreso." : "✅ Excelente, tu flujo mensual permite cubrir las cuotas holgadamente.";
+                document.getElementById('ls-narrative').innerHTML = `Durante este mes tienes un total acumulado de <b>${fmt.format(totalMonthlyQuotas)}</b> en cuotas por pagar. Frente a un ingreso de <b>${fmt.format(monthInc)}</b>, tus obligaciones financieras consumen el <b>${ratio}%</b> de la liquidez. ${statusText}`;
+            } else summaryCont.classList.add('hidden');
+
+            if(activeLoans.length === 0) { list.innerHTML = `<div class="text-center p-10 theme-card rounded-[2rem] shadow-sm"><i class="fa-solid fa-hands-holding-circle text-4xl text-amber-200 mb-4"></i><p class="text-xs font-black text-slate-400 uppercase italic">Libre de Deudas</p></div>`; return; }
+
+            let htmlBlocks = '';
+            if (normalLoans.length > 0) {
+                htmlBlocks += `<div class="mb-6"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-2">Préstamos Bancarios</h3>`;
+                htmlBlocks += normalLoans.map(l => `<div onclick="showLoanDetail('${l.id}')" class="p-8 theme-card rounded-[2rem] border-l-8 border-amber-500 shadow-sm flex justify-between items-center cursor-pointer active:scale-95 transition-transform mb-3"><div><p class="text-[9px] font-black uppercase text-amber-500 tracking-widest mb-1">${l.term} Meses • ${l.rate}% EM</p><h4 class="text-sm font-black uppercase tracking-tighter truncate max-w-[180px] theme-text">${l.name}</h4></div><p class="text-xl font-black theme-text">${fmt.format(l.total)}</p></div>`).join('');
+                htmlBlocks += `</div>`;
+            }
+            if (ccLoans.length > 0) {
+                htmlBlocks += `<div><h3 class="text-[10px] font-black uppercase text-red-400 tracking-widest mb-3 ml-2 flex items-center gap-2"><i class="fa-solid fa-credit-card"></i> Compras T. Crédito</h3>`;
+                htmlBlocks += ccLoans.map(l => `<div onclick="showLoanDetail('${l.id}')" class="p-8 theme-card rounded-[2rem] border-l-8 border-red-500 shadow-sm flex justify-between items-center cursor-pointer active:scale-95 transition-transform mb-3"><div><p class="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1">${l.term} Cuotas • ${l.rate}% EM</p><h4 class="text-sm font-black uppercase tracking-tighter truncate max-w-[180px] theme-text">${l.name}</h4></div><p class="text-xl font-black theme-val-exp">${fmt.format(l.total)}</p></div>`).join('');
+                htmlBlocks += `</div>`;
+            }
+            list.innerHTML = htmlBlocks;
+        }
+
+        function showLoanDetail(id) { 
+            const loan = state.loans.find(l => l.id === id);
+            if(!loan) return;
+            document.getElementById('loans-view-list').classList.add('hidden');
+            document.getElementById('loans-view-detail').classList.remove('hidden');
+            document.getElementById('det-loan-title').innerText = loan.name;
+            const P = loan.total; const r = loan.rate / 100; const n = loan.term;
+            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            const startDate = new Date(loan.date); const now = new Date();
+            let monthsPassed = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+            if(monthsPassed < 0) monthsPassed = 0; if(monthsPassed > n) monthsPassed = n;
+            let balance = P, paidToDate = 0, pendingCapital = P, totalIntPending = 0, totalIntAcc = 0, htmlRows = '';
+            for (let i = 1; i <= n; i++) {
+                const interest = balance * r; const capital = A - interest; totalIntAcc += interest;
+                const pDate = new Date(startDate); pDate.setMonth(pDate.getMonth() + i);
+                const dateStr = pDate.toLocaleDateString('es-CO', {month:'short', year:'2-digit'});
+                let rowClass = "", statusIcon = "";
+                if (i <= monthsPassed) { paidToDate += A; pendingCapital -= capital; rowClass = "opacity-40 line-through text-slate-400"; statusIcon = `<i class="fa-solid fa-check text-emerald-500 mr-2"></i>`; } 
+                else { totalIntPending += interest; rowClass = "font-medium"; statusIcon = `<span class="mr-2 text-slate-300">${i}</span>`; }
+                balance -= capital;
+                htmlRows += `<tr class="border-b border-slate-50/50 ${rowClass}"><td class="px-4 py-4 uppercase flex items-center">${statusIcon}${dateStr}</td><td class="px-4 py-4 text-right font-mono">${fmt.format(capital)}</td><td class="px-4 py-4 text-right font-mono">${fmt.format(interest)}</td><td class="px-4 py-4 text-right font-black">${fmt.format(A)}</td><td class="px-4 py-4 text-right font-mono text-amber-600">${fmt.format(Math.max(0, balance))}</td></tr>`;
+            }
+            document.getElementById('det-loan-table').innerHTML = htmlRows;
+            document.getElementById('det-loan-paragraph').innerHTML = `El crédito <b>${loan.name}</b> tiene un valor inicial de <b>${fmt.format(P)}</b> diferido a <b>${n} meses</b> con una tasa del <b>${loan.rate}% E.M</b>. A la fecha, se han cubierto ${monthsPassed} periodos por un valor pagado de <b>${fmt.format(paidToDate)}</b>, dejando un capital pendiente de <b>${fmt.format(pendingCapital)}</b>. El valor de intereses futuros a pagar es de <b>${fmt.format(totalIntPending)}</b>.<br><br>💡 <span class="uppercase font-black tracking-widest text-[9px] text-amber-600">Tip Financiero</span><br>Realizar abonos a capital reducirá el interés futuro de ${fmt.format(totalIntPending)}. Puedes elegir entre <b>reducir el plazo</b> (ahorras más intereses) o <b>reducir la cuota mensual</b> (mejora tu flujo de caja).`;
+        }
+
+        function hideLoanDetail() { document.getElementById('loans-view-detail').classList.add('hidden'); document.getElementById('loans-view-list').classList.remove('hidden'); }
+        function openLoanForm() { document.getElementById('loan-modal').classList.remove('hidden'); document.getElementById('fl-date').value = new Date().toISOString().split('T')[0]; document.getElementById('fl-name').value = ''; document.getElementById('fl-amount').value = ''; document.getElementById('fl-rate').value = ''; document.getElementById('fl-term').value = ''; }
+        function closeLoanForm() { document.getElementById('loan-modal').classList.add('hidden'); }
+        function saveLoan(e) { e.preventDefault(); const total=parseFloat(document.getElementById('fl-amount').value); const rate=parseFloat(document.getElementById('fl-rate').value); const term=parseInt(document.getElementById('fl-term').value); if(!total||isNaN(rate)||isNaN(term)) return alert("Datos inválidos"); state.loans.push({ id:'L_'+Date.now(), name:document.getElementById('fl-name').value, total, rate, term, isBNPL:false, isCC:false, date:new Date(document.getElementById('fl-date').value).toISOString()}); saveState(); closeLoanForm(); renderLoansList(); }
+        
+        // --- COMPRAS TC ---
+        function openCCPurchaseModal(cardId) { document.getElementById('cc-purchase-modal').classList.remove('hidden'); document.getElementById('cc-p-cardid').value = cardId; document.getElementById('cc-p-desc').value = ''; document.getElementById('cc-p-amount').value = ''; document.getElementById('cc-p-term').value = '1'; document.getElementById('cc-p-date').value = new Date().toISOString().split('T')[0]; }
+        function closeCCPurchaseModal() { document.getElementById('cc-purchase-modal').classList.add('hidden'); }
+        function saveCCPurchase(e) { e.preventDefault(); const cardId = document.getElementById('cc-p-cardid').value; const desc = document.getElementById('cc-p-desc').value.trim(); const amount = parseFloat(document.getElementById('cc-p-amount').value); const term = parseInt(document.getElementById('cc-p-term').value); const date = document.getElementById('cc-p-date').value; const card = state.accounts.find(a => a.id === cardId); if(!card || isNaN(amount) || isNaN(term)) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la tarjeta. ¿Autorizas el sobregiro?`)) return; } card.balance += amount; state.tx.push({ id: Date.now().toString(), type: 'expense', amount: amount, cat: '🛍️ Compras', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}` }); state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, rate: card.rate || 0, term: term, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString() }); saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); }
+
+        // --- AFTERPAY ENGINE ---
+        function getNextPayDate(baseDate, targetDayOfWeek) { let date = new Date(baseDate); let currentDay = date.getDay(); let distance = targetDayOfWeek - currentDay; if (distance <= 0) distance += 7; date.setDate(date.getDate() + distance); return date; }
+        
+        function calculateAfterpaySchedules() { 
+            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4); 
+            const payDay = state.settings.apPayDay || 5; 
+            const globalSchedule = []; 
+            apTx.forEach(tx => { 
+                const startDate = getNextPayDate(new Date(tx.date), payDay); 
+                const stepDays = tx.apFreq === 'fortnightly' ? 14 : 7; 
+                const instAmt = tx.amount / 4; 
+                for(let i = (tx.apPaid || 0); i < 4; i++) { 
+                    const d = new Date(startDate.getTime()); d.setDate(d.getDate() + (i * stepDays)); 
+                    const dateStr = d.toISOString().split('T')[0]; 
+                    globalSchedule.push({ date: d, dateStr, amount: instAmt, txId: tx.id }); 
+                } 
+            }); 
+            const grouped = {}; 
+            globalSchedule.forEach(item => { 
+                if(!grouped[item.dateStr]) grouped[item.dateStr] = { date: item.date, amount: 0, items: 0 }; 
+                grouped[item.dateStr].amount += item.amount; grouped[item.dateStr].items += 1; 
+            }); 
+            return Object.values(grouped).sort((a,b) => a.date - b.date); 
+        }
+
+        function renderAfterpay() { 
+            const apTx = state.tx.filter(t => t.type === 'afterpay'); 
+            const activeAp = apTx.filter(t => (t.apPaid || 0) < 4); 
+            
+            const pendingTotal = activeAp.reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0); 
+            document.getElementById('ap-total-pending').innerText = fmt.format(pendingTotal); 
+            document.getElementById('ap-available').innerText = fmt.format(Math.max(0, (state.settings.apLimit || 0) - pendingTotal)); 
+            
+            const schedule = calculateAfterpaySchedules(); 
+            const recentInc = state.tx.filter(t => t.type === 'income' && new Date(t.date) >= new Date(new Date().getTime() - 30 * 86400000)).reduce((s,t) => s + t.amount, 0); 
+            const weeklyInc = recentInc / 4.28; 
+            const nextPaymentAmount = schedule.length > 0 ? schedule[0].amount : 0; 
+            
+            document.getElementById('aps-weekly-inc').innerText = fmt.format(weeklyInc); 
+            const apRatio = weeklyInc > 0 ? ((nextPaymentAmount / weeklyInc) * 100).toFixed(1) : 0; 
+            document.getElementById('aps-ratio').innerText = apRatio + "%"; 
+            document.getElementById('aps-narrative').innerHTML = `El motor <i>Pay in 4</i> registra <b>${activeAp.length}</b> compras activas. Tu pago más próximo requiere <b>${fmt.format(nextPaymentAmount)}</b> de liquidez, impactando <b>${apRatio}%</b> tu ingreso semanal estimado (${fmt.format(weeklyInc)}).`; 
+            
+            const schedList = document.getElementById('ap-schedule-list'); 
+            if(schedule.length > 0) { 
+                document.getElementById('ap-last-date').innerText = schedule[schedule.length - 1].date.toLocaleDateString('es-CO', {day: 'numeric', month: 'short', year: 'numeric'}); 
+                schedList.innerHTML = schedule.map((s, idx) => `<div class="flex justify-between items-center p-4 bg-slate-50/50 rounded-2xl border ${idx === 0 ? 'border-teal-400 bg-teal-50' : 'border-slate-100/50'}"><div><p class="text-xs font-black theme-text">${s.date.toLocaleDateString('es-CO', {weekday: 'long', day: 'numeric', month: 'short'})}</p><p class="text-[9px] font-bold uppercase text-slate-400 mt-1">${s.items} Cuotas a debitar</p></div><p class="text-sm font-black ${idx === 0 ? 'text-teal-600' : 'theme-text'}">${fmt.format(s.amount)}</p></div>`).join(''); 
+            } else { 
+                document.getElementById('ap-last-date').innerText = "Todo al Día"; 
+                schedList.innerHTML = `<p class="text-center text-[10px] uppercase font-bold text-slate-400 py-4 italic">No tienes pagos programados</p>`; 
+            } 
+            
+            const actList = document.getElementById('ap-active-list'); 
+            if(activeAp.length > 0) { 
+                activeAp.sort((a,b) => new Date(b.date) - new Date(a.date)); 
+                actList.innerHTML = activeAp.map(tx => `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm"><div class="flex justify-between items-center mb-3"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center"><i class="fa-solid fa-bag-shopping text-[10px]"></i></div><div><p class="text-[11px] font-black uppercase theme-text">${tx.note}</p><p class="text-[8px] font-bold text-slate-400 uppercase">${tx.cat.substring(2)}</p></div></div><div class="text-right"><p class="text-xs font-black theme-text">${fmt.format(tx.amount)}</p><p class="text-[8px] font-black uppercase text-teal-500">${tx.apFreq === 'weekly' ? 'Semanal' : 'Quincenal'}</p></div></div><div class="flex items-center gap-3"><div class="flex-1 h-1.5 bg-slate-100/50 rounded-full overflow-hidden"><div class="h-full bg-teal-400" style="width: ${((tx.apPaid || 0) / 4) * 100}%"></div></div><span class="text-[9px] font-black uppercase text-slate-400">${tx.apPaid || 0} / 4 Pagos</span></div></div>`).join(''); 
+            } else { 
+                actList.innerHTML = `<p class="text-center text-[10px] uppercase font-bold text-slate-400 py-4 italic">Sin compras vigentes</p>`; 
+            }
+
+            const ctx = document.getElementById('ap-chart-cat').getContext('2d');
+            if(charts.apCat) charts.apCat.destroy();
+            const grp = {};
+            apTx.forEach(t => { grp[t.note] = (grp[t.note]||0) + t.amount; }); 
+            charts.apCat = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: Object.keys(grp), datasets: [{ data: Object.values(grp), backgroundColor: '#14b8a6', borderRadius: 6 }] },
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} }
+            });
+        }
+
+        // --- HISTORIAL CUENTAS ---
+        let currentHistAccId = null;
+        let currentHistPeriod = 'all';
+
+        function openAccountHistory(id) {
+            const acc = state.accounts.find(a => a.id === id);
+            if(!acc) return;
+            currentHistAccId = id;
+            document.getElementById('account-history-modal').classList.remove('hidden');
+            document.getElementById('hist-acc-name').innerText = acc.name;
+            document.getElementById('hist-acc-balance').innerText = fmt.format(acc.balance);
+            setHistFilter('all');
+        }
+
+        function closeAccountHistory() {
+            document.getElementById('account-history-modal').classList.add('hidden');
+            currentHistAccId = null;
+        }
+
+        function setHistFilter(period) {
+            currentHistPeriod = period;
+            ['all', '30d', 'month', 'year'].forEach(p => {
+                const el = document.getElementById('hf-' + p);
+                if(el) el.classList.remove('active');
+            });
+            const elAct = document.getElementById('hf-' + period);
+            if(elAct) elAct.classList.add('active');
+            renderAccountHistoryList();
+        }
+
+        function renderAccountHistoryList() {
+            if(!currentHistAccId) return;
+            const listCont = document.getElementById('hist-acc-list');
+            const now = new Date();
+            let accTx = state.tx.filter(t => t.accId === currentHistAccId);
+            accTx = accTx.filter(t => { const d = new Date(t.date); if(currentHistPeriod === '30d') return d >= new Date(now.getTime() - 30 * 86400000); if(currentHistPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); if(currentHistPeriod === 'year') return d.getFullYear() === now.getFullYear(); return true; });
+            accTx.sort((a,b) => new Date(b.date) - new Date(a.date));
+            if(accTx.length === 0) { listCont.innerHTML = `<div class="text-center p-8 bg-slate-50/50 rounded-2xl border border-slate-100/50"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Sin movimientos</p></div>`; return; }
+            listCont.innerHTML = accTx.map(t => { const isInc = t.type === 'income'; const isExpOrAp = t.type === 'expense' || t.type === 'afterpay'; const sign = isExpOrAp ? '-' : '+'; const colorText = isInc ? 'theme-val-inc' : isExpOrAp ? 'theme-val-exp' : 'theme-text'; const iconBg = isInc ? 'bg-emerald-50 text-emerald-600' : isExpOrAp ? 'bg-slate-100/50 text-slate-600' : 'bg-indigo-50 text-indigo-600'; return `<div class="theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iconBg}"><i class="fa-solid ${isInc?'fa-arrow-up':isExpOrAp?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO', {day:'2-digit', month:'short', year:'numeric'})} • ${t.cat.substring(2)}</p></div></div><p class="font-black text-sm ${colorText}">${sign}$${fmt.format(t.amount)}</p></div>`; }).join('');
+        }
+
+        // --- DIRECTIVA & FINANZAS PRO ---
+        function renderReport() { 
+            const now = new Date();
+            const last90Days = new Date(now.getTime() - 90 * 86400000);
+            const last30Days = new Date(now.getTime() - 30 * 86400000);
+
+            const totalAssets = state.accounts.filter(a => a.type !== 'credit').reduce((s,a) => s + a.balance, 0);
+            const creditCardDebt = state.accounts.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0);
+            
+            const activeLoans = state.loans.filter(l => !l.isBNPL);
+            let loanDebt = 0;
+            let monthlyDebtService = 0;
+            activeLoans.forEach(l => {
+                const P = l.total; const r = l.rate / 100; const n = l.term;
+                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                monthlyDebtService += A;
+
+                const startDate = new Date(l.date);
+                let monthsPassed = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+                if(monthsPassed < 0) monthsPassed = 0;
+                if(monthsPassed > n) monthsPassed = n;
+                
+                let balance = P;
+                for (let i = 1; i <= monthsPassed; i++) {
+                    const interest = balance * r;
+                    balance -= (A - interest);
+                }
+                loanDebt += Math.max(0, balance);
+            });
+
+            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
+            const pendingAp = apTx.reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0);
+
+            const totalLiabilities = Math.abs(creditCardDebt) + loanDebt + pendingAp;
+
+            const recentTx = state.tx.filter(t => new Date(t.date) >= last90Days && t.type !== 'afterpay');
+            const recentInc = recentTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
+            const recentExp = recentTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+            
+            const retentionRate = recentInc > 0 ? (((recentInc - recentExp) / recentInc) * 100).toFixed(1) : 0;
+            const monthlyIncAvg = recentInc / 3;
+
+            const debtToIncome = monthlyIncAvg > 0 ? ((monthlyDebtService / monthlyIncAvg) * 100).toFixed(1) : 0;
+
+            document.getElementById('rep-assets').innerText = fmt.format(totalAssets);
+            document.getElementById('rep-liabilities').innerText = fmt.format(totalLiabilities);
+            document.getElementById('rep-savings').innerText = retentionRate + "%";
+            document.getElementById('rep-health').innerText = debtToIncome + "%";
+            
+            document.getElementById('rep-savings').className = `text-lg font-black tabular-nums ${retentionRate >= 20 ? 'theme-val-inc' : retentionRate > 0 ? 'text-amber-500' : 'theme-val-exp'}`;
+            document.getElementById('rep-health').className = `text-lg font-black tabular-nums ${debtToIncome <= 30 ? 'theme-val-inc' : debtToIncome <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
+
+            const veryRecentExp = state.tx.filter(t => t.type === 'expense' && new Date(t.date) >= last30Days);
+            const catGroup = {};
+            veryRecentExp.forEach(t => catGroup[t.cat] = (catGroup[t.cat]||0) + t.amount);
+            const topCategory = Object.keys(catGroup).sort((a,b) => catGroup[b] - catGroup[a])[0];
+            const topAmount = topCategory ? catGroup[topCategory] : 0;
+            const topPerc = (recentExp/3) > 0 ? ((topAmount / (recentExp/3)) * 100).toFixed(1) : 0;
+
+            let solvencyText = totalAssets > totalLiabilities 
+                ? `La estructura patrimonial demuestra solvencia positiva, cubriendo los pasivos en un <b>${((totalAssets/Math.max(1, totalLiabilities))*100).toFixed(0)}%</b>.` 
+                : `Se observa una situación de sobre-apalancamiento, donde los pasivos superan a los activos líquidos e inversiones actuales.`;
+
+            let dtiText = debtToIncome > 40 
+                ? `El índice de Carga Financiera (DTI) se encuentra en nivel <b>crítico (${debtToIncome}%)</b>. Se recomienda no adquirir nuevas deudas hasta liquidar o refinanciar las actuales.` 
+                : `La relación Deuda-Ingreso es <b>saludable (${debtToIncome}%)</b>, permitiendo margen de maniobra para flujo libre.`;
+
+            document.getElementById('rep-narrative').innerHTML = `
+                <p><b>Análisis de Solvencia:</b> Los activos consolidados ascienden a ${fmt.format(totalAssets)} frente a unos pasivos totales de ${fmt.format(totalLiabilities)}. ${solvencyText}</p>
+                <p><b>Eficiencia Operativa:</b> Durante el último trimestre, la tasa de retención (Ahorro Libre) se ubicó en <b>${retentionRate}%</b>. ${dtiText}</p>
+            `;
+
+            let actionPlan = "";
+            if (topCategory) {
+                const savingPotential = topAmount * 0.15; 
+                actionPlan = `<p>Se ha detectado una concentración inusual de salidas de caja en la categoría <b>'${topCategory.substring(2)}'</b>, representando el <b>${topPerc}%</b> del gasto del último mes.</p>
+                              <p><b>Optimización:</b> Establecer un control riguroso o tope presupuestal sobre esta categoría. Una reducción del <b>15%</b> en este rubro liberaría <b>${fmt.format(savingPotential)}</b> mensuales, los cuales pueden ser inyectados directamente a abonos a capital de deuda (Método Bola de Nieve) o a fondos de inversión indexados para maximizar el ROE personal.</p>`;
+            } else {
+                actionPlan = "<p>El flujo operativo se encuentra distribuido homogéneamente. Se sugiere mantener el ritmo actual e incrementar las aportaciones al portafolio de inversión.</p>";
+            }
+            document.getElementById('rep-action-plan').innerHTML = actionPlan;
+
+            const ctxTrend = document.getElementById('report-chart-trend').getContext('2d');
+            if(charts.reportTrend) charts.reportTrend.destroy();
+            
+            const labelsTrend = []; const dataInc = []; const dataExp = [];
+            
+            for (let i = 5; i >= 0; i--) {
+                const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                labelsTrend.push(targetDate.toLocaleDateString('es-CO', { month: 'short' }).toUpperCase());
+
+                const mTx = state.tx.filter(t => {
+                    const d = new Date(t.date);
+                    return d.getMonth() === targetDate.getMonth() && d.getFullYear() === targetDate.getFullYear() && t.type !== 'afterpay';
+                });
+                dataInc.push(mTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0));
+                dataExp.push(mTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0));
+            }
+
+            charts.reportTrend = new Chart(ctxTrend, {
+                type: 'line',
+                data: {
+                    labels: labelsTrend,
+                    datasets: [
+                        { label: 'Ingresos', data: dataInc, borderColor: state.theme.inc, tension: 0.4, borderWidth: 3 },
+                        { label: 'Gastos', data: dataExp, borderColor: state.theme.exp, tension: 0.4, borderWidth: 3, borderDash: [5, 5] }
+                    ]
+                },
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{display:false}, x:{grid:{display:false}, ticks:{font:{size:9, weight:'bold'}}}} }
+            });
+
+            const ctxVs = document.getElementById('report-chart-vs').getContext('2d');
+            if(charts.reportVs) charts.reportVs.destroy();
+
+            const allRecentExp = state.tx.filter(t => t.type === 'expense' && new Date(t.date) >= last90Days);
+            let basicExp = 0, discExp = 0, debtExp = 0;  
+
+            allRecentExp.forEach(t => {
+                if (t.cat.includes('Vivienda') || t.cat.includes('Comida') || t.cat.includes('Transporte') || t.cat.includes('Salud')) basicExp += t.amount;
+                else if (t.cat.includes('Pago Deuda')) debtExp += t.amount;
+                else discExp += t.amount;
+            });
+
+            charts.reportVs = new Chart(ctxVs, {
+                type: 'bar',
+                data: {
+                    labels: ['Básicos (Fijos)', 'Discrecional', 'Deuda (Bancos)'],
+                    datasets: [{
+                        data: [basicExp, discExp, debtExp],
+                        backgroundColor: ['#3b82f6', '#f59e0b', state.theme.exp],
+                        borderRadius: 8
+                    }]
+                },
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{display:false}, x:{grid:{display:false}, ticks:{font:{size:10, weight:'bold'}}}} }
+            });
+        }
+
+        // --- FINANZAS PRO ---
+        function openFinanceReport(type) { 
+            document.getElementById('finances-menu').classList.add('hidden'); 
+            document.getElementById('finances-detail').classList.remove('hidden'); 
+            const cont = document.getElementById('fin-det-content'); 
+
+            const now = new Date();
+            const currentYearTx = state.tx.filter(t => new Date(t.date).getFullYear() === now.getFullYear() && t.type !== 'afterpay');
+            
+            const currentAssets = state.accounts.filter(a => a.type === 'liquid').reduce((s,a) => s + a.balance, 0);
+            const nonCurrentAssets = state.accounts.filter(a => a.type === 'investment').reduce((s,a) => s + a.balance, 0);
+            const totalAssets = currentAssets + nonCurrentAssets;
+
+            const currentLiabilities = Math.abs(state.accounts.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0)) + 
+                state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4).reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0);
+            
+            let nonCurrentLiabilities = 0;
+            state.loans.filter(l => !l.isBNPL).forEach(l => {
+                const P = l.total; const r = l.rate / 100; const n = l.term;
+                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                let balance = P;
+                let monthsPassed = (now.getFullYear() - new Date(l.date).getFullYear()) * 12 + (now.getMonth() - new Date(l.date).getMonth());
+                for (let i = 1; i <= Math.max(0, Math.min(n, monthsPassed)); i++) balance -= (A - (balance * r));
+                nonCurrentLiabilities += Math.max(0, balance);
+            });
+            const totalLiabilities = currentLiabilities + nonCurrentLiabilities;
+            const equity = totalAssets - totalLiabilities;
+
+            if (type === 'balance') {
+                document.getElementById('fin-det-title').innerText = "Balance General";
+                cont.innerHTML = `
+                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                        <h3 class="text-[10px] font-black uppercase text-blue-500 tracking-widest border-b border-slate-100/50 pb-2 mb-4">Activos (Lo que tienes)</h3>
+                        <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Liquidez (Corriente)</p><p class="text-sm font-mono font-bold theme-text">${fmt.format(currentAssets)}</p></div>
+                        <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Inversiones (No Corriente)</p><p class="text-sm font-mono font-bold theme-text">${fmt.format(nonCurrentAssets)}</p></div>
+                        <div class="flex justify-between items-center bg-blue-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-blue-800">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt.format(totalAssets)}</p></div>
+                    </div>
+                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                        <h3 class="text-[10px] font-black uppercase text-red-500 tracking-widest border-b border-slate-100/50 pb-2 mb-4">Pasivos (Lo que debes)</h3>
+                        <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Corto Plazo (TC/Afterpay)</p><p class="text-sm font-mono font-bold theme-text">${fmt.format(currentLiabilities)}</p></div>
+                        <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Largo Plazo (Créditos)</p><p class="text-sm font-mono font-bold theme-text">${fmt.format(nonCurrentLiabilities)}</p></div>
+                        <div class="flex justify-between items-center bg-red-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-red-800">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt.format(totalLiabilities)}</p></div>
+                    </div>
+                    <div class="bg-slate-900 text-white p-6 rounded-[2rem] shadow-lg flex justify-between items-center">
+                        <div><p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto</p><p class="text-[8px] opacity-50 uppercase">Activos - Pasivos</p></div>
+                        <p class="text-xl font-black ${equity >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt.format(equity)}</p>
+                    </div>
+                `;
+            } else if (type === 'pnl') {
+                document.getElementById('fin-det-title').innerText = "Estado de Resultados";
+                const inc = currentYearTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                const exp = currentYearTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+                const netIncome = inc - exp;
+                
+                cont.innerHTML = `
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center mb-2">Acumulado Año Actual (YTD)</p>
+                    <div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden">
+                        <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-sm font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-base font-mono font-bold theme-text">${fmt.format(inc)}</p></div>
+                        <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-sm font-black uppercase theme-val-exp">Gastos Operativos</p><p class="text-base font-mono font-bold theme-text">${fmt.format(exp)}</p></div>
+                        <div class="p-6 bg-slate-50 flex justify-between items-center">
+                            <div><p class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Utilidad Neta</p></div>
+                            <p class="text-xl font-black ${netIncome >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt.format(netIncome)}</p>
+                        </div>
+                    </div>
+                `;
+            } else if (type === 'ratios') {
+                document.getElementById('fin-det-title').innerText = "KPIs Financieros";
+                
+                const ratioLiquidez = currentLiabilities > 0 ? (currentAssets / currentLiabilities).toFixed(2) : '∞';
+                const ratioEndeudamiento = totalAssets > 0 ? ((totalLiabilities / totalAssets) * 100).toFixed(1) : 0;
+                
+                const mInc = currentYearTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                const mExp = currentYearTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+                const margenUtilidad = mInc > 0 ? ((mInc - mExp) / mInc * 100).toFixed(1) : 0;
+
+                cont.innerHTML = `
+                    <div class="grid grid-cols-1 gap-4">
+                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                            <div class="flex justify-between items-start mb-2">
+                                <div><h3 class="text-xs font-black uppercase theme-text">Ratio de Liquidez Corriente</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Activos Corrientes / Pasivos Corrientes</p></div>
+                                <p class="text-lg font-black ${ratioLiquidez >= 1.5 ? 'theme-val-inc' : ratioLiquidez >= 1 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${ratioLiquidez}x</p>
+                            </div>
+                            <p class="text-[10px] text-slate-500 font-medium">Capacidad de pagar tus deudas a corto plazo. Ideal > 1.5x.</p>
+                        </div>
+                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                            <div class="flex justify-between items-start mb-2">
+                                <div><h3 class="text-xs font-black uppercase theme-text">Ratio de Endeudamiento</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Total Pasivos / Total Activos</p></div>
+                                <p class="text-lg font-black ${ratioEndeudamiento <= 30 ? 'theme-val-inc' : ratioEndeudamiento <= 50 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${ratioEndeudamiento}%</p>
+                            </div>
+                            <p class="text-[10px] text-slate-500 font-medium">Porcentaje de tus activos que pertenecen a los bancos. Ideal < 30%.</p>
+                        </div>
+                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                            <div class="flex justify-between items-start mb-2">
+                                <div><h3 class="text-xs font-black uppercase theme-text">Margen de Utilidad (Ahorro)</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Utilidad Neta YTD / Ingresos YTD</p></div>
+                                <p class="text-lg font-black ${margenUtilidad >= 20 ? 'theme-val-inc' : margenUtilidad > 0 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${margenUtilidad}%</p>
+                            </div>
+                            <p class="text-[10px] text-slate-500 font-medium">Efectividad para convertir ingresos en riqueza retenida. Ideal > 20%.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        function closeFinanceReport() { document.getElementById('finances-detail').classList.add('hidden'); document.getElementById('finances-menu').classList.remove('hidden'); }
+
+        // --- BACKUP ---
+        function renderSettingsTab() {
+            document.getElementById('set-ap-limit').value = state.settings.apLimit;
+            document.getElementById('set-ap-day').value = state.settings.apPayDay;
+            document.getElementById('set-theme-bg').value = state.theme.bg;
+            document.getElementById('set-theme-card').value = state.theme.card;
+            document.getElementById('set-theme-text').value = state.theme.text;
+            document.getElementById('set-theme-inc').value = state.theme.inc;
+            document.getElementById('set-theme-exp').value = state.theme.exp;
+            setCatManageType('income');
+        }
+        function exportBackup() { try { const dataStr = JSON.stringify(state, null, 2); const blob = new Blob([dataStr], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Nexus_Backup_${new Date().toISOString().split('T')[0]}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); } catch (err) { alert("Error al exportar."); } }
+        function importBackup(event) { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const importedState = JSON.parse(e.target.result); if (importedState && importedState.tx) { state = importedState; saveState(); alert("✅ Respaldo importado."); location.reload(); } else alert("❌ Archivo incorrecto."); } catch (err) { alert("❌ Error al leer el JSON."); } }; reader.readAsText(file); }
+        function resetFactory() { if(confirm("ALERTA: Se borrará toda tu información permanentemente. ¿Continuar?")) { localStorage.removeItem('nexus_v50_db'); location.reload(); } }
+
+        // --- MOTOR DE SERVICE WORKER INLINE (FASE 3) ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                const swCode = `
+                    const CACHE_NAME = 'nexus-v51-cache';
+                    const urlsToCache = [
+                        '/',
+                        'https://cdn.tailwindcss.com',
+                        'https://cdn.jsdelivr.net/npm/chart.js',
+                        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+                    ];
+                    
+                    self.addEventListener('install', event => {
+                        event.waitUntil(
+                            caches.open(CACHE_NAME).then(cache => {
+                                // No bloqueamos la instalación si falla algún fetch externo
+                                return cache.addAll(urlsToCache).catch(err => console.warn('Cache warning:', err));
+                            })
+                        );
+                    });
+                    
+                    self.addEventListener('fetch', event => {
+                        event.respondWith(
+                            caches.match(event.request).then(response => {
+                                return response || fetch(event.request).catch(() => {
+                                    console.log('No hay conexión y el recurso no está cacheado:', event.request.url);
+                                });
+                            })
+                        );
+                    });
+                `;
+                const blob = new Blob([swCode], { type: 'application/javascript' });
+                const swUrl = URL.createObjectURL(blob);
+                
+                navigator.serviceWorker.register(swUrl).then(registration => {
+                    console.log('Arquitectura Offline Activa: SW Inyectado correctamente.', registration.scope);
+                }).catch(err => console.log('Bypass SW Local origin policy', err));
+            });
+        }
+    </script>
+</body>
+</html>
