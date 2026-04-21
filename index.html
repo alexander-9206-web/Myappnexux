@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Nexus Finance Omni v51.5</title>
+    <title>Nexus Finance Omni v52.0</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -91,7 +91,7 @@
     <!-- CABECERA DE CONTEXTO TEMPORAL Y MULTIDIVISA -->
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
         <div class="px-6 py-5 flex justify-between items-center">
-            <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span id="version-tag" class="text-slate-400">v51.5</span></h1>
+            <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span id="version-tag" class="text-slate-400">v52.0</span></h1>
             <div class="flex gap-4">
                 <select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1 rounded-full outline-none cursor-pointer">
                     <option value="COP">COP</option>
@@ -531,7 +531,7 @@
         <button onclick="openLoanForm()" class="w-14 h-14 bg-amber-500 text-white rounded-full shadow-2xl flex items-center justify-center text-xl active:scale-90 transition-transform"><i class="fa-solid fa-file-signature"></i></button>
     </div>
 
-    <!-- MÓDULO SCANNER (OCR PDF / IMAGEN) -->
+    <!-- MÓDULO SCANNER (OCR PDF / IMAGEN REAL INTEGRADO CON IA) -->
     <div id="scanner-modal" class="fixed inset-0 z-50 hidden bg-slate-900/80 backdrop-blur-sm flex flex-col justify-end sm:items-center sm:justify-center">
         <div class="theme-card w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto flex flex-col">
             <div class="flex justify-between items-center mb-2 shrink-0">
@@ -555,14 +555,14 @@
                 </div>
                 <div class="bg-slate-900 text-white p-4 rounded-xl text-[9px] uppercase tracking-widest font-medium flex gap-3 items-center">
                     <i class="fa-solid fa-terminal text-emerald-400"></i>
-                    <p>En el entorno PWA local, este módulo simula una llamada a la API VisionKit/OpenAI para extraer el JSON estructurado. Sube cualquier archivo para ver la demo.</p>
+                    <p>Motor Neural Activado. El documento será codificado en Base64 y procesado para extraer valores, cuotas, intereses y categorías reales.</p>
                 </div>
             </div>
 
             <!-- Paso 2: Procesando -->
             <div id="scan-step-2" class="hidden flex-col items-center justify-center py-12 space-y-4">
                 <i class="fa-solid fa-circle-notch fa-spin text-4xl text-purple-500"></i>
-                <p class="text-xs font-black uppercase tracking-widest text-slate-500 animate-pulse" id="scan-status-text">Analizando Documento...</p>
+                <p class="text-xs font-black uppercase tracking-widest text-slate-500 animate-pulse" id="scan-status-text">Codificando Documento...</p>
             </div>
 
             <!-- Paso 3: Resultados de Extracción -->
@@ -578,7 +578,7 @@
                                 <th class="px-4 py-3 text-right">Valor Venta</th>
                                 <th class="px-4 py-3 text-center">Cuotas (Pag/Tot)</th>
                                 <th class="px-4 py-3 text-right">Interés</th>
-                                <th class="px-4 py-3 text-right text-red-500">Saldo Pendiente</th>
+                                <th class="px-4 py-3 text-right text-red-500">Saldo Pend.</th>
                             </tr>
                         </thead>
                         <tbody id="scan-results-table" class="divide-y divide-slate-100">
@@ -755,6 +755,9 @@
     </div>
 
     <script>
+        // --- API GEMINI INTEGRADA ---
+        const apiKey = ""; // Llenado dinámicamente en tiempo de ejecución
+        
         // --- BASE DE DATOS Y ESTADO MULTI-DIVISA ---
         const DEFAULT_CATEGORIES = {
             income: ["💰 Salario", "💼 Freelance", "📈 Inversión", "🏦 Intereses", "🔄 Varios"],
@@ -2131,31 +2134,108 @@
 
         function closeScannerModal() { document.getElementById('scanner-modal').classList.add('hidden'); }
 
-        function processScanFile(e) {
-            if(!e.target.files[0]) return;
+        async function callGeminiVisionAPI(base64Data, mimeType) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            const expenseCats = state.categories.expense.join(", ");
+            const incomeCats = state.categories.income.join(", ");
+            const catPrompt = `Asigna la categoría más adecuada de esta lista. Gastos: ${expenseCats}. Ingresos: ${incomeCats}.`;
+
+            const payload = {
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: `Extrae todas las transacciones de este extracto bancario o recibo. Ignora logos, texto publicitario y encabezados irrelevantes. Retorna estrictamente un arreglo de objetos JSON. ${catPrompt}` },
+                        { inlineData: { mimeType: mimeType, data: base64Data } }
+                    ]
+                }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                date: { type: "STRING", description: "Formato YYYY-MM-DD" },
+                                desc: { type: "STRING", description: "Nombre del comercio o concepto" },
+                                amount: { type: "NUMBER", description: "Valor total de la transacción" },
+                                cat: { type: "STRING", description: "Categoría asignada" },
+                                isCredit: { type: "BOOLEAN", description: "True si es una compra a cuotas o tarjeta de crédito" },
+                                paidQuotas: { type: "NUMBER", description: "Número de cuotas ya pagadas (o 0)" },
+                                totalQuotas: { type: "NUMBER", description: "Número total de cuotas diferidas (o 0)" },
+                                interest: { type: "NUMBER", description: "Interés cobrado en esta transacción (o 0)" },
+                                pending: { type: "NUMBER", description: "Saldo pendiente de pago (o 0)" }
+                            },
+                            required: ["date", "desc", "amount", "isCredit"]
+                        }
+                    }
+                }
+            };
+
+            const delays = [1000, 2000, 4000, 8000, 16000];
+            for (let attempt = 0; attempt <= 5; attempt++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    return JSON.parse(text);
+                } catch (error) {
+                    if (attempt === 5) {
+                        alert("Error de conexión con el Motor de IA. Verifica tu documento y red.");
+                        return null;
+                    }
+                    await new Promise(r => setTimeout(r, delays[attempt]));
+                }
+            }
+        }
+
+        async function processScanFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
             document.getElementById('scan-step-1').classList.add('hidden');
             document.getElementById('scan-step-2').classList.remove('hidden');
             document.getElementById('scan-step-2').classList.add('flex');
+            document.getElementById('scan-status-text').innerText = "Convirtiendo documento (Base64)...";
 
-            // Simulación de latencia de red para API OCR Vision
-            setTimeout(() => {
-                document.getElementById('scan-status-text').innerText = "Extrayendo Tablas y Conceptos...";
-            }, 1000);
+            const reader = new FileReader();
+            reader.onload = async function(event) {
+                const base64String = event.target.result;
+                const [header, data] = base64String.split(',');
+                const mimeType = header.split(':')[1].split(';')[0];
 
-            setTimeout(() => {
-                document.getElementById('scan-step-2').classList.add('hidden');
-                document.getElementById('scan-step-2').classList.remove('flex');
-                document.getElementById('scan-step-3').classList.remove('hidden');
+                document.getElementById('scan-status-text').innerText = "Red Neuronal Analizando Documento...";
                 
-                // Generación de Datos Simulados Extraídos
-                const today = new Date();
-                tempScannedData = [
-                    { desc: "Uber Trip", amount: 15000, date: today.toISOString().split('T')[0], cat: "🚗 Transporte", isCredit: false },
-                    { desc: "Amazon Prime", amount: 28000, date: new Date(today.getTime() - 86400000).toISOString().split('T')[0], cat: "🍿 Ocio", isCredit: false },
-                    { desc: "Apple Store", amount: 4500000, date: new Date(today.getTime() - 86400000*2).toISOString().split('T')[0], cat: "🛍️ Compras", isCredit: true, paidQuotas: 2, totalQuotas: 12, interest: 95000, pending: 3750000 }
-                ];
-                renderScannedTable();
-            }, 3000);
+                const extractedData = await callGeminiVisionAPI(data, mimeType);
+                
+                if (extractedData && Array.isArray(extractedData) && extractedData.length > 0) {
+                    tempScannedData = extractedData.map(d => ({
+                        desc: d.desc || "Comercio Desconocido",
+                        amount: d.amount || 0,
+                        date: d.date || new Date().toISOString().split('T')[0],
+                        cat: d.cat || "🔄 Varios", 
+                        isCredit: !!d.isCredit,
+                        paidQuotas: d.paidQuotas || 0,
+                        totalQuotas: d.totalQuotas || 0,
+                        interest: d.interest || 0,
+                        pending: d.pending || 0
+                    }));
+                    
+                    document.getElementById('scan-step-2').classList.add('hidden');
+                    document.getElementById('scan-step-2').classList.remove('flex');
+                    document.getElementById('scan-step-3').classList.remove('hidden');
+                    renderScannedTable();
+                } else {
+                    alert("No se pudieron extraer transacciones estructuradas de este documento.");
+                    closeScannerModal();
+                }
+            };
+            reader.readAsDataURL(file);
         }
 
         function renderScannedTable() {
