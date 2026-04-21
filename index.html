@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Nexus Finance project v58.5</title>
+    <title>Nexus Finance Omni v58.6</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -80,10 +80,12 @@
         .numpad-key:active { background: #e2e8f0; transform: scale(0.95); }
         .numpad-modal-content { animation: slideUpNumpad 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
         
+        /* Timeline Classes */
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; }
         .timeline-item:last-child::before { display: none; }
         .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
 
+        /* Calendar Grid Classes */
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
         .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; font-size: 11px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;}
         .cal-cell.is-empty { background-color: transparent; }
@@ -148,7 +150,7 @@
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
         <div class="px-6 py-5 flex justify-between items-center">
             <div>
-                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.4</span></h1>
+                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.5</span></h1>
                 <p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p>
             </div>
             <div class="flex gap-4">
@@ -375,6 +377,7 @@
                 </div>
             </div>
 
+            <!-- Proyección Anual -->
             <div id="stat-proj-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6">
                 <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-chart-line text-emerald-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Análisis y Proyección</h3></div>
                 <div class="overflow-x-auto hide-scrollbar">
@@ -389,6 +392,7 @@
                 </div>
             </div>
             
+            <!-- Evolución Anual -->
             <div id="stat-year-table-container" class="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6 hidden">
                 <div class="flex items-center gap-3 border-b border-white/10 pb-4"><i class="fa-solid fa-calendar-days text-indigo-400"></i><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-300">Evolución Mensual del Año</h3></div>
                 <div class="overflow-x-auto hide-scrollbar">
@@ -420,7 +424,7 @@
                 <div id="loans-list" class="space-y-4 pb-20"></div>
             </div>
 
-            <!-- Detalle de Deuda -->
+            <!-- Detalle de Deuda (Amortización) -->
             <div id="loans-view-detail" class="hidden view-transition space-y-6 pb-20">
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-4">
@@ -453,7 +457,7 @@
             </div>
         </section>
         
-        <!-- TAB 6: AFTERPAY -->
+        <!-- TAB 6: AFTERPAY ENGINE -->
         <section id="tab-afterpay" class="tab-content space-y-8">
             <div class="flex items-center gap-4"><button onclick="switchTab('home')" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase text-teal-600 tracking-tighter">Afterpay Hub</h2></div>
             
@@ -565,10 +569,8 @@
                 </div>
                 <button onclick="openAccountModal()" class="w-10 h-10 bg-slate-900 text-white rounded-full shadow-lg active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
             </div>
-            
-            <div class="space-y-6" id="acc-hub-list">
-                <!-- Se llenará dinámicamente agrupado por Divisa -->
-            </div>
+            <div class="grid grid-cols-3 gap-3" id="acc-hub-summary"></div>
+            <div id="acc-hub-list" class="space-y-6 pb-12"></div>
         </section>
 
         <!-- TAB 10: CONFIGURACIÓN -->
@@ -956,7 +958,7 @@
         </div>
     </div>
 
-    <!-- SCRIPT DE ARQUITECTURA MAESTRA -->
+    <!-- SCRIPT DE ARQUITECTURA MAESTRA DESCOMPRIMIDA -->
     <script>
         // ==========================================
         // 1. CONSTANTES GLOBALES Y ESTADO
@@ -968,7 +970,6 @@
             transfer: ["🔀 Entre Cuentas Propias", "⬇️ Retiro Efectivo", "⬆️ Depósito Bancario"]
         };
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
-        
         const EXCHANGE_RATES = { USD: 1, COP: 3900, EUR: 0.92, AUD: 1.53, GBP: 0.79, CAD: 1.35, JPY: 150, MXN: 17, BRL: 4.95 };
 
         let currentUser = null;
@@ -981,7 +982,7 @@
         let currentCatManageType = 'income';
         let currentHistAccId = null; 
         let currentHistPeriod = 'all';
-        let tempScannedData = null; // Modificado para manejar objeto con resumen
+        let tempScannedData = null;
 
         let scanTasks = [
             { id: 1, name: "Conexión Flash Instantánea", status: 'pending', p: 0 },
@@ -1086,7 +1087,6 @@
                 statsType: 'expense', activeCurrency: 'COP', calendarFilter: 'all'
             };
             
-            // Migración
             if (!state.settings.alertDays) state.settings.alertDays = 3;
             if (!state.settings.baseCurrency) state.settings.baseCurrency = 'COP';
             if (!state.calendarFilter) state.calendarFilter = 'all';
@@ -1154,28 +1154,21 @@
         function setContext(ctx) {
             state.context = ctx; 
             document.querySelectorAll('.v-btn').forEach(b => b.classList.remove('active')); 
-            
-            const btnCtx = document.getElementById('btn-' + ctx);
-            if (btnCtx) btnCtx.classList.add('active');
+            document.getElementById('btn-' + ctx).classList.add('active');
             
             if(ctx !== 'day') document.body.classList.add('is-red-mode'); 
             else document.body.classList.remove('is-red-mode');
             
-            const viewDay = document.getElementById('view-day');
-            const viewPeriod = document.getElementById('view-period');
-            const wealthTitle = document.getElementById('wealth-title');
-            const fabMain = document.getElementById('fab-main');
-
             if(ctx === 'day') { 
-                if (viewDay) viewDay.classList.remove('hidden'); 
-                if (viewPeriod) viewPeriod.classList.add('hidden'); 
-                if (state.activeTab !== 'loans' && fabMain) fabMain.classList.remove('hidden'); 
-                if (wealthTitle) wealthTitle.innerText = "Patrimonio Global Unificado"; 
+                document.getElementById('view-day').classList.remove('hidden'); 
+                document.getElementById('view-period').classList.add('hidden'); 
+                if(state.activeTab !== 'loans') { const f = document.getElementById('fab-main'); if (f) f.classList.remove('hidden'); } 
+                document.getElementById('wealth-title').innerText = "Patrimonio Global Unificado"; 
             } else { 
-                if (viewDay) viewDay.classList.add('hidden'); 
-                if (viewPeriod) viewPeriod.classList.remove('hidden'); 
-                if (fabMain) fabMain.classList.add('hidden'); 
-                if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; 
+                document.getElementById('view-day').classList.add('hidden'); 
+                document.getElementById('view-period').classList.remove('hidden'); 
+                const f = document.getElementById('fab-main'); if (f) f.classList.add('hidden'); 
+                document.getElementById('wealth-title').innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; 
             }
             
             state.periodFilter = { type: 'all', cat: 'all' }; 
@@ -1217,12 +1210,10 @@
                 if(id === 'loans') { 
                     fM.classList.add('hidden'); 
                     fL.classList.remove('hidden'); 
-                    
                     const vL = document.getElementById('loans-view-list'); 
                     const vD = document.getElementById('loans-view-detail'); 
                     if (vL) vL.classList.remove('hidden'); 
                     if (vD) vD.classList.add('hidden'); 
-                    
                     renderLoansList(); 
                 } else if (id === 'home' && state.context === 'day') { 
                     fM.classList.remove('hidden'); 
@@ -1233,7 +1224,6 @@
                 } 
             }
             
-            // Calls a los renderers específicos
             if(id === 'analysis') renderAnalysis(); 
             if(id === 'afterpay') renderAfterpay(); 
             if(id === 'report') renderReport(); 
@@ -1285,7 +1275,10 @@
             }
         }
         
-        function closeNumpad() { document.getElementById('numpad-modal').classList.add('hidden'); numpadTargetId = null; }
+        function closeNumpad() { 
+            document.getElementById('numpad-modal').classList.add('hidden'); 
+            numpadTargetId = null; 
+        }
         
         function numpadConfirm() { 
             if (numpadTargetId) { 
@@ -1392,15 +1385,11 @@
                 }
             });
             
-            const netWorthEl = document.getElementById('net-worth');
-            const baseCurrLabel = document.getElementById('base-curr-label');
-            const scoreEl = document.getElementById('nexus-score');
-            
-            if(netWorthEl) netWorthEl.innerText = fmt(uNW, bC); 
-            if(baseCurrLabel) baseCurrLabel.innerText = bC;
+            document.getElementById('net-worth').innerText = fmt(uNW, bC); 
+            document.getElementById('base-curr-label').innerText = bC;
             
             let scT = bC === 'COP' ? 25000000 : (bC === 'USD' ? 6500 : 6000); 
-            if(scoreEl) scoreEl.innerText = Math.floor(720 + (uNW/scT));
+            document.getElementById('nexus-score').innerText = Math.floor(720 + (uNW/scT));
             
             const aTx = getActiveTx(); 
             const cTx = getContextTx(aTx);
@@ -1408,11 +1397,8 @@
             const cI = cTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); 
             const cE = cTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
             
-            const totIncEl = document.getElementById('total-inc');
-            const totExpEl = document.getElementById('total-exp');
-            
-            if(totIncEl) totIncEl.innerText = "+" + fmt(cI); 
-            if(totExpEl) totExpEl.innerText = "-" + fmt(cE);
+            document.getElementById('total-inc').innerText = "+" + fmt(cI); 
+            document.getElementById('total-exp').innerText = "-" + fmt(cE);
             
             if(state.context === 'day') { 
                 renderAccounts(); 
@@ -1724,10 +1710,6 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
                         valor_cuota_mes: cleanNumber(t.valor_cuota_mes),
                         saldo_pendiente: cleanNumber(t.saldo_pendiente),
                         alerta_cotejo: Boolean(t.alerta_cotejo)
-                    })),
-                    resumen_mensual_proyectado: ensureArray(parsed.resumen_mensual_proyectado).map(m => ({
-                        mes: String(m.mes || ""),
-                        monto_estimado: cleanNumber(m.monto_estimado)
                     }))
                 };
 
@@ -1824,7 +1806,7 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
                     if(acc) acc.balance -= amt; 
                     
                     const unpaid = parseInt(d.cuotas_por_pagar) || 0;
-                    if(unpaid > 0 && d.saldo_pendiente > 0) { 
+                    if(d.isCredit && unpaid > 0 && d.saldo_pendiente > 0) { 
                         const eL = state.loans.find(l => l.name === d.descripcion && l.isCC && l.currency === state.activeCurrency); 
                         if (!eL) { 
                             state.loans.push({ 
@@ -1852,7 +1834,7 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
         }
 
         // ==========================================
-        // 9. GESTIÓN DE TRANSACCIONES (FORMS)
+        // 10. GESTIÓN DE TRANSACCIONES (FORMS)
         // ==========================================
         function openForm(type) { 
             toggleFab(); 
@@ -1922,7 +1904,7 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
         }
 
         // ==========================================
-        // 10. CALENDARIO DE PAGOS Y ALERTAS
+        // 11. CALENDARIO DE PAGOS Y ALERTAS
         // ==========================================
         function calculateAfterpaySchedules() { 
             const apTx = getActiveTx().filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4); 
@@ -2397,7 +2379,6 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
                 }
             }
         }
-        
         function setStatsType(type) { state.statsType = type; saveState(); renderAnalysis(); }
 
         // ==========================================
