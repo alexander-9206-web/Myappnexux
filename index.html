@@ -841,6 +841,50 @@
         const getActiveAccounts = () => state.accounts.filter(a => a.currency === state.activeCurrency);
         const getActiveTx = () => state.tx.filter(t => t.currency === state.activeCurrency);
         const getActiveLoans = () => state.loans.filter(l => l.currency === state.activeCurrency);
+
+        // NUEVA FUNCIÓN: Motor de Enriquecimiento Generativo (Cronología de Proyecciones)
+        function getEnrichedTx() {
+            let rawTx = [...getActiveTx()];
+            const now = new Date();
+            now.setHours(0,0,0,0);
+            
+            // 1. Proyectar Afterpay Futuro
+            const apTx = rawTx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
+            const payDay = state.settings.apPayDay || 5;
+            apTx.forEach(tx => {
+                const sD = getNextPayDate(new Date(tx.date), payDay);
+                const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
+                const iA = tx.amount / 4;
+                for(let i = (tx.apPaid || 0); i < 4; i++) {
+                    const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD));
+                    if (d > now) {
+                        rawTx.push({ id: 'proj_ap_'+tx.id+'_'+i, type: 'expense', amount: iA, cat: '🛍️ Cuota Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Proyectado] ${tx.cat}`, isProjected: true, currency: tx.currency });
+                    }
+                }
+            });
+            
+            // 2. Proyectar Préstamos Futuros
+            getActiveLoans().forEach(l => {
+                const P = l.total; const r = l.rate / 100; const n = l.term;
+                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                let nPD = new Date(l.date); nPD.setMonth(nPD.getMonth() + 1);
+                for(let i=0; i<n; i++) {
+                    let pD = new Date(nPD); pD.setMonth(pD.getMonth() + i);
+                    if (pD > now) {
+                        rawTx.push({ id: 'proj_loan_'+l.id+'_'+i, type: 'expense', amount: A, cat: '💳 Cuota Préstamo', accId: null, date: pD.toISOString(), note: `[Proyectado] ${l.name}`, isProjected: true, currency: l.currency });
+                    }
+                }
+            });
+
+            // 3. Proyectar Pagos de TC (Cuentas Crédito)
+            getActiveAccounts().filter(a => a.type === 'credit' && a.balance > 0).forEach(c => {
+                let pD = new Date(now.getFullYear(), now.getMonth(), c.payDay || 15);
+                if (pD <= now) pD.setMonth(pD.getMonth() + 1);
+                rawTx.push({ id: 'proj_cc_'+c.id, type: 'expense', amount: c.balance, cat: '💳 Pago TC', accId: c.id, date: pD.toISOString(), note: `[Proyectado] ${c.name}`, isProjected: true, currency: c.currency });
+            });
+
+            return rawTx;
+        }
         // 🔴 FIN FUNCIONES: Core Globals y Motores de Formato
         // =========================================================================================
 
@@ -942,35 +986,53 @@
         function updateDashboard() {
             let uNW = 0; 
             const bC = state.settings.baseCurrency;
+            let totAssets = 0; let totLiab = 0;
             
             state.accounts.forEach(a => { 
                 let bal = a.type === 'credit' ? -a.balance : a.balance; 
                 uNW += convertCurrency(bal, a.currency, bC); 
+                if (a.type === 'credit') totLiab += convertCurrency(a.balance, a.currency, bC);
+                else totAssets += convertCurrency(a.balance, a.currency, bC);
             });
+            state.loans.forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
             
-            document.getElementById('net-worth').innerText = fmt(uNW, bC); 
-            document.getElementById('base-curr-label').innerText = bC;
+            const netWorthEl = document.getElementById('net-worth');
+            const baseCurrLabel = document.getElementById('base-curr-label');
+            const scoreEl = document.getElementById('nexus-score');
+            const scoreModalVal = document.getElementById('score-modal-val');
             
-            let scT = bC === 'COP' ? 25000000 : (bC === 'USD' ? 6500 : 6000); 
-            const finalScore = Math.floor(720 + (uNW/scT));
+            if(netWorthEl) netWorthEl.innerText = fmt(uNW, bC); 
+            if(baseCurrLabel) baseCurrLabel.innerText = bC;
             
-            document.getElementById('nexus-score').innerText = finalScore;
-            document.getElementById('score-modal-val').innerText = finalScore;
+            // Algoritmo de Nexus Score Basado en Comportamiento Financiero
+            let scT = bC === 'COP' ? 1000000 : 250; 
+            let dynamicScore = 550 + (totAssets / scT) * 15 - (totLiab / scT) * 20;
+            if (totAssets > 0 && totLiab === 0) dynamicScore += 50; 
+            if (totLiab > totAssets * 1.5) dynamicScore -= 100;
             
-            const aTx = getActiveTx(); 
+            dynamicScore = Math.floor(Math.max(300, Math.min(850, dynamicScore)));
+            
+            if(scoreEl) scoreEl.innerText = dynamicScore;
+            if(scoreModalVal) scoreModalVal.innerText = dynamicScore;
+            
+            // Cambiado a getEnrichedTx() para obtener la vista real + generativa
+            const aTx = getEnrichedTx(); 
             const cTx = getContextTx(aTx);
             
             const cI = cTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); 
-            const cE = cTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+            const cE = cTx.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
             
-            document.getElementById('total-inc').innerText = "+" + fmt(cI); 
-            document.getElementById('total-exp').innerText = "-" + fmt(cE);
+            const totIncEl = document.getElementById('total-inc');
+            const totExpEl = document.getElementById('total-exp');
+            
+            if(totIncEl) totIncEl.innerText = "+" + fmt(cI); 
+            if(totExpEl) totExpEl.innerText = "-" + fmt(cE);
             
             if(state.context === 'day') { 
                 renderAccounts(); 
                 render7DaysChart(aTx); 
             } else { 
-                renderPeriodLineChart(cTx); 
+                renderPeriodChart(cTx); 
                 renderPeriodList(cTx); 
             }
         }
@@ -1085,24 +1147,43 @@
 
         function renderPeriodList(cTx) { 
             const list = document.getElementById('period-list'); 
+            if(!list) return;
+
             const fTx = cTx.filter(t => { 
                 if(t.type === 'afterpay') return false; 
                 if(state.periodFilter.type !== 'all' && t.type !== state.periodFilter.type) return false; 
                 if(state.periodFilter.cat !== 'all' && t.cat !== state.periodFilter.cat) return false; 
                 return true; 
-            }).sort((a,b) => new Date(b.date) - new Date(a.date)); 
+            }); 
+            fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             
-            list.innerHTML = fTx.map(t => `<div onclick="editTransaction('${t.id}')" class="cursor-pointer theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 hover:border-blue-300 transition-colors"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}"><i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[9px] font-bold opacity-40 theme-text">${new Date(t.date).toLocaleDateString('es-CO')} • ${t.cat.substring(2)}</p></div></div><p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount)}</p></div>`).join(''); 
+            list.innerHTML = fTx.map(t => {
+                const projBadge = t.isProjected ? `<span class="text-[8px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full ml-2 border border-amber-200">PROY.</span>` : '';
+                return `
+                <div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}">
+                            <i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i>
+                        </div>
+                        <div><p class="text-xs font-black uppercase theme-text flex items-center">${t.cat.substring(2)} ${projBadge}</p><p class="text-[9px] font-bold opacity-40 theme-text">${new Date(t.date).toLocaleDateString()}</p></div>
+                    </div>
+                    <p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount)}</p>
+                </div>
+            `}).join(''); 
             
             const sI = fTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); 
             const sE = fTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0); 
             
-            document.getElementById('period-sub-inc').innerText = fmt(sI); 
-            document.getElementById('period-sub-exp').innerText = fmt(sE); 
-            
-            const psEl = document.getElementById('period-subtotal'); 
-            psEl.innerText = fmt(sI - sE); 
-            psEl.className = `text-2xl font-black tabular-nums ${(sI - sE) >= 0 ? 'theme-text' : 'theme-val-exp'}`; 
+            const piEl = document.getElementById('period-sub-inc');
+            const peEl = document.getElementById('period-sub-exp');
+            const psEl = document.getElementById('period-subtotal');
+
+            if(piEl) piEl.innerText = fmt(sI); 
+            if(peEl) peEl.innerText = fmt(sE); 
+            if(psEl) {
+                psEl.innerText = fmt(sI - sE); 
+                psEl.className = `text-2xl font-black tabular-nums ${(sI - sE) >= 0 ? 'theme-text' : 'theme-val-exp'}`; 
+            }
         }
         // 🔴 FIN FUNCIONES: Dashboard & SSoT Linked
         // =========================================================================================
@@ -1154,46 +1235,47 @@
         }
 
         function renderDatabase() { 
-            const st = new Date(document.getElementById('db-filter-start').value); 
-            const en = new Date(document.getElementById('db-filter-end').value); 
-            en.setHours(23,59,59); 
+            const fsEl = document.getElementById('db-filter-start'); const feEl = document.getElementById('db-filter-end');
+            const ftEl = document.getElementById('db-filter-type'); const fcEl = document.getElementById('db-filter-cat');
+            if(!fsEl || !feEl || !ftEl || !fcEl) return;
+
+            const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); 
+            const tp = ftEl.value; const ct = fcEl.value; 
             
-            const tp = document.getElementById('db-filter-type').value; 
-            const ct = document.getElementById('db-filter-cat').value; 
-            
-            let fTx = getActiveTx().filter(t => { 
+            // Usamos la base de datos enriquecida (cronología real + proyectada)
+            let fTx = getEnrichedTx().filter(t => { 
                 const d = new Date(t.date); 
                 if(d < st || d > en) return false; 
                 if(tp !== 'all' && t.type !== tp) return false; 
                 if(ct !== 'all' && t.cat !== ct) return false; 
                 return true; 
-            }).sort((a,b) => new Date(b.date) - new Date(a.date)); 
+            }); 
+            fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             
-            document.getElementById('db-count').innerText = fTx.length; 
-            
+            const dcEl = document.getElementById('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
             const tV = fTx.reduce((s,t) => t.type==='income'? s+t.amount : (t.type==='expense'||t.type==='afterpay')? s-t.amount : s, 0); 
             const tE = document.getElementById('db-total'); 
-            tE.innerText = fmt(tV); 
-            tE.className = tV >= 0 ? "theme-val-inc" : "theme-val-exp"; 
+            if(tE) { tE.innerText = fmt(tV); tE.className = tV >= 0 ? "theme-val-inc" : "theme-val-exp"; }
             
-            const lC = document.getElementById('db-list'); 
-            if(fTx.length === 0) { 
-                lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase text-slate-400">0 Registros Encontrados</p></div>`; 
-                return; 
-            } 
+            const lC = document.getElementById('db-list'); if(!lC) return;
+            if(fTx.length === 0) { lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`; return; } 
             
             lC.innerHTML = fTx.map(t => { 
-                const iI = t.type === 'income'; 
-                const iE = t.type === 'expense' || t.type === 'afterpay'; 
+                const iI = t.type === 'income'; const iE = t.type === 'expense' || t.type === 'afterpay'; 
                 const cT = iI ? 'theme-val-inc' : iE ? 'theme-val-exp' : 'theme-text'; 
                 const iB = iI ? 'bg-emerald-50 text-emerald-600' : iE ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-600'; 
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 let dAmt = t.amount;
                 let suffix = '';
-                if(t.type === 'afterpay') { dAmt = t.amount / 4; suffix = ' (Cuota Periodo)'; }
+                if(t.type === 'afterpay' && !t.isProjected) { dAmt = t.amount / 4; suffix = ' (Cuota Periodo)'; }
 
-                return `<div onclick="editTransaction('${t.id}')" class="cursor-pointer theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 hover:border-blue-300 transition-all"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px]">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN}${suffix}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(dAmt)}</p><button onclick="deleteTx(event, '${t.id}')" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                const pBadge = t.isProjected ? `<span class="text-[8px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full ml-2 border border-amber-200">PROYECTADO</span>` : '';
+                const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`;
+                const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300';
+                const deleteAction = t.isProjected ? `alert('Registro predictivo vinculado a un pasivo. Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
+
+                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px] flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1 flex items-center">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN}${suffix} ${pBadge}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(dAmt)}</p><button onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         // 🔴 FIN FUNCIONES: DB Auditoría
@@ -1351,8 +1433,10 @@
         // 🟢 INICIO FUNCIONES: Directiva & Analítica
         // =========================================================================================
         function renderAnalysis() {
-            const contextTx = getContextTx(getActiveTx()).filter(t => t.type !== 'afterpay');
-            document.getElementById('stat-period-label').innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
+            // Cambiado a getEnrichedTx() para conectar Analítica con Base de Datos SSoT Cronológica Generativa
+            const contextTx = getContextTx(getEnrichedTx()).filter(t => t.type !== 'afterpay');
+            const splEl = document.getElementById('stat-period-label');
+            if(splEl) splEl.innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
             
             const inc = contextTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); 
             const exp = contextTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
@@ -1365,159 +1449,63 @@
                 days = Math.floor((now - sy) / 86400000) + 1; 
             }
             
-            document.getElementById('stat-burn').innerText = fmt(exp / days); 
-            
-            const sE = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; 
-            const ssEl = document.getElementById('stat-save'); 
-            ssEl.innerText = sE + '%'; 
-            ssEl.className = `text-lg font-black tabular-nums ${sE >= 20 ? 'theme-val-inc' : (sE >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; 
+            const sbEl = document.getElementById('stat-burn'); const ssEl = document.getElementById('stat-save');
+            if(sbEl) sbEl.innerText = fmt(exp / days); 
+            const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; 
+            if(ssEl) { ssEl.innerText = saveEff + '%'; ssEl.className = `text-lg font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
 
             const typeTx = contextTx.filter(t => t.type === state.statsType); 
             const totalType = typeTx.reduce((s,t) => s + t.amount, 0); 
-            const catG = {}; 
-            typeTx.forEach(t => catG[t.cat] = (catG[t.cat] || 0) + t.amount); 
-            const sCats = Object.keys(catG).map(k => ({ cat: k, amt: catG[k] })).sort((a,b) => b.amt - a.amt).slice(0, 10);
+            const catGroup = {}; typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount); 
+            const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
             
             const tbody = document.getElementById('stat-top-table');
-            if (sCats.length === 0) { 
-                tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos en auditoría</td></tr>`; 
-            } else { 
-                tbody.innerHTML = sCats.map(c => { 
-                    const p = totalType > 0 ? ((c.amt / totalType) * 100).toFixed(1) : 0; 
-                    return `<tr class="border-b border-slate-50/50"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amt)}</td><td class="py-3 text-right text-slate-400 font-bold">${p}%</td></tr>`; 
-                }).join(''); 
+            if(tbody) {
+                if (sortedCats.length === 0) { tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos</td></tr>`; } 
+                else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr class="border-b border-slate-50/50 last:border-0"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold">${perc}%</td></tr>`; }).join(''); }
             }
             
-            document.getElementById('btn-stat-exp').className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`; 
-            document.getElementById('btn-stat-inc').className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
+            const btnExp = document.getElementById('btn-stat-exp'); const btnInc = document.getElementById('btn-stat-inc');
+            if(btnExp) btnExp.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`; 
+            if(btnInc) btnInc.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
 
-            const projF = state.context === 'month' ? (new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() / days) : (365 / days);
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(); 
+            const projFactor = state.context === 'month' ? (daysInMonth / days) : (365 / days);
             
-            document.getElementById('tbl-real-inc').innerText = fmt(inc); 
-            document.getElementById('tbl-proj-inc').innerText = fmt(inc * projF); 
-            document.getElementById('tbl-real-exp').innerText = fmt(exp); 
-            document.getElementById('tbl-proj-exp').innerText = fmt(exp * projF); 
-            document.getElementById('tbl-real-net').innerText = fmt(inc - exp); 
-            document.getElementById('tbl-proj-net').innerText = fmt((inc - exp) * projF);
-        }
-        
-        function setStatsType(type) { 
-            state.statsType = type; 
-            renderAnalysis(); 
-        }
+            const tri = document.getElementById('tbl-real-inc'); if(tri) tri.innerText = fmt(inc); 
+            const tpi = document.getElementById('tbl-proj-inc'); if(tpi) tpi.innerText = fmt(inc * projFactor); 
+            const tre = document.getElementById('tbl-real-exp'); if(tre) tre.innerText = fmt(exp); 
+            const tpe = document.getElementById('tbl-proj-exp'); if(tpe) tpe.innerText = fmt(exp * projFactor); 
+            const trn = document.getElementById('tbl-real-net'); if(trn) trn.innerText = fmt(inc - exp); 
+            const tpn = document.getElementById('tbl-proj-net'); if(tpn) tpn.innerText = fmt((inc - exp) * projFactor);
 
-        function renderReport() { 
-            const now = new Date(); 
-            const l90 = new Date(now.getTime() - 90 * 86400000); 
-            const bC = state.settings.baseCurrency; 
-            
-            document.getElementById('rep-base-curr').innerText = bC;
-            
-            let uA = 0, uL = 0, lD = 0, mDS = 0;
-            state.accounts.forEach(a => { 
-                if(a.type !== 'credit') uA += convertCurrency(a.balance, a.currency, bC); 
-                else uL += convertCurrency(a.balance, a.currency, bC); 
-            });
-            
-            state.loans.filter(l => !l.isBNPL).forEach(l => { 
-                const P = l.total; 
-                const r = l.rate / 100; 
-                const n = l.term; 
-                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1); 
-                mDS += convertCurrency(A, l.currency, bC); 
-                
-                let b = P; 
-                const m = Math.max(0, Math.min(n, (now.getFullYear() - new Date(l.date).getFullYear()) * 12 + (now.getMonth() - new Date(l.date).getMonth()))); 
-                for (let i = 1; i <= m; i++) b -= (A - (b * r)); 
-                lD += convertCurrency(Math.max(0, b), l.currency, bC); 
-            });
-            
-            let pAp = 0; 
-            state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4).forEach(tx => {
-                pAp += convertCurrency((tx.amount * (4 - (tx.apPaid||0)) / 4), tx.currency, bC);
-            });
-            
-            const tL = Math.abs(uL) + lD + pAp;
-            
-            let rI = 0, rE = 0; 
-            state.tx.filter(t => new Date(t.date) >= l90 && t.type !== 'afterpay').forEach(t => { 
-                if(t.type === 'income') rI += convertCurrency(t.amount, t.currency, bC); 
-                if(t.type === 'expense') rE += convertCurrency(t.amount, t.currency, bC); 
-            });
-            
-            const rR = rI > 0 ? (((rI - rE) / rI) * 100).toFixed(1) : 0; 
-            const mIA = rI / 3; 
-            const dTI = mIA > 0 ? ((mDS / mIA) * 100).toFixed(1) : 0;
-            
-            document.getElementById('rep-assets').innerText = fmt(uA, bC); 
-            document.getElementById('rep-liabilities').innerText = fmt(tL, bC); 
-            
-            const rsEl = document.getElementById('rep-savings'); 
-            const rhEl = document.getElementById('rep-health');
-            
-            rsEl.innerText = rR + "%"; 
-            rsEl.className = `text-lg font-black tabular-nums ${rR >= 20 ? 'theme-val-inc' : rR > 0 ? 'text-amber-500' : 'theme-val-exp'}`; 
-            
-            rhEl.innerText = dTI + "%"; 
-            rhEl.className = `text-lg font-black tabular-nums ${dTI <= 30 ? 'theme-val-inc' : dTI <= 40 ? 'text-amber-500' : 'theme-val-exp'}`; 
-            
-            document.getElementById('rep-narrative').innerHTML = `<p><b>Análisis de Solvencia:</b> Activos de ${fmt(uA, bC)} frente a pasivos de ${fmt(tL, bC)}.</p><p><b>Eficiencia SSoT:</b> Tasa de retención consolidada <b>${rR}%</b> (Basado en base de datos maestra últimos 90d).</p>`;
-            
-            const cT = document.getElementById('report-chart-trend').getContext('2d'); 
-            if(charts.rT) charts.rT.destroy(); 
-            
-            const lT = [], dI = [], dE = [];
-            for (let i = 5; i >= 0; i--) { 
-                const tD = new Date(now.getFullYear(), now.getMonth() - i, 1); 
-                lT.push(tD.toLocaleDateString('es-CO', { month: 'short' })); 
-                let mI=0, mE=0; 
-                state.tx.filter(t => { 
-                    const d = new Date(t.date); 
-                    return d.getMonth() === tD.getMonth() && d.getFullYear() === tD.getFullYear() && t.type !== 'afterpay'; 
-                }).forEach(t => { 
-                    if(t.type === 'income') mI += convertCurrency(t.amount, t.currency, bC); 
-                    if(t.type === 'expense') mE += convertCurrency(t.amount, t.currency, bC); 
-                }); 
-                dI.push(mI); dE.push(mE); 
+            const yearTableCont = document.getElementById('stat-year-table-container');
+            if(yearTableCont) {
+                if(state.context === 'year') {
+                    yearTableCont.classList.remove('hidden'); let htmlRows = ''; let acuNet = 0;
+                    for(let m = 0; m <= now.getMonth(); m++) {
+                        const mTx = getEnrichedTx().filter(t => { const d = new Date(t.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === m && t.type !== 'afterpay'; });
+                        const mInc = mTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); const mExp = mTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0); 
+                        acuNet += (mInc - mExp);
+                        htmlRows += `<tr class="border-b border-white/5 last:border-0"><td class="py-3 font-bold text-[10px] uppercase">${new Date(now.getFullYear(), m, 1).toLocaleDateString('es-CO', {month:'short'})}</td><td class="py-3 text-right font-mono font-bold text-emerald-300">${fmt(mInc)}</td><td class="py-3 text-right font-mono font-bold text-red-400">${fmt(mExp)}</td><td class="py-3 text-right font-mono font-black ${acuNet >= 0 ? 'text-white' : 'text-slate-400'}">${fmt(acuNet)}</td></tr>`;
+                    }
+                    const tb = document.getElementById('stat-year-tbody'); if(tb) tb.innerHTML = htmlRows;
+                } else { yearTableCont.classList.add('hidden'); }
             }
-            
-            charts.rT = new Chart(cT, { 
-                type: 'line', 
-                data: { labels: lT, datasets: [ { label: 'Ingresos', data: dI, borderColor: state.theme.inc, tension: 0.4 }, { label: 'Gastos', data: dE, borderColor: state.theme.exp, tension: 0.4, borderDash: [5, 5] } ] }, 
-                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
-            });
-
-            const cV = document.getElementById('report-chart-vs').getContext('2d'); 
-            if(charts.rV) charts.rV.destroy(); 
-            
-            let bE = 0, dsE = 0, dbE = 0;  
-            state.tx.filter(t => t.type === 'expense' && new Date(t.date) >= last90Days).forEach(t => { 
-                const v = convertCurrency(t.amount, t.currency, bC); 
-                if (t.cat.includes('Vivienda') || t.cat.includes('Comida') || t.cat.includes('Transporte') || t.cat.includes('Salud')) bE += v; 
-                else if (t.cat.includes('Deuda')) dbE += v; 
-                else dsE += v; 
-            });
-            
-            charts.rV = new Chart(cV, { 
-                type: 'bar', 
-                data: { labels: ['Básicos', 'Discrecional', 'Deuda'], datasets: [{ data: [bE, dsE, dbE], backgroundColor: ['#3b82f6', '#f59e0b', state.theme.exp], borderRadius: 8 }] }, 
-                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:10, weight:'bold'}}}, y:{display:false}} } 
-            });
         }
-        
         function openFinanceReport(type) { 
             const fm = document.getElementById('finances-menu'); const fd = document.getElementById('finances-detail');
             if(fm) fm.classList.add('hidden'); if(fd) fd.classList.remove('hidden'); 
             
             const cont = document.getElementById('fin-det-content'); if(!cont) return;
-            const now = new Date(); const activeTx = getActiveTx(); const activeAccs = getActiveAccounts(); const activeLoansBase = getActiveLoans();
+            const now = new Date(); const activeTx = getEnrichedTx(); const activeAccs = getActiveAccounts(); const activeLoansBase = getActiveLoans();
             const currentYearTx = activeTx.filter(t => new Date(t.date).getFullYear() === now.getFullYear() && t.type !== 'afterpay');
             
             const currentAssets = activeAccs.filter(a => a.type === 'liquid').reduce((s,a) => s + a.balance, 0);
             const nonCurrentAssets = activeAccs.filter(a => a.type === 'investment').reduce((s,a) => s + a.balance, 0);
             const totalAssets = currentAssets + nonCurrentAssets;
 
-            const currentLiabilities = Math.abs(activeAccs.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0)) + activeTx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4).reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0);
+            const currentLiabilities = Math.abs(activeAccs.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0)) + getActiveTx().filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4).reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0);
             
             let nonCurrentLiabilities = 0;
             activeLoansBase.filter(l => !l.isBNPL).forEach(l => {
@@ -1539,41 +1527,47 @@
                         <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentAssets)}</p></div>
                         <div class="flex justify-between items-center bg-blue-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-blue-800">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets)}</p></div>
                     </div>
-                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
+                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm mt-4">
                         <h3 class="text-[10px] font-black uppercase text-red-500 tracking-widest border-b border-slate-100/50 pb-2 mb-4">Pasivos</h3>
                         <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(currentLiabilities)}</p></div>
                         <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Largo Plazo (Créditos)</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities)}</p></div>
                         <div class="flex justify-between items-center bg-red-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-red-800">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(totalLiabilities)}</p></div>
                     </div>
-                    <div class="bg-slate-900 text-white p-6 rounded-[2rem] shadow-lg flex justify-between items-center">
+                    <div class="bg-slate-900 text-white p-6 rounded-[2rem] shadow-lg flex justify-between items-center mt-4">
                         <div><p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto</p><p class="text-[8px] opacity-50 uppercase">Activos - Pasivos</p></div>
                         <p class="text-xl font-black ${equity >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(equity)}</p>
+                    </div>
+                    <div class="mt-6 p-4 bg-blue-50/50 rounded-2xl border border-blue-100 text-xs text-blue-900 leading-relaxed shadow-sm">
+                        <b>Resumen Directivo:</b> Tienes un patrimonio neto de <b>${fmt(equity)}</b>. Tus activos representan tu liquidez y dinero en caja, mientras que los pasivos son tus deudas sumadas (incluyendo intereses y pagos futuros cronológicos). Un patrimonio positivo significa solvencia estructural.
                     </div>
                 `;
             } else if (type === 'pnl') {
                 const tEl = document.getElementById('fin-det-title'); if(tEl) tEl.innerText = "Estado de Resultados";
                 const inc = currentYearTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-                const exp = currentYearTx.filter(t=>t.type==='expense' || t.type === 'afterpay').reduce((s,t)=>s+t.amount,0);
+                const exp = currentYearTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
                 
-                const fixedCats = ['Vivienda', 'Salud', 'Deuda', 'Transporte'];
+                const fixedCats = ['Vivienda', 'Salud', 'Deuda', 'Transporte', 'TC', 'Préstamo', 'Afterpay'];
                 let fixedExp = 0; let varExp = 0;
-                currentYearTx.filter(t => t.type === 'expense' || t.type === 'afterpay').forEach(t => {
+                currentYearTx.filter(t => t.type === 'expense').forEach(t => {
                     if(fixedCats.some(c => t.cat.includes(c))) fixedExp += t.amount;
                     else varExp += t.amount;
                 });
                 
                 const netIncome = inc - exp;
                 cont.innerHTML = `
-                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center mb-2">Acumulado Año Actual (YTD)</p>
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center mb-2">Acumulado Año Actual (Generativo)</p>
                     <div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden">
                         <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-sm font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-base font-mono font-bold theme-text">${fmt(inc)}</p></div>
                         <div class="p-6 border-b border-slate-100/50 bg-slate-50/50">
                             <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3">Estructura de Gastos</p>
-                            <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Costos Fijos (Vivienda, Deuda, etc.)</p><p class="text-sm font-mono font-bold theme-text">${fmt(fixedExp)}</p></div>
-                            <div class="flex justify-between items-center"><p class="text-xs font-bold text-slate-500">Costos Variables (Ocio, Otros)</p><p class="text-sm font-mono font-bold theme-text">${fmt(varExp)}</p></div>
+                            <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Fijos (Vivienda, Deuda, Cuotas)</p><p class="text-sm font-mono font-bold theme-text">${fmt(fixedExp)}</p></div>
+                            <div class="flex justify-between items-center"><p class="text-xs font-bold text-slate-500">Variables (Ocio, Discrecional)</p><p class="text-sm font-mono font-bold theme-text">${fmt(varExp)}</p></div>
                         </div>
                         <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-xs font-black uppercase theme-val-exp">Total Gastos Operativos</p><p class="text-base font-mono font-bold theme-val-exp">${fmt(exp)}</p></div>
                         <div class="p-6 bg-slate-50 flex justify-between items-center"><div><p class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Utilidad Neta</p></div><p class="text-xl font-black ${netIncome >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(netIncome)}</p></div>
+                    </div>
+                    <div class="mt-6 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 text-xs text-emerald-900 leading-relaxed shadow-sm">
+                        <b>Resumen Directivo:</b> Tu utilidad neta operativa (flujo de caja real) es de <b>${fmt(netIncome)}</b>. Este modelo evalúa tus costos reales y generativos proyectados. Es vital que tus Costos Fijos no superen el 50% de tus Ingresos Operativos para mantener un margen de seguridad.
                     </div>
                 `;
             } else if (type === 'ratios') {
@@ -1595,92 +1589,10 @@
                             <div class="flex justify-between items-start mb-2"><div><h3 class="text-xs font-black uppercase theme-text">Margen de Utilidad</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Neta / Ingresos</p></div><p class="text-lg font-black ${margenUtilidad >= 20 ? 'theme-val-inc' : margenUtilidad > 0 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${margenUtilidad}%</p></div>
                         </div>
                     </div>
+                    <div class="mt-6 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 text-xs text-indigo-900 leading-relaxed shadow-sm">
+                        <b>Resumen Directivo:</b> Un <b>Ratio de Liquidez > 1</b> significa que puedes pagar deudas inmediatas. Un <b>Endeudamiento < 40%</b> es el estándar corporativo saludable. Un <b>Margen de Utilidad Positivo</b> indica expansión y crecimiento neto de tu capital.
+                    </div>
                 `;
-            }
-        }
-        function closeFinanceReport() { const fd = document.getElementById('finances-detail'); const fm = document.getElementById('finances-menu'); if(fd) fd.classList.add('hidden'); if(fm) fm.classList.remove('hidden'); }
-        // 🔴 FIN FUNCIONES: Directiva & Analítica
-        // =========================================================================================
-
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Configuraciones & Multi-Tenant
-        // =========================================================================================
-        function renderSettingsTab() {
-            document.getElementById('set-base-currency').value = state.settings.baseCurrency;
-            document.getElementById('set-ap-limit').value = state.settings.apLimit || 0;
-            document.getElementById('set-ap-day').value = state.settings.apPayDay || 5;
-
-            let uH = ''; 
-            for (let i = 0; i < localStorage.length; i++) { 
-                const k = localStorage.key(i); 
-                if (k.startsWith('nexus_profile_')) { 
-                    const p = JSON.parse(localStorage.getItem(k)); 
-                    const iC = p.email === currentUser; 
-                    uH += `<div class="flex justify-between items-center p-3 bg-slate-50 rounded-xl mb-2 border border-slate-100/50"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black">${p.name.charAt(0)}</div><div><p class="text-xs font-black uppercase">${p.name} ${iC?'<span class="text-[8px] bg-blue-500 text-white px-2 rounded-full">ACTUAL</span>':''}</p><p class="text-[9px] text-slate-400">${p.email}</p></div></div></div>`; 
-                } 
-            }
-            document.getElementById('local-users-list').innerHTML = uH;
-            
-            renderCategories();
-        }
-
-        function updateSettings() {
-            state.settings.baseCurrency = document.getElementById('set-base-currency').value;
-            state.settings.apLimit = parseFloat(document.getElementById('set-ap-limit').value);
-            state.settings.apPayDay = parseInt(document.getElementById('set-ap-day').value);
-            saveState(); 
-            updateDashboard();
-        }
-
-        function setCatManageType(type) {
-            catManageType = type;
-            document.querySelectorAll('#tab-settings button[id^="cat-btn-"]').forEach(b => {
-                b.classList.remove('bg-white', 'shadow-sm', 'text-emerald-500', 'text-red-500', 'text-indigo-500');
-                b.classList.add('text-slate-400');
-            });
-            
-            const btn = document.getElementById('cat-btn-' + type);
-            btn.classList.remove('text-slate-400');
-            btn.classList.add('bg-white', 'shadow-sm', type==='income'?'text-emerald-500':type==='expense'?'text-red-500':'text-indigo-500');
-            
-            renderCategories();
-        }
-
-        function renderCategories() {
-            const list = document.getElementById('cat-manage-list');
-            const cats = state.categories[catManageType] || [];
-            list.innerHTML = cats.map(c => `<div class="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100"><span class="text-xs font-bold theme-text">${c}</span><button onclick="removeCategory('${c}')" class="text-red-400"><i class="fa-solid fa-trash text-[10px]"></i></button></div>`).join('');
-        }
-
-        function addCategory() {
-            const inp = document.getElementById('new-cat-input'); 
-            const val = inp.value.trim();
-            if(!val) return;
-            
-            if(!state.categories[catManageType]) state.categories[catManageType] = [];
-            state.categories[catManageType].push(val); 
-            inp.value = ''; 
-            
-            saveState(); 
-            renderCategories();
-        }
-
-        function removeCategory(cat) {
-            state.categories[catManageType] = state.categories[catManageType].filter(c => c !== cat);
-            saveState(); 
-            renderCategories();
-        }
-
-        function requestFactoryReset() {
-            const pin = prompt("⚠ ZONA DE PELIGRO ⚠\nIngresa tu PIN de sesión (4 dígitos) para PURGAR TODA la base de datos local:");
-            if(pin === userProfile.pin) {
-                if(confirm("⚠ IRREVERSIBLE ⚠\n¿Confirmas la destrucción absoluta de los datos de " + userProfile.email + "?")) {
-                    localStorage.removeItem(`nexus_db_${currentUser}`);
-                    alert("Bóveda Destruida. Reiniciando secuencia..."); 
-                    location.reload();
-                }
-            } else { 
-                alert("PIN Inválido. Purga bloqueada por seguridad."); 
             }
         }
 
