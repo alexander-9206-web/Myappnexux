@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Nexus Finance Omni v58.8</title>
+    <title>Nexus Finance Omni v58.9</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -148,7 +148,7 @@
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top">
         <div class="px-6 py-5 flex justify-between items-center">
             <div>
-                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.7</span></h1>
+                <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">v58.9</span></h1>
                 <p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p>
             </div>
             <div class="flex gap-4">
@@ -567,8 +567,12 @@
                 </div>
                 <button onclick="openAccountModal()" class="w-10 h-10 bg-slate-900 text-white rounded-full shadow-lg active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
             </div>
+            
             <div class="grid grid-cols-3 gap-3" id="acc-hub-summary"></div>
-            <div class="space-y-6" id="acc-hub-list"></div>
+            
+            <div class="space-y-6" id="acc-hub-list">
+                <!-- Se llenará dinámicamente agrupado por Divisa -->
+            </div>
         </section>
 
         <!-- TAB 10: CONFIGURACIÓN -->
@@ -647,11 +651,14 @@
             <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4 text-center">
                 <h3 class="text-[10px] font-black uppercase opacity-40 tracking-widest text-center mb-4 theme-text">Autenticación & Backups</h3>
                 <p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Usuario: <span id="settings-current-user" class="text-indigo-500"></span></p>
+                
                 <button onclick="exportBackup()" class="w-full bg-black text-white p-4 rounded-2xl font-black uppercase text-[10px] active:scale-95 transition-transform shadow-md"><i class="fa-solid fa-download mr-2"></i> Guardar Respaldo Local</button>
+                
                 <div class="relative mt-2">
                     <input type="file" accept=".json" onchange="importBackup(event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
                     <button class="w-full bg-indigo-50 text-indigo-600 border border-indigo-100 p-4 rounded-2xl font-black uppercase text-[10px] pointer-events-none"><i class="fa-solid fa-upload mr-2"></i> Cargar Respaldo</button>
                 </div>
+
                 <button onclick="logout()" class="w-full bg-slate-100 text-slate-600 p-4 rounded-2xl font-black uppercase text-[10px] active:scale-95 transition-transform mt-2"><i class="fa-solid fa-right-from-bracket mr-2"></i> Cerrar Sesión</button>
             </div>
 
@@ -956,7 +963,7 @@
         </div>
     </div>
 
-    <!-- SCRIPT MAESTRO DESMINIFICADO (V58.7) -->
+    <!-- SCRIPT DE ARQUITECTURA MAESTRA -->
     <script>
         // ==========================================
         // 1. CONSTANTES GLOBALES Y ESTADO
@@ -1089,9 +1096,13 @@
             if (!state.settings.baseCurrency) state.settings.baseCurrency = 'COP';
             if (!state.calendarFilter) state.calendarFilter = 'all';
 
-            document.getElementById('header-user-badge').innerText = userProfile.name;
-            document.getElementById('settings-current-user').innerText = userProfile.name;
-            document.getElementById('global-currency').value = state.activeCurrency;
+            const userBadge = document.getElementById('header-user-badge');
+            const currentUserEl = document.getElementById('settings-current-user');
+            if (userBadge) userBadge.innerText = userProfile.name;
+            if (currentUserEl) currentUserEl.innerText = userProfile.name;
+            
+            const globalCurr = document.getElementById('global-currency');
+            if (globalCurr) globalCurr.value = state.activeCurrency;
             
             applyThemeCSS();
             initNexus();
@@ -1152,21 +1163,28 @@
         function setContext(ctx) {
             state.context = ctx; 
             document.querySelectorAll('.v-btn').forEach(b => b.classList.remove('active')); 
-            document.getElementById('btn-' + ctx).classList.add('active');
+            
+            const btnCtx = document.getElementById('btn-' + ctx);
+            if (btnCtx) btnCtx.classList.add('active');
             
             if(ctx !== 'day') document.body.classList.add('is-red-mode'); 
             else document.body.classList.remove('is-red-mode');
             
+            const viewDay = document.getElementById('view-day');
+            const viewPeriod = document.getElementById('view-period');
+            const wealthTitle = document.getElementById('wealth-title');
+            const fabMain = document.getElementById('fab-main');
+
             if(ctx === 'day') { 
-                document.getElementById('view-day').classList.remove('hidden'); 
-                document.getElementById('view-period').classList.add('hidden'); 
-                if(state.activeTab !== 'loans') { const f = document.getElementById('fab-main'); if (f) f.classList.remove('hidden'); } 
-                document.getElementById('wealth-title').innerText = "Patrimonio Global Unificado"; 
+                if (viewDay) viewDay.classList.remove('hidden'); 
+                if (viewPeriod) viewPeriod.classList.add('hidden'); 
+                if (state.activeTab !== 'loans' && fabMain) fabMain.classList.remove('hidden'); 
+                if (wealthTitle) wealthTitle.innerText = "Patrimonio Global Unificado"; 
             } else { 
-                document.getElementById('view-day').classList.add('hidden'); 
-                document.getElementById('view-period').classList.remove('hidden'); 
-                const f = document.getElementById('fab-main'); if (f) f.classList.add('hidden'); 
-                document.getElementById('wealth-title').innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; 
+                if (viewDay) viewDay.classList.add('hidden'); 
+                if (viewPeriod) viewPeriod.classList.remove('hidden'); 
+                if (fabMain) fabMain.classList.add('hidden'); 
+                if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; 
             }
             
             state.periodFilter = { type: 'all', cat: 'all' }; 
@@ -1376,15 +1394,6 @@
                 uNW += convertCurrency(bal, a.currency, bC); 
             });
             
-            state.tx.forEach(t => { 
-                if(t.type === 'income') uNW += convertCurrency(t.amount, t.currency, bC); 
-                if(t.type === 'expense') uNW -= convertCurrency(t.amount, t.currency, bC); 
-                if(t.type === 'afterpay') {
-                    const pending = t.amount * (4 - (t.apPaid||0)) / 4;
-                    uNW -= convertCurrency(pending, t.currency, bC); 
-                }
-            });
-            
             const netWorthEl = document.getElementById('net-worth');
             const baseCurrLabel = document.getElementById('base-curr-label');
             const scoreEl = document.getElementById('nexus-score');
@@ -1424,6 +1433,61 @@
                 if(state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); 
                 return d.getFullYear() === now.getFullYear(); 
             }); 
+        }
+
+        function renderAccounts() {
+            const cont = document.getElementById('accounts-container');
+            if(!cont) return;
+
+            if(!state.accounts || state.accounts.length === 0) {
+                cont.innerHTML = `<div class="text-center p-8 border border-dashed rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas registradas</p></div>`;
+                return;
+            }
+
+            const groups = {};
+            state.accounts.forEach(a => {
+                if(!groups[a.currency]) groups[a.currency] = [];
+                groups[a.currency].push(a);
+            });
+
+            let html = '';
+            for(let curr in groups) {
+                const accs = groups[curr];
+                let total = 0;
+                accs.forEach(a => {
+                    if(a.type === 'credit') total -= a.balance;
+                    else total += a.balance;
+                });
+
+                html += `
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 mb-4">
+                    <div class="flex justify-between items-center border-b border-slate-100/50 pb-3">
+                        <h3 class="text-xs font-black uppercase tracking-widest text-slate-500"><i class="fa-solid fa-coins mr-2"></i>Bóveda ${curr}</h3>
+                        <span class="text-sm font-black ${total >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(total, curr)}</span>
+                    </div>
+                    <div class="space-y-3">
+                `;
+                
+                accs.forEach(a => {
+                    const typeIcon = a.type === 'liquid' ? 'fa-wallet text-slate-400' : (a.type === 'credit' ? 'fa-credit-card text-red-400' : 'fa-arrow-trend-up text-emerald-400');
+                    const sign = a.type === 'credit' ? '-' : '';
+                    const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text';
+                    
+                    html += `
+                    <div onclick="switchTab('accounts')" class="flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-100">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid ${typeIcon} text-[10px]"></i></div>
+                            <div>
+                                <p class="text-[11px] font-black uppercase theme-text">${a.name}</p>
+                                <p class="text-[8px] font-bold text-slate-400 uppercase">${a.type}</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-black ${color}">${sign}${fmt(a.balance, curr)}</span>
+                    </div>`;
+                });
+                html += `</div></div>`;
+            }
+            cont.innerHTML = html;
         }
 
         // ==========================================
@@ -2830,7 +2894,322 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
         }
 
         // ==========================================
-        // 18. SERVICE WORKER PARA CAPACIDADES OFFLINE
+        // 17. DEUDAS Y PRÉSTAMOS
+        // ==========================================
+        function renderLoansList() {
+            const list = document.getElementById('loans-list');
+            if (!list) return;
+
+            const activeLoans = getActiveLoans().filter(l => !l.isBNPL);
+            const normalLoans = activeLoans.filter(l => !l.isCC);
+            const ccLoans = activeLoans.filter(l => l.isCC);
+            
+            const currentMonth = new Date().getMonth();
+            const currentYear = new Date().getFullYear();
+            
+            const monthInc = getActiveTx()
+                .filter(t => t.type === 'income' && new Date(t.date).getMonth() === currentMonth && new Date(t.date).getFullYear() === currentYear)
+                .reduce((s,t) => s + t.amount, 0);
+            
+            let totalMonthlyQuotas = 0;
+            activeLoans.forEach(l => {
+                const P = l.total; 
+                const r = l.rate / 100; 
+                const n = l.term;
+                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                
+                const startDate = new Date(l.date); 
+                const now = new Date();
+                let monthsPassed = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+                
+                if(monthsPassed < n) totalMonthlyQuotas += A;
+            });
+            
+            const summaryCont = document.getElementById('loans-summary-container');
+            if(activeLoans.length > 0) {
+                if(summaryCont) summaryCont.classList.remove('hidden');
+                const lsIncome = document.getElementById('ls-income');
+                if(lsIncome) lsIncome.innerText = fmt(monthInc);
+                
+                const ratio = monthInc > 0 ? ((totalMonthlyQuotas / monthInc) * 100).toFixed(1) : 0;
+                const lsRatio = document.getElementById('ls-ratio');
+                if(lsRatio) lsRatio.innerText = ratio + "%";
+            } else {
+                if(summaryCont) summaryCont.classList.add('hidden');
+            }
+            
+            if(activeLoans.length === 0) {
+                list.innerHTML = `<div class="text-center p-10 theme-card rounded-[2rem] shadow-sm"><i class="fa-solid fa-hands-holding-circle text-4xl text-amber-200 mb-4"></i><p class="text-xs font-black text-slate-400 uppercase italic">Libre de Deudas</p></div>`;
+                return;
+            }
+            
+            let htmlBlocks = '';
+            
+            if (normalLoans.length > 0) {
+                htmlBlocks += `<div class="mb-6"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-2">Préstamos Bancarios</h3>`;
+                htmlBlocks += normalLoans.map(l => `
+                    <div onclick="showLoanDetail('${l.id}')" class="p-8 theme-card rounded-[2rem] border-l-8 border-amber-500 shadow-sm flex justify-between items-center cursor-pointer active:scale-95 transition-transform mb-3">
+                        <div>
+                            <p class="text-[9px] font-black uppercase text-amber-500 tracking-widest mb-1">${l.term} Meses • ${l.rate}% EM</p>
+                            <h4 class="text-sm font-black uppercase tracking-tighter truncate max-w-[180px] theme-text">${l.name}</h4>
+                        </div>
+                        <p class="text-xl font-black theme-text">${fmt(l.total)}</p>
+                    </div>
+                `).join('');
+                htmlBlocks += `</div>`;
+            }
+            
+            if (ccLoans.length > 0) {
+                htmlBlocks += `<div><h3 class="text-[10px] font-black uppercase text-red-400 tracking-widest mb-3 ml-2 flex items-center gap-2"><i class="fa-solid fa-credit-card"></i> Compras T. Crédito</h3>`;
+                htmlBlocks += ccLoans.map(l => `
+                    <div onclick="showLoanDetail('${l.id}')" class="p-8 theme-card rounded-[2rem] border-l-8 border-red-500 shadow-sm flex justify-between items-center cursor-pointer active:scale-95 transition-transform mb-3">
+                        <div>
+                            <p class="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1">${l.term} Cuotas • ${l.rate}% EM</p>
+                            <h4 class="text-sm font-black uppercase tracking-tighter truncate max-w-[180px] theme-text">${l.name}</h4>
+                        </div>
+                        <p class="text-xl font-black theme-val-exp">${fmt(l.total)}</p>
+                    </div>
+                `).join('');
+                htmlBlocks += `</div>`;
+            }
+            
+            list.innerHTML = htmlBlocks;
+        }
+
+        function showLoanDetail(id) {
+            const loan = state.loans.find(l => l.id === id);
+            if(!loan) return;
+            
+            const viewList = document.getElementById('loans-view-list');
+            const viewDetail = document.getElementById('loans-view-detail');
+            if(viewList) viewList.classList.add('hidden');
+            if(viewDetail) viewDetail.classList.remove('hidden');
+            
+            const titleEl = document.getElementById('det-loan-title');
+            if(titleEl) titleEl.innerText = loan.name;
+            
+            const P = loan.total; 
+            const r = loan.rate / 100; 
+            const n = loan.term;
+            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            
+            const startDate = new Date(loan.date); 
+            const now = new Date();
+            let monthsPassed = (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth());
+            
+            if(monthsPassed < 0) monthsPassed = 0; 
+            if(monthsPassed > n) monthsPassed = n;
+            
+            let balance = P;
+            let paidToDate = 0;
+            let pendingCapital = P;
+            let totalIntPending = 0;
+            let htmlRows = '';
+            
+            for (let i = 1; i <= n; i++) {
+                const interest = balance * r; 
+                const capital = A - interest;
+                
+                const pDate = new Date(startDate); 
+                pDate.setMonth(pDate.getMonth() + i);
+                const dateStr = pDate.toLocaleDateString('es-CO', {month:'short', year:'2-digit'});
+                
+                let rowClass = "";
+                let statusIcon = "";
+                
+                if (i <= monthsPassed) {
+                    paidToDate += A; 
+                    pendingCapital -= capital; 
+                    rowClass = "opacity-40 line-through text-slate-400"; 
+                    statusIcon = `<i class="fa-solid fa-check text-emerald-500 mr-2"></i>`;
+                } else {
+                    totalIntPending += interest; 
+                    rowClass = "font-medium"; 
+                    statusIcon = `<span class="mr-2 text-slate-300">${i}</span>`;
+                }
+                
+                balance -= capital;
+                
+                htmlRows += `
+                <tr class="border-b border-slate-50/50 ${rowClass}">
+                    <td class="px-4 py-4 uppercase flex items-center">${statusIcon}${dateStr}</td>
+                    <td class="px-4 py-4 text-right font-mono">${fmt(capital)}</td>
+                    <td class="px-4 py-4 text-right font-mono">${fmt(interest)}</td>
+                    <td class="px-4 py-4 text-right font-black">${fmt(A)}</td>
+                    <td class="px-4 py-4 text-right font-mono text-amber-600">${fmt(Math.max(0, balance))}</td>
+                </tr>`;
+            }
+            
+            const tableBody = document.getElementById('det-loan-table');
+            if(tableBody) tableBody.innerHTML = htmlRows;
+            
+            const pEl = document.getElementById('det-loan-paragraph');
+            if(pEl) {
+                pEl.innerHTML = `El crédito <b>${loan.name}</b> tiene un valor inicial de <b>${fmt(P)}</b> diferido a <b>${n} meses</b> con una tasa del <b>${loan.rate}% E.M</b>. Se han pagado ${monthsPassed} periodos, dejando un saldo de <b>${fmt(pendingCapital)}</b>. Interés futuro: <b>${fmt(totalIntPending)}</b>.`;
+            }
+        }
+
+        function hideLoanDetail() {
+            const viewDetail = document.getElementById('loans-view-detail');
+            const viewList = document.getElementById('loans-view-list');
+            if(viewDetail) viewDetail.classList.add('hidden');
+            if(viewList) viewList.classList.remove('hidden');
+        }
+        
+        function openLoanForm() {
+            toggleFab();
+            const md = document.getElementById('loan-modal');
+            if(md) md.classList.remove('hidden');
+            
+            const dateEl = document.getElementById('fl-date');
+            if(dateEl) dateEl.value = new Date().toISOString().split('T')[0];
+            
+            const nameEl = document.getElementById('fl-name'); if(nameEl) nameEl.value = '';
+            const amtEl = document.getElementById('fl-amount'); if(amtEl) amtEl.value = '';
+            const rateEl = document.getElementById('fl-rate'); if(rateEl) rateEl.value = '';
+            const termEl = document.getElementById('fl-term'); if(termEl) termEl.value = '';
+        }
+        
+        function closeLoanForm() {
+            const md = document.getElementById('loan-modal');
+            if(md) md.classList.add('hidden');
+        }
+        
+        function saveLoan(e) {
+            e.preventDefault();
+            
+            const totalEl = document.getElementById('fl-amount');
+            const rateEl = document.getElementById('fl-rate');
+            const termEl = document.getElementById('fl-term');
+            const nameEl = document.getElementById('fl-name');
+            const dateEl = document.getElementById('fl-date');
+            
+            if(!totalEl || !rateEl || !termEl || !nameEl || !dateEl) return;
+            
+            const total = parseFloat(totalEl.value);
+            const rate = parseFloat(rateEl.value);
+            const term = parseInt(termEl.value);
+            const name = nameEl.value;
+            const date = dateEl.value;
+            
+            if(!total || isNaN(rate) || isNaN(term)) return alert("Datos inválidos");
+            
+            state.loans.push({
+                id: 'L_' + Date.now(),
+                name: name,
+                total: total,
+                rate: rate,
+                term: term,
+                isBNPL: false,
+                isCC: false,
+                date: new Date(date).toISOString(),
+                currency: state.activeCurrency
+            });
+            
+            saveState();
+            closeLoanForm();
+            renderLoansList();
+            updateDashboard();
+        }
+
+        // ==========================================
+        // 18. AFTERPAY HUB
+        // ==========================================
+        function renderAfterpay() { 
+            const apTx = getActiveTx().filter(t => t.type === 'afterpay'); 
+            const activeAp = apTx.filter(t => (t.apPaid || 0) < 4); 
+            const pendingTotal = activeAp.reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0); 
+            
+            const apTotalEl = document.getElementById('ap-total-pending');
+            if(apTotalEl) apTotalEl.innerText = fmt(pendingTotal); 
+            
+            const apAvailEl = document.getElementById('ap-available');
+            if(apAvailEl) apAvailEl.innerText = fmt(Math.max(0, (state.settings.apLimit || 0) - pendingTotal)); 
+            
+            const schedule = calculateAfterpaySchedules(); 
+            const recentInc = getActiveTx().filter(t => t.type === 'income' && new Date(t.date) >= new Date(new Date().getTime() - 30 * 86400000)).reduce((s,t) => s + t.amount, 0); 
+            const weeklyInc = recentInc / 4.28; 
+            const nextPaymentAmount = schedule.length > 0 ? schedule[0].amount : 0; 
+            
+            const apsWeeklyEl = document.getElementById('aps-weekly-inc');
+            if(apsWeeklyEl) apsWeeklyEl.innerText = fmt(weeklyInc); 
+            
+            const apRatio = weeklyInc > 0 ? ((nextPaymentAmount / weeklyInc) * 100).toFixed(1) : 0; 
+            const apsRatioEl = document.getElementById('aps-ratio');
+            if(apsRatioEl) apsRatioEl.innerText = apRatio + "%"; 
+            
+            const schedList = document.getElementById('ap-schedule-list'); 
+            if(schedList) {
+                if(schedule.length > 0) { 
+                    const apLastDate = document.getElementById('ap-last-date');
+                    if(apLastDate) apLastDate.innerText = schedule[schedule.length - 1].date.toLocaleDateString('es-CO', {day: 'numeric', month: 'short', year: 'numeric'}); 
+                    
+                    schedList.innerHTML = schedule.map((s, idx) => `
+                        <div class="flex justify-between items-center p-4 bg-slate-50/50 rounded-2xl border ${idx === 0 ? 'border-teal-400 bg-teal-50' : 'border-slate-100/50'}">
+                            <div>
+                                <p class="text-xs font-black theme-text">${s.date.toLocaleDateString('es-CO', {weekday: 'long', day: 'numeric', month: 'short'})}</p>
+                                <p class="text-[9px] font-bold uppercase text-slate-400 mt-1">${s.items} Cuotas a debitar</p>
+                            </div>
+                            <p class="text-sm font-black ${idx === 0 ? 'text-teal-600' : 'theme-text'}">${fmt(s.amount)}</p>
+                        </div>
+                    `).join(''); 
+                } else { 
+                    const apLastDate = document.getElementById('ap-last-date');
+                    if(apLastDate) apLastDate.innerText = "Todo al Día"; 
+                    schedList.innerHTML = `<p class="text-center text-[10px] uppercase font-bold text-slate-400 py-4 italic">No tienes pagos programados</p>`; 
+                } 
+            }
+            
+            const actList = document.getElementById('ap-active-list'); 
+            if(actList) {
+                if(activeAp.length > 0) { 
+                    activeAp.sort((a,b) => new Date(b.date) - new Date(a.date)); 
+                    actList.innerHTML = activeAp.map(tx => `
+                        <div class="theme-card p-5 rounded-[1.5rem] border shadow-sm">
+                            <div class="flex justify-between items-center mb-3">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center">
+                                        <i class="fa-solid fa-bag-shopping text-[10px]"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-[11px] font-black uppercase theme-text">${tx.note}</p>
+                                        <p class="text-[8px] font-bold text-slate-400 uppercase">${tx.cat.substring(2)}</p>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-xs font-black theme-text">${fmt(tx.amount)}</p>
+                                    <p class="text-[8px] font-black uppercase text-teal-500">${tx.apFreq === 'weekly' ? 'Semanal' : 'Quincenal'}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="flex-1 h-1.5 bg-slate-100/50 rounded-full overflow-hidden">
+                                    <div class="h-full bg-teal-400" style="width: ${((tx.apPaid || 0) / 4) * 100}%"></div>
+                                </div>
+                                <span class="text-[9px] font-black uppercase text-slate-400">${tx.apPaid || 0} / 4 Pagos</span>
+                            </div>
+                        </div>
+                    `).join(''); 
+                } else { 
+                    actList.innerHTML = `<p class="text-center text-[10px] uppercase font-bold text-slate-400 py-4 italic">Sin compras vigentes</p>`; 
+                }
+            }
+
+            const canvasEl = document.getElementById('ap-chart-cat');
+            if(canvasEl) {
+                const ctx = canvasEl.getContext('2d'); 
+                if(charts.apCat) charts.apCat.destroy(); 
+                const grp = {}; 
+                apTx.forEach(t => { grp[t.note] = (grp[t.note]||0) + t.amount; }); 
+                charts.apCat = new Chart(ctx, { 
+                    type: 'bar', 
+                    data: { labels: Object.keys(grp), datasets: [{ data: Object.values(grp), backgroundColor: '#14b8a6', borderRadius: 6 }] }, 
+                    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
+                }); 
+            }
+        }
+
+        // ==========================================
+        // 19. SERVICE WORKER PARA CAPACIDADES OFFLINE
         // ==========================================
         if ('serviceWorker' in navigator) { 
             window.addEventListener('load', () => { 
