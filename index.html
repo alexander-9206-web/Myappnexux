@@ -643,8 +643,24 @@
                     <button onclick="setCatManageType('expense')" class="filter-chip" id="btn-cat-manage-expense">Gastos</button>
                     <button onclick="setCatManageType('transfer')" class="filter-chip" id="btn-cat-manage-transfer">Transf.</button>
                 </div>
-                <div id="settings-cat-list" class="space-y-2 max-h-48 overflow-y-auto hide-scrollbar"></div>
-                <button onclick="addNewCategory()" class="w-full bg-slate-900 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 transition-transform mt-2"><i class="fa-solid fa-plus mr-2"></i> Añadir Categoría</button>
+                
+                <div class="space-y-4 pt-2">
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categorías Actuales</label>
+                        <div class="flex gap-2 mt-1">
+                            <select id="settings-cat-dropdown" class="form-input text-xs flex-1 bg-slate-50"></select>
+                            <button onclick="deleteSelectedCategory()" class="bg-red-50 text-red-500 px-4 rounded-2xl active:scale-95 transition-transform"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-slate-100/50 pt-4">
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Crear Nueva Categoría</label>
+                        <div class="flex gap-2 mt-1">
+                            <input type="text" id="new-cat-input" class="form-input text-xs flex-1" placeholder="Ej: 🍔 Comida">
+                            <button onclick="addNewCategoryInline()" class="bg-slate-900 text-white px-5 rounded-2xl active:scale-95 transition-transform font-black text-[10px] uppercase shadow-lg"><i class="fa-solid fa-plus"></i></button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- GESTION USUARIO Y BACKUPS -->
@@ -3209,7 +3225,140 @@ ESTRATEGIA DE LECTURA DE ARCHIVO PLANO:
         }
 
         // ==========================================
-        // 19. SERVICE WORKER PARA CAPACIDADES OFFLINE
+        // 19. CONFIGURACIÓN Y MOTOR DE CATEGORÍAS
+        // ==========================================
+        function renderSettingsCategories() { 
+            const dropdown = document.getElementById('settings-cat-dropdown'); 
+            if(!dropdown) return;
+            const cats = state.categories[currentCatManageType] || []; 
+            dropdown.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join(''); 
+        }
+
+        function setCatManageType(type) { 
+            currentCatManageType = type; 
+            ['income', 'expense', 'transfer'].forEach(t => { 
+                const el = document.getElementById('btn-cat-manage-' + t); 
+                if(el) el.classList.remove('active'); 
+            }); 
+            const elAct = document.getElementById('btn-cat-manage-' + type); 
+            if(elAct) elAct.classList.add('active'); 
+            renderSettingsCategories(); 
+        }
+
+        function addNewCategoryInline() { 
+            const inputEl = document.getElementById('new-cat-input');
+            if(!inputEl) return;
+            
+            const name = inputEl.value.trim(); 
+            if(name && name.length > 0) { 
+                if(!state.categories[currentCatManageType].includes(name)) { 
+                    state.categories[currentCatManageType].push(name); 
+                    saveState(); 
+                    renderSettingsCategories(); 
+                    populateFilters(); 
+                    inputEl.value = ''; 
+                } else {
+                    alert("La categoría ya existe en esta sección.");
+                }
+            } 
+        }
+
+        function deleteSelectedCategory() { 
+            const dropdown = document.getElementById('settings-cat-dropdown');
+            if(!dropdown || !dropdown.value) return;
+            
+            const name = dropdown.value;
+            if(name.includes('Afterpay')) {
+                alert("La categoría base de Afterpay está protegida por el sistema y no puede ser eliminada.");
+                return;
+            }
+            if(confirm(`¿Eliminar la categoría '${name}' de forma permanente?`)) { 
+                state.categories[currentCatManageType] = state.categories[currentCatManageType].filter(c => c !== name); 
+                saveState(); 
+                renderSettingsCategories(); 
+                populateFilters(); 
+            } 
+        }
+
+        function renderSettingsTab() { 
+            const baseCurr = document.getElementById('set-base-currency');
+            if (baseCurr) baseCurr.value = state.settings.baseCurrency || 'COP'; 
+            
+            const apLimit = document.getElementById('set-ap-limit');
+            if (apLimit) apLimit.value = state.settings.apLimit || 0; 
+            
+            const apDay = document.getElementById('set-ap-day');
+            if (apDay) apDay.value = state.settings.apPayDay || 5; 
+            
+            const alertDays = document.getElementById('set-alert-days');
+            if (alertDays) alertDays.value = state.settings.alertDays || 3; 
+            
+            const themeBg = document.getElementById('set-theme-bg');
+            if (themeBg) themeBg.value = state.theme.bg; 
+            
+            const themeCard = document.getElementById('set-theme-card');
+            if (themeCard) themeCard.value = state.theme.card; 
+            
+            const themeText = document.getElementById('set-theme-text');
+            if (themeText) themeText.value = state.theme.text; 
+            
+            const themeInc = document.getElementById('set-theme-inc');
+            if (themeInc) themeInc.value = state.theme.inc; 
+            
+            const themeExp = document.getElementById('set-theme-exp');
+            if (themeExp) themeExp.value = state.theme.exp; 
+            
+            setCatManageType('income'); 
+        }
+
+        function exportBackup() { 
+            try { 
+                const dataStr = JSON.stringify(state, null, 2); 
+                const blob = new Blob([dataStr], { type: "application/json" }); 
+                const url = URL.createObjectURL(blob); 
+                const a = document.createElement('a'); 
+                a.href = url; 
+                a.download = `Nexus_Backup_${currentUser}_${new Date().toISOString().split('T')[0]}.json`; 
+                document.body.appendChild(a); 
+                a.click(); 
+                document.body.removeChild(a); 
+                URL.revokeObjectURL(url); 
+            } catch (err) { 
+                alert("Error al exportar la bóveda."); 
+            } 
+        }
+
+        function importBackup(event) { 
+            const file = event.target.files[0]; 
+            if (!file) return; 
+            const reader = new FileReader(); 
+            reader.onload = function(e) { 
+                try { 
+                    const importedState = JSON.parse(e.target.result); 
+                    if (importedState && importedState.tx) { 
+                        state = importedState; 
+                        saveState(); 
+                        alert("✅ Respaldo de bóveda importado con éxito."); 
+                        location.reload(); 
+                    } else {
+                        alert("❌ Archivo JSON no compatible con Nexus."); 
+                    }
+                } catch (err) { 
+                    alert("❌ Error de lectura en el archivo."); 
+                } 
+            }; 
+            reader.readAsText(file); 
+        }
+
+        function resetFactory() { 
+            if(confirm("ALERTA CRÍTICA: Se borrará tu bóveda local permanentemente. Esta acción no se puede deshacer. ¿Deseas continuar?")) { 
+                localStorage.removeItem(`nexus_db_${currentUser}`); 
+                location.reload(); 
+            } 
+        }
+
+        // ==========================================
+        // 20. SERVICE WORKER PARA CAPACIDADES OFFLINE
         // ==========================================
         if ('serviceWorker' in navigator) { 
             window.addEventListener('load', () => { 
