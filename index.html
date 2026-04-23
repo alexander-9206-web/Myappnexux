@@ -422,7 +422,8 @@
                 </div>
             </div>
 
-            <!-- ... (El resto del tab de configuración permanece INTACTO) ... -->
+            <!-- MÓDULO: GLOBAL & AFTERPAY -->
+            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
                 <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4"><i class="fa-solid fa-gears mr-2"></i>Global Engine & Cloud Prep</h3>
                 <div class="space-y-2">
                     <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda Base (Para Informes Unificados)</label>
@@ -987,7 +988,7 @@
             const now = new Date();
             now.setHours(0,0,0,0);
             
-            // 1. Proyectar Afterpay Futuro
+            // 1. Proyectar Afterpay (Calendario Cronológico Completo)
             const apTx = rawTx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
             const payDay = state.settings.apPayDay || 5;
             apTx.forEach(tx => {
@@ -996,30 +997,51 @@
                 const iA = tx.amount / 4;
                 for(let i = (tx.apPaid || 0); i < 4; i++) {
                     const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD));
-                    if (d > now) {
-                        rawTx.push({ id: 'proj_ap_'+tx.id+'_'+i, type: 'expense', amount: iA, cat: '🛍️ Cuota Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Proyectado] ${tx.cat}`, isProjected: true, currency: tx.currency });
-                    }
+                    const clearCat = tx.note || tx.cat.substring(2).trim();
+                    rawTx.push({ id: 'proj_ap_'+tx.id+'_'+i, type: 'expense', amount: iA, cat: '🛍️ Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Cuota Pendiente] ${clearCat} (${i+1}/4)`, isProjected: true, currency: tx.currency });
                 }
             });
             
-            // 2. Proyectar Préstamos Futuros
+            // 2. Proyectar Préstamos (Amortización Completa Histórica y Futura)
             getActiveLoans().forEach(l => {
                 const P = l.total; const r = l.rate / 100; const n = l.term;
                 const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                let nPD = new Date(l.date); nPD.setMonth(nPD.getMonth() + 1);
+                
+                let balance = P;
                 for(let i=0; i<n; i++) {
-                    let pD = new Date(nPD); pD.setMonth(pD.getMonth() + i);
-                    if (pD > now) {
-                        rawTx.push({ id: 'proj_loan_'+l.id+'_'+i, type: 'expense', amount: A, cat: '💳 Cuota Préstamo', accId: null, date: pD.toISOString(), note: `[Proyectado] ${l.name}`, isProjected: true, currency: l.currency });
-                    }
+                    let pD = new Date(l.date); 
+                    pD.setMonth(pD.getMonth() + i + 1);
+                    
+                    const interest = balance * r;
+                    const principal = A - interest;
+                    balance -= principal;
+                    if(balance < 0.01) balance = 0;
+
+                    rawTx.push({ 
+                        id: 'proj_loan_'+l.id+'_'+i, 
+                        type: 'expense', 
+                        amount: A, 
+                        cat: '💳 Pago Deuda',
+                        accId: null, 
+                        date: pD.toISOString(), 
+                        note: `[Cuota ${i+1}/${n}] ${l.name} (Cap:${fmt(principal, l.currency)} | Int:${fmt(interest, l.currency)})`, 
+                        isProjected: true, 
+                        currency: l.currency 
+                    });
                 }
             });
 
             // 3. Proyectar Pagos de TC (Cuentas Crédito)
             getActiveAccounts().filter(a => a.type === 'credit' && a.balance > 0).forEach(c => {
-                let pD = new Date(now.getFullYear(), now.getMonth(), c.payDay || 15);
-                if (pD <= now) pD.setMonth(pD.getMonth() + 1);
-                rawTx.push({ id: 'proj_cc_'+c.id, type: 'expense', amount: c.balance, cat: '💳 Pago TC', accId: c.id, date: pD.toISOString(), note: `[Proyectado] ${c.name}`, isProjected: true, currency: c.currency });
+                const ccLoans = getActiveLoans().filter(l => l.isCC && l.cardId === c.id);
+                const loansBalance = ccLoans.reduce((sum, l) => sum + l.balance, 0);
+                const directBalance = c.balance - loansBalance;
+                
+                if (directBalance > 0.01) {
+                    let pD = new Date(now.getFullYear(), now.getMonth(), c.payDay || 15);
+                    if (pD <= now) pD.setMonth(pD.getMonth() + 1);
+                    rawTx.push({ id: 'proj_cc_direct_'+c.id, type: 'expense', amount: directBalance, cat: '💳 Pago Deuda', accId: c.id, date: pD.toISOString(), note: `[Pago Directo TC] ${c.name}`, isProjected: true, currency: c.currency });
+                }
             });
 
             return rawTx;
@@ -1356,7 +1378,14 @@
             fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             
             list.innerHTML = fTx.map(t => {
-                const projBadge = t.isProjected ? `<span class="text-[8px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full ml-2 border border-amber-200">PROY.</span>` : '';
+                let projBadge = '';
+                if(t.isProjected) {
+                    const isPast = new Date(t.date) <= new Date();
+                    const bTxt = isPast ? (t.cat.includes('Afterpay') ? 'PENDIENTE' : 'AMORTIZADO') : 'PROY.';
+                    const bCls = isPast ? (t.cat.includes('Afterpay') ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-100 text-blue-600 border-blue-200') : 'bg-amber-100 text-amber-600 border-amber-200';
+                    projBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`;
+                }
+                
                 return `
                 <div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50">
                     <div class="flex items-center gap-4">
@@ -1405,14 +1434,27 @@
 
             const now = new Date(); 
             const start = new Date();
+            const end = new Date();
             
-            if(range === 'hoy') { start.setHours(0,0,0,0); }
-            else if(range === 'semana') { start.setDate(now.getDate() - 7); }
-            else if(range === 'mes') { start.setDate(now.getDate() - 30); }
-            else if(range === 'all') { start.setFullYear(2000); }
+            if(range === 'hoy') { 
+                start.setHours(0,0,0,0); 
+                end.setHours(23,59,59,999); 
+            }
+            else if(range === 'semana') { 
+                start.setDate(now.getDate() - 7); 
+                end.setDate(now.getDate() + 7); 
+            }
+            else if(range === 'mes') { 
+                start.setDate(now.getDate() - 30); 
+                end.setDate(now.getDate() + 60); // Proyección a futuro visible
+            }
+            else if(range === 'all') { 
+                start.setFullYear(2000); 
+                end.setFullYear(2100); 
+            }
 
             document.getElementById('db-filter-start').value = start.toISOString().split('T')[0]; 
-            document.getElementById('db-filter-end').value = now.toISOString().split('T')[0]; 
+            document.getElementById('db-filter-end').value = end.toISOString().split('T')[0]; 
             updateDbCatFilter();
         }
 
@@ -1448,6 +1490,7 @@
                 if(ct !== 'all' && t.cat !== ct) return false; 
                 return true; 
             }); 
+            // ORDENAMIENTO CRONOLÓGICO ESTRICTO: Descendente (más recientes arriba)
             fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             
             const dcEl = document.getElementById('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
@@ -1468,7 +1511,16 @@
                 let suffix = '';
                 if(t.type === 'afterpay' && !t.isProjected) { dAmt = t.amount / 4; suffix = ' (Cuota Periodo)'; }
 
-                const pBadge = t.isProjected ? `<span class="text-[8px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full ml-2 border border-amber-200">PROYECTADO</span>` : '';
+                let pBadge = '';
+                if(t.isProjected) {
+                    const isPast = new Date(t.date) <= new Date();
+                    const bTxt = isPast ? (t.cat.includes('Afterpay') ? 'PENDIENTE' : 'AMORTIZADO') : 'PROYECTADO';
+                    const bCls = isPast ? (t.cat.includes('Afterpay') ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-100 text-blue-600 border-blue-200') : 'bg-amber-100 text-amber-600 border-amber-200';
+                    pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`;
+                } else if (t.note && t.note.includes('[Abono Realizado]')) {
+                    pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200">PAGADO</span>`;
+                }
+
                 const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`;
                 const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300';
                 const deleteAction = t.isProjected ? `alert('Registro predictivo vinculado a un pasivo. Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
@@ -1895,60 +1947,6 @@
             node.remove();
         }
 
-        function renderReport() {
-            const bC = state.settings.baseCurrency;
-            document.getElementById('rep-base-curr').innerText = bC;
-            
-            let totAssets = 0; let totLiab = 0;
-            state.accounts.forEach(a => { 
-                if (a.type === 'credit') totLiab += convertCurrency(a.balance, a.currency, bC);
-                else totAssets += convertCurrency(a.balance, a.currency, bC);
-            });
-            state.loans.forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
-            
-            document.getElementById('rep-assets').innerText = fmt(totAssets, bC);
-            document.getElementById('rep-liabilities').innerText = fmt(totLiab, bC);
-
-            const now = new Date();
-            const past90d = new Date(now.getTime() - (90 * 86400000));
-            const enrichedTx = getEnrichedTx().filter(t => t.type !== 'afterpay');
-            
-            const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now);
-            const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
-            const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
-            
-            const savingsRate = inc90d > 0 ? ((inc90d - exp90d) / inc90d * 100) : 0;
-            document.getElementById('rep-savings').innerText = savingsRate.toFixed(1) + '%';
-            document.getElementById('rep-savings').className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
-            
-            const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
-            document.getElementById('rep-health').innerText = debtRatio.toFixed(1) + '%';
-            document.getElementById('rep-health').className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
-            if(debtRatio <= 20) document.getElementById('rep-health').className = 'text-lg font-black tabular-nums theme-val-inc';
-
-            document.getElementById('rep-narrative').innerHTML = `
-                Mantenemos una liquidez consolidada de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo total de <strong>${fmt(totLiab, bC)}</strong>. 
-                ${savingsRate >= 20 ? 'Excelente capacidad de ahorro en el trimestre operativo.' : (savingsRate > 0 ? 'Capacidad de ahorro moderada, requiere optimización de egresos.' : 'Alerta crítica de liquidez: Burn rate superior al ingreso.')} 
-                Su apalancamiento es del ${debtRatio.toFixed(1)}%.
-            `;
-            
-            const ctxTrend = document.getElementById('report-chart-trend').getContext('2d');
-            if(charts.trend) charts.trend.destroy();
-            charts.trend = new Chart(ctxTrend, { 
-                type: 'bar', 
-                data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes Actual'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, 
-                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
-            });
-
-            const ctxVs = document.getElementById('report-chart-vs').getContext('2d');
-            if(charts.vs) charts.vs.destroy();
-            charts.vs = new Chart(ctxVs, {
-                type: 'doughnut',
-                data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]},
-                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' }
-            });
-        }
-
         function deleteDatabaseRecord(id) {
             deleteTx(new Event('click'), id);
         }
@@ -2265,16 +2263,6 @@
                 modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
                 numpadTargetId = null; 
             }, 300);
-        }
-
-        function numpadConfirm() { 
-            if (numpadTargetId) { 
-                const el = document.getElementById(numpadTargetId); 
-                el.value = numpadCurrentValue; 
-                el.dispatchEvent(new Event('change', { bubbles: true })); 
-            } 
-            closeNumpad(); 
-            if(navigator.vibrate) navigator.vibrate(50); 
         }
 
         function toggleFab() { 
@@ -2637,7 +2625,18 @@
                 const quotaAmt = t.amount / totalQuotas;
                 acc.balance -= quotaAmt;
                 
-                state.tx.push({ id: 'ap_pay_' + Date.now(), type: 'expense', amount: quotaAmt, cat: 'Pago Cuota Afterpay', accId: acc.id, date: new Date().toISOString(), note: `Cuota de ${t.cat} (${t.apPaid}/${totalQuotas})`, currency: state.activeCurrency });
+                const clearCat = t.note || t.cat.substring(2).trim();
+                state.tx.push({ 
+                    id: 'ap_pay_' + Date.now(), 
+                    type: 'expense', 
+                    amount: quotaAmt, 
+                    cat: '🛍️ Afterpay', 
+                    accId: acc.id, 
+                    date: new Date().toISOString(), 
+                    note: `[Abono Realizado] ${clearCat} (${t.apPaid}/${totalQuotas})`, 
+                    currency: state.activeCurrency 
+                });
+                
                 saveState(); updateDashboard(); renderAfterpay();
                 alert(`✅ Cuota pagada correctamente. Se ha debitado ${fmt(quotaAmt)} de tu cuenta principal.`);
             }
