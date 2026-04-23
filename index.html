@@ -35,7 +35,9 @@
 
         .tab-content { display: none; }
         .tab-content.active { display: block; animation: slideIn 0.4s cubic-bezier(0, 0, 0.2, 1); }
+        .tab-content.active.slide-back { animation: slideBack 0.4s cubic-bezier(0, 0, 0.2, 1); }
         @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideBack { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideUpNumpad { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
@@ -707,7 +709,11 @@
         window.onload = () => {
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
-                document.getElementById('login-screen').classList.remove('hidden');
+                const ls = document.getElementById('login-screen');
+                ls.classList.add('opacity-0');
+                ls.classList.remove('hidden');
+                requestAnimationFrame(() => ls.classList.remove('opacity-0'));
+                
                 document.getElementById('login-email').addEventListener('input', (e) => {
                     const em = e.target.value.trim().toLowerCase();
                     if(em && !localStorage.getItem(`nexus_profile_${em}`)) {
@@ -743,8 +749,14 @@
 
             localStorage.setItem('nexus_current_user', email); 
             currentUser = email;
-            document.getElementById('login-screen').classList.add('hidden');
-            bootApp();
+            
+            const loginScreen = document.getElementById('login-screen');
+            loginScreen.classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                loginScreen.classList.add('hidden');
+                loginScreen.classList.remove('opacity-0', 'pointer-events-none');
+                bootApp();
+            }, 300);
         }
         // 🔴 FIN FUNCIÓN: handleLogin
         // =========================================================================================
@@ -756,9 +768,14 @@
             const input = document.getElementById('session-pin-input').value;
             if(input === userProfile.pin) {
                 sessionUnlocked = true;
-                document.getElementById('session-lock-screen').classList.add('hidden');
-                document.getElementById('session-pin-input').value = '';
-                bootApp();
+                const lockScreen = document.getElementById('session-lock-screen');
+                lockScreen.classList.add('opacity-0', 'pointer-events-none');
+                setTimeout(() => {
+                    lockScreen.classList.add('hidden');
+                    lockScreen.classList.remove('opacity-0', 'pointer-events-none');
+                    document.getElementById('session-pin-input').value = '';
+                    bootApp();
+                }, 300);
             } else { 
                 alert("PIN Incorrecto. Acceso denegado."); 
                 document.getElementById('session-pin-input').value = ''; 
@@ -775,7 +792,9 @@
             
             if(!sessionUnlocked) {
                 const lock = document.getElementById('session-lock-screen');
+                lock.classList.add('opacity-0');
                 lock.classList.remove('hidden');
+                requestAnimationFrame(() => lock.classList.remove('opacity-0'));
                 document.getElementById('lock-name').innerText = userProfile.name;
                 return;
             }
@@ -946,9 +965,17 @@
                 btn.style.transform = 'rotate(0deg)'; 
             }
             
+            const isBack = id === 'home' && state.activeTab !== 'home';
             state.activeTab = id;
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active')); 
-            document.getElementById('tab-' + id).classList.add('active');
+            
+            document.querySelectorAll('.tab-content').forEach(t => {
+                t.classList.remove('active');
+                t.classList.remove('slide-back');
+            }); 
+            
+            const targetTab = document.getElementById('tab-' + id);
+            if (isBack) targetTab.classList.add('slide-back');
+            targetTab.classList.add('active');
             
             const pN = document.getElementById('period-nav'); 
             if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar'].includes(id)) {
@@ -1038,7 +1065,14 @@
         }
 
         function showScoreModal() { document.getElementById('score-modal').classList.remove('hidden'); }
-        function closeScoreModal() { document.getElementById('score-modal').classList.add('hidden'); }
+        function closeScoreModal() { 
+            const modal = document.getElementById('score-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
+        }
 
         function getContextTx(baseTx) { 
             const now = new Date(); 
@@ -1105,7 +1139,7 @@
             }); 
         }
 
-        function renderPeriodLineChart(cTx) { 
+        function renderPeriodChart(cTx) { 
             const ctx = document.getElementById('chart-period').getContext('2d'); 
             if(charts.period) charts.period.destroy(); 
             
@@ -1324,7 +1358,12 @@
         }
         
         function closeForm() { 
-            document.getElementById('tx-modal').classList.add('hidden'); 
+            const modal = document.getElementById('tx-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
         }
         
         function editTransaction(id) {
@@ -1596,6 +1635,18 @@
             }
         }
 
+        function closeFinanceReport() {
+            const fm = document.getElementById('finances-menu'); const fd = document.getElementById('finances-detail');
+            if(fd) {
+                fd.classList.add('opacity-0', 'transition-opacity', 'duration-200');
+                setTimeout(() => {
+                    fd.classList.add('hidden');
+                    fd.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
+                    if(fm) { fm.classList.remove('hidden'); fm.classList.add('animate-slideUp'); }
+                }, 200);
+            }
+        }
+
         function exportBackup() {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
             const node = document.createElement('a'); 
@@ -1605,6 +1656,146 @@
             node.click(); 
             node.remove();
         }
+
+        function renderSettingsTab() {
+            document.getElementById('set-base-currency').value = state.settings.baseCurrency || 'COP';
+            document.getElementById('set-ap-limit').value = state.settings.apLimit || 5000000;
+            document.getElementById('set-ap-day').value = state.settings.apPayDay || 5;
+            
+            updateLocalUsersList();
+            setCatManageType(catManageType || 'income');
+        }
+
+        function updateSettings() {
+            state.settings.baseCurrency = document.getElementById('set-base-currency').value;
+            state.settings.apLimit = parseFloat(document.getElementById('set-ap-limit').value) || 5000000;
+            state.settings.apPayDay = parseInt(document.getElementById('set-ap-day').value) || 5;
+            saveState();
+            updateDashboard();
+        }
+
+        function updateLocalUsersList() {
+            const list = document.getElementById('local-users-list');
+            let html = '';
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('nexus_profile_')) {
+                    const p = JSON.parse(localStorage.getItem(key));
+                    const isCurrent = p.email === currentUser;
+                    html += `<div class="flex justify-between items-center p-3 rounded-2xl border ${isCurrent ? 'border-blue-500 bg-blue-50' : 'border-slate-100'}">
+                        <div><p class="text-xs font-black uppercase text-slate-800">${p.name}</p><p class="text-[9px] font-bold text-slate-400">${p.email}</p></div>
+                        ${isCurrent ? '<span class="text-[9px] font-black bg-blue-100 text-blue-600 px-2 py-1 rounded">Activo</span>' : ''}
+                    </div>`;
+                }
+            }
+            list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay otras bóvedas.</p>';
+        }
+
+        function setCatManageType(type) {
+            catManageType = type;
+            document.getElementById('cat-btn-income').className = `flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-colors ${type === 'income' ? 'shadow-sm bg-white text-emerald-500' : 'text-slate-400'}`;
+            document.getElementById('cat-btn-expense').className = `flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-colors ${type === 'expense' ? 'shadow-sm bg-white text-red-500' : 'text-slate-400'}`;
+            document.getElementById('cat-btn-transfer').className = `flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-colors ${type === 'transfer' ? 'shadow-sm bg-white text-indigo-500' : 'text-slate-400'}`;
+            renderCategories();
+        }
+
+        function renderCategories() {
+            const list = document.getElementById('cat-manage-list');
+            const cats = state.categories[catManageType] || [];
+            list.innerHTML = cats.map(c => `<div class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-lg transition-colors group">
+                <span class="text-[10px] font-black uppercase text-slate-600">${c}</span>
+                <button onclick="removeCategory('${c}')" class="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-trash text-[10px]"></i></button>
+            </div>`).join('');
+        }
+
+        function addCategory() {
+            const input = document.getElementById('new-cat-input');
+            const val = input.value.trim();
+            if(!val) return;
+            if(!state.categories[catManageType].includes(val)) {
+                state.categories[catManageType].push(val);
+                saveState();
+                renderCategories();
+                populateFilters();
+                input.value = '';
+            }
+        }
+
+        function removeCategory(cat) {
+            state.categories[catManageType] = state.categories[catManageType].filter(c => c !== cat);
+            saveState();
+            renderCategories();
+            populateFilters();
+        }
+
+        function requestFactoryReset() {
+            if(confirm("⚠ PELIGRO: Esto destruirá tu Bóveda de Datos Local permanentemente y no se puede deshacer. ¿ESTÁS SEGURO?")) {
+                if(confirm("Confirmación Final. ¿Destruir todo?")) {
+                    localStorage.removeItem('nexus_db_' + currentUser);
+                    localStorage.removeItem('nexus_profile_' + currentUser);
+                    logout();
+                }
+            }
+        }
+
+        function renderReport() {
+            const bC = state.settings.baseCurrency;
+            document.getElementById('rep-base-curr').innerText = bC;
+            
+            let totAssets = 0; let totLiab = 0;
+            state.accounts.forEach(a => { 
+                if (a.type === 'credit') totLiab += convertCurrency(a.balance, a.currency, bC);
+                else totAssets += convertCurrency(a.balance, a.currency, bC);
+            });
+            state.loans.forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
+            
+            document.getElementById('rep-assets').innerText = fmt(totAssets, bC);
+            document.getElementById('rep-liabilities').innerText = fmt(totLiab, bC);
+
+            const now = new Date();
+            const past90d = new Date(now.getTime() - (90 * 86400000));
+            const enrichedTx = getEnrichedTx().filter(t => t.type !== 'afterpay');
+            
+            const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now);
+            const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            
+            const savingsRate = inc90d > 0 ? ((inc90d - exp90d) / inc90d * 100) : 0;
+            document.getElementById('rep-savings').innerText = savingsRate.toFixed(1) + '%';
+            document.getElementById('rep-savings').className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
+            
+            const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
+            document.getElementById('rep-health').innerText = debtRatio.toFixed(1) + '%';
+            document.getElementById('rep-health').className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
+            if(debtRatio <= 20) document.getElementById('rep-health').className = 'text-lg font-black tabular-nums theme-val-inc';
+
+            document.getElementById('rep-narrative').innerHTML = `
+                Mantenemos una liquidez consolidada de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo total de <strong>${fmt(totLiab, bC)}</strong>. 
+                ${savingsRate >= 20 ? 'Excelente capacidad de ahorro en el trimestre operativo.' : (savingsRate > 0 ? 'Capacidad de ahorro moderada, requiere optimización de egresos.' : 'Alerta crítica de liquidez: Burn rate superior al ingreso.')} 
+                Su apalancamiento es del ${debtRatio.toFixed(1)}%.
+            `;
+            
+            const ctxTrend = document.getElementById('report-chart-trend').getContext('2d');
+            if(charts.trend) charts.trend.destroy();
+            charts.trend = new Chart(ctxTrend, { 
+                type: 'bar', 
+                data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes Actual'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, 
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
+            });
+
+            const ctxVs = document.getElementById('report-chart-vs').getContext('2d');
+            if(charts.vs) charts.vs.destroy();
+            charts.vs = new Chart(ctxVs, {
+                type: 'doughnut',
+                data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]},
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' }
+            });
+        }
+
+        function deleteDatabaseRecord(id) {
+            deleteTx(new Event('click'), id);
+        }
+
         // 🔴 FIN FUNCIONES: Configuraciones & Multi-Tenant
         // =========================================================================================
 
@@ -1659,8 +1850,13 @@
         }
 
         function closeNumpad() { 
-            document.getElementById('numpad-modal').classList.add('hidden'); 
-            numpadTargetId = null; 
+            const modal = document.getElementById('numpad-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+                numpadTargetId = null; 
+            }, 300);
         }
 
         function numpadConfirm() { 
@@ -1767,7 +1963,12 @@
         }
 
         function closeAccountModal() { 
-            document.getElementById('new-account-modal').classList.add('hidden'); 
+            const modal = document.getElementById('new-account-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
         }
         
         function toggleCreditFields() { 
@@ -1826,7 +2027,12 @@
         }
         
         function closeLoanForm() { 
-            document.getElementById('loan-modal').classList.add('hidden'); 
+            const modal = document.getElementById('loan-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
         }
         
         function saveLoan(e) {
@@ -1896,9 +2102,17 @@
             const loan = state.loans.find(l => l.id === id);
             if (!loan) return;
             
-            document.getElementById('loans-view-list').classList.add('hidden');
-            document.getElementById('loans-view-detail').classList.remove('hidden');
-            document.getElementById('det-loan-title').innerText = loan.name;
+            const listView = document.getElementById('loans-view-list');
+            const detailView = document.getElementById('loans-view-detail');
+            
+            listView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
+            setTimeout(() => {
+                listView.classList.add('hidden');
+                listView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
+                detailView.classList.remove('hidden');
+                detailView.classList.add('animate-slideUp');
+                document.getElementById('det-loan-title').innerText = loan.name;
+            }, 200);
 
             let quota = 0; const r = loan.rate / 100;
             if(loan.rate === 0) quota = loan.total / loan.term;
@@ -1922,8 +2136,16 @@
         }
 
         function hideLoanDetail() { 
-            document.getElementById('loans-view-detail').classList.add('hidden'); 
-            document.getElementById('loans-view-list').classList.remove('hidden'); 
+            const listView = document.getElementById('loans-view-list');
+            const detailView = document.getElementById('loans-view-detail');
+            
+            detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
+            setTimeout(() => {
+                detailView.classList.add('hidden');
+                detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
+                listView.classList.remove('hidden');
+                listView.classList.add('animate-slideUp');
+            }, 200);
         }
 
         function deleteLoan(id) { 
@@ -1938,7 +2160,12 @@
         }
         
         function closeCCPurchaseModal() { 
-            document.getElementById('cc-purchase-modal').classList.add('hidden'); 
+            const modal = document.getElementById('cc-purchase-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
         }
         
         function saveCCPurchase(e) { 
@@ -2140,7 +2367,12 @@
         }
         
         function closeAccountHistory() { 
-            document.getElementById('account-history-modal').classList.add('hidden'); 
+            const modal = document.getElementById('account-history-modal');
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
         }
         
         function setHistFilter(f) { 
