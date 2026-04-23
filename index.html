@@ -413,16 +413,16 @@
                     <div class="space-y-4">
                         <div><label class="text-[9px] font-black uppercase text-blue-600 ml-1">Nombre Descriptivo</label><input type="text" id="edit-user-name" class="form-input text-xs bg-white shadow-sm mt-1"></div>
                         <div><label class="text-[9px] font-black uppercase text-blue-600 ml-1">PIN de Seguridad (4 Dígitos)</label><input type="password" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-lg font-black bg-white shadow-sm text-center tracking-[0.5em] mt-1"></div>
-                        <div class="flex gap-2 pt-2">
-                            <button onclick="saveUserEdit()" class="flex-1 bg-blue-600 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Guardar</button>
-                            <button onclick="closeUserEdit()" class="flex-1 bg-slate-200 text-slate-600 py-3 rounded-xl text-[10px] font-black uppercase active:scale-95 transition-transform"><i class="fa-solid fa-xmark mr-1"></i>Cancelar</button>
+                        <div class="grid grid-cols-3 gap-2 pt-2">
+                            <button onclick="saveUserEdit()" class="bg-blue-600 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check"></i> Guardar</button>
+                            <button onclick="deleteUserVault()" class="bg-red-50 text-red-600 border border-red-100 py-3 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-trash"></i> Eliminar</button>
+                            <button onclick="closeUserEdit()" class="bg-slate-200 text-slate-600 py-3 rounded-xl text-[10px] font-black uppercase active:scale-95 transition-transform"><i class="fa-solid fa-xmark"></i> Cancelar</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- MÓDULO: GLOBAL & AFTERPAY -->
-            <div class="theme-card p-8 rounded-[2rem] border shadow-sm space-y-4">
+            <!-- ... (El resto del tab de configuración permanece INTACTO) ... -->
                 <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4"><i class="fa-solid fa-gears mr-2"></i>Global Engine & Cloud Prep</h3>
                 <div class="space-y-2">
                     <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda Base (Para Informes Unificados)</label>
@@ -1956,7 +1956,7 @@
         // =========================================================================================
         // 🟢 NUEVO MÓDULO: LÓGICA DE CONFIGURACIÓN & ESTRUCTURAS
         // =========================================================================================
-        
+
         const CAT_PARENTS = {
             income: ['Salario', 'Freelance', 'Inversión', 'Ingreso Pasivo', 'Otros Ingresos'],
             expense: ['Costos Fijos', 'Costos Variables', 'Deuda/Financiero', 'Ocio/Discrecional', 'Otros Gastos'],
@@ -2032,6 +2032,23 @@
             }
             closeUserEdit();
             updateLocalUsersList();
+        }
+
+        // NUEVA FUNCIÓN: ELIMINACIÓN DE BÓVEDAS DE USUARIO
+        function deleteUserVault() {
+            const email = document.getElementById('edit-user-original-email').value;
+            if(confirm(`⚠ PELIGRO: ¿Estás seguro de eliminar permanentemente la bóveda del usuario ${email}? Se borrarán todos sus registros y datos financieros de este dispositivo.`)) {
+                localStorage.removeItem(`nexus_profile_${email}`);
+                localStorage.removeItem(`nexus_db_${email}`);
+
+                if(email === currentUser) {
+                    alert("Has eliminado tu propia bóveda activa. La sesión se cerrará inmediatamente para proteger la integridad del sistema.");
+                    logout();
+                } else {
+                    closeUserEdit();
+                    updateLocalUsersList();
+                }
+            }
         }
 
         // --- GESTIÓN AVANZADA DE CATEGORÍAS ---
@@ -2135,84 +2152,13 @@
 
         // 🔴 FIN NUEVO MÓDULO: LÓGICA DE CONFIGURACIÓN & ESTRUCTURAS
         // =========================================================================================
-
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Componentes UI y Numpad
-        function saveTransaction(e) { 
-            e.preventDefault(); 
-            const id = document.getElementById('f-id').value;
-            const type = document.getElementById('f-type').value; 
-            const amount = parseFloat(document.getElementById('f-amount').value); 
-            const cat = document.getElementById('f-cat').value; 
-            const accId = document.getElementById('f-account').value; 
-            const date = document.getElementById('f-date').value; 
-            const note = document.getElementById('f-note').value; 
-            
-            if(!amount || amount <= 0) return; 
-
-            if(id) {
-                const oldTx = state.tx.find(t => t.id === id);
-                if(oldTx && oldTx.accId) {
-                    const oldAcc = state.accounts.find(a => a.id === oldTx.accId);
-                    if(oldAcc && oldTx.type !== 'afterpay') {
-                        if(oldTx.type === 'income') oldAcc.balance -= oldTx.amount;
-                        if(oldTx.type === 'expense') oldAcc.balance += oldTx.amount;
-                    }
-                }
-                
-                oldTx.amount = amount; 
-                oldTx.cat = cat; 
-                oldTx.accId = type==='afterpay'?null:accId;
-                oldTx.date = new Date(date).toISOString(); 
-                oldTx.note = note;
-                
-                if(type === 'afterpay') {
-                    oldTx.apFreq = document.getElementById('f-ap-freq').value;
-                    oldTx.currency = 'AUD'; // Inyección estructural: Afterpay siempre AUD
-                }
-                
-                const newAcc = state.accounts.find(a => a.id === oldTx.accId);
-                if(newAcc && oldTx.type !== 'afterpay') {
-                    if(oldTx.type === 'income') newAcc.balance += oldTx.amount;
-                    if(oldTx.type === 'expense') newAcc.balance -= oldTx.amount;
-                }
-            } else {
-                const acc = state.accounts.find(a => a.id === accId); 
-                if(acc && type !== 'afterpay') { 
-                    if(type === 'income') acc.balance += amount; 
-                    if(type === 'expense') acc.balance -= amount; 
-                } 
-                
-                const newTx = { 
-                    id: 'tx_' + Date.now(), 
-                    type, amount, cat, 
-                    accId: type === 'afterpay' ? null : accId, 
-                    date: new Date(date).toISOString(), 
-                    note, 
-                    currency: type === 'afterpay' ? 'AUD' : state.activeCurrency // Inyección estructural
-                }; 
-                
-                if (type === 'afterpay') { 
-                    newTx.apFreq = document.getElementById('f-ap-freq').value; 
-                    newTx.apPaid = 0; 
-                } 
-                
-                state.tx.push(newTx); 
-            }
-            
-            saveState(); 
-            updateDashboard(); 
-            closeForm(); 
-            
-            if(state.activeTab === 'database') renderDatabase(); 
-            if(state.activeTab === 'afterpay') renderAfterpay(); 
-        }
-        // 🔴 FIN FUNCIONES: Formularios & Edición Transacciones SSoT
+        // 🟢 INICIO FUNCIONES: Componentes UI y Numpad (DELIMITADORES MEJORADOS)
         // =========================================================================================
         function openNumpad(id) { 
             numpadTargetId = id; 
             const el = document.getElementById(id); 
-            numpadCurrentValue = el.value ? el.value.toString() : ""; 
+            // Recuperamos el valor raw oculto, o limpiamos el visual
+            numpadCurrentValue = el.dataset.raw !== undefined ? el.dataset.raw : (el.value ? el.value.toString().replace(/[^\d.-]/g, '') : ""); 
             numpadFormatType = el.dataset.type || 'currency'; 
             document.getElementById('numpad-modal').classList.remove('hidden'); 
             updateNumpadDisplay(); 
@@ -2221,6 +2167,13 @@
         function numpadPress(char) { 
             if (numpadCurrentValue.length >= 15) return;
             if (char === '.' && numpadCurrentValue.includes('.')) return; 
+            
+            // Delimitador estricto de máximo 2 decimales
+            if (numpadCurrentValue.includes('.')) {
+                const parts = numpadCurrentValue.split('.');
+                if (parts[1] && parts[1].length >= 2) return;
+            }
+
             if (numpadCurrentValue === "0" && char === "0") return;
             if (numpadCurrentValue === "0" && char !== '.') {
                 numpadCurrentValue = char; 
@@ -2233,6 +2186,7 @@
 
         function numpadBackspace() { 
             numpadCurrentValue = numpadCurrentValue.slice(0, -1); 
+            if (numpadCurrentValue === "") numpadCurrentValue = "";
             updateNumpadDisplay(); 
             if(navigator.vibrate) navigator.vibrate(20); 
         }
@@ -2245,15 +2199,62 @@
             } 
             let v = parseFloat(numpadCurrentValue); 
             if(isNaN(v)) v = 0; 
+            
             if (numpadFormatType === 'currency') { 
                 if(numpadCurrentValue.endsWith('.')) {
-                    d.innerText = fmt(v) + (state.activeCurrency==='COP'? ",00" : "."); 
+                    // Muestra el punto decimal en vivo mientras se escribe
+                    d.innerText = fmt(v).replace(/(\.00|,00)$/, '') + '.'; 
+                } else if (numpadCurrentValue.includes('.')) {
+                    // Respeta los decimales mientras se escriben
+                    const parts = numpadCurrentValue.split('.');
+                    const intPart = parseFloat(parts[0]);
+                    d.innerText = fmt(intPart).replace(/(\.00|,00)$/, '') + '.' + parts[1];
                 } else {
                     d.innerText = fmt(v); 
                 }
             } else { 
-                d.innerText = numpadCurrentValue; 
+                // Añadido delimitador de miles a números normales
+                d.innerText = new Intl.NumberFormat('es-CO').format(v); 
+                if(numpadCurrentValue.endsWith('.')) d.innerText += '.'; 
             }
+        }
+
+        function numpadConfirm() { 
+            if (numpadTargetId) { 
+                const el = document.getElementById(numpadTargetId); 
+                el.dataset.raw = numpadCurrentValue; // Almacenamos el valor puro matemáticamente
+                
+                let v = parseFloat(numpadCurrentValue);
+                if(isNaN(v)) v = 0;
+                const visualValue = numpadFormatType === 'currency' ? fmt(v) : new Intl.NumberFormat('es-CO').format(v);
+
+                // MONKEY-PATCH: Redefinimos cómo se comporta el input para que muestre el valor formateado
+                // pero entregue el valor raw al resto del código cuando hagan parseFloat()
+                if (!el.dataset.patched) {
+                    const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+                    Object.defineProperty(el, 'value', {
+                        get: function() {
+                            return this.dataset.raw !== undefined ? this.dataset.raw : originalDescriptor.get.call(this);
+                        },
+                        set: function(val) {
+                            if(val === '' || val === null) {
+                                delete this.dataset.raw;
+                                originalDescriptor.set.call(this, '');
+                            } else {
+                                this.dataset.raw = val;
+                                originalDescriptor.set.call(this, val);
+                            }
+                        }
+                    });
+                    el.dataset.patched = "true";
+                }
+                
+                // Actualizamos visualmente usando el descriptor nativo del DOM
+                Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, visualValue);
+                el.dispatchEvent(new Event('change', { bubbles: true })); 
+            } 
+            closeNumpad(); 
+            if(navigator.vibrate) navigator.vibrate(50); 
         }
 
         function closeNumpad() { 
