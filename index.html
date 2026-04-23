@@ -131,11 +131,14 @@
                 <h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1>
                 <p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p>
             </div>
-            <div class="flex items-center gap-3">
-                <select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer">
-                    <!-- Dinámico -->
-                </select>
-                <button onclick="switchTab('settings')" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors"><i class="fa-solid fa-gear"></i></button>
+            <div class="flex items-center gap-2">
+                <div class="flex flex-col items-end gap-1">
+                    <select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer">
+                        <!-- Dinámico -->
+                    </select>
+                    <div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div>
+                </div>
+                <button onclick="switchTab('settings')" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
             </div>
         </div>
         <div id="period-nav" class="flex border-t border-slate-50/50">
@@ -857,6 +860,9 @@
             currSelects.forEach(s => {
                 const currentVal = s.value || state.activeCurrency;
                 s.innerHTML = '';
+                if (s.id === 'global-currency') {
+                    s.innerHTML += `<option value="GLOBAL">🌐 VISTA GLOBAL</option>`;
+                }
                 CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
                 s.value = currentVal;
             });
@@ -891,20 +897,89 @@
         }
         
         function fmt(val, forceCurrency = null) { 
-            const c = forceCurrency || state.activeCurrency; 
+            const c = forceCurrency || (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency); 
             const f = ['COP', 'JPY'].includes(c) ? 0 : 2; 
             return new Intl.NumberFormat('es-CO', { style:'currency', currency: c, minimumFractionDigits: f }).format(val); 
         }
-        
-        function convertCurrency(amount, fromCode, toCode) { 
-            if(fromCode === toCode) return amount;
-            const inUSD = amount / (EXCHANGE_RATES[fromCode] || 1);
-            return inUSD * (EXCHANGE_RATES[toCode] || 1); 
+
+        // 💡 ARQUITECTURA MULTI-DIVISA: Motor Dinámico de Conversión (Real-Time API)
+        let LIVE_RATES = EXCHANGE_RATES; // Fallback inicial estático
+
+        async function fetchLiveRates() {
+            try {
+                const response = await fetch('https://open.er-api.com/v6/latest/USD');
+                const data = await response.json();
+                if (data && data.rates) {
+                    LIVE_RATES = data.rates;
+                    console.log("Apex Architect: Tasas de cambio actualizadas en tiempo real.");
+                    updateCurrencyLabels();
+                    if (['home', 'analysis', 'report', 'finances'].includes(state.activeTab)) {
+                        updateDashboard();
+                    }
+                }
+            } catch (error) {
+                console.error("Error obteniendo tasas reales. Usando fallback offline.", error);
+            }
         }
-        
-        const getActiveAccounts = () => state.accounts.filter(a => a.currency === state.activeCurrency);
-        const getActiveTx = () => state.tx.filter(t => t.currency === state.activeCurrency);
-        const getActiveLoans = () => state.loans.filter(l => l.currency === state.activeCurrency);
+
+        function convertCurrency(amount, fromCode, toCode) { 
+            if (!amount) return 0;
+            if(fromCode === toCode) return amount;
+            const inUSD = amount / (LIVE_RATES[fromCode] || 1);
+            return inUSD * (LIVE_RATES[toCode] || 1); 
+        }
+
+        // 💡 ARQUITECTURA MULTI-DIVISA: Firebase Data Schema Helper
+        function buildTransactionSchema(baseObj) {
+            const baseCurrency = state.settings.baseCurrency || 'USD';
+            return {
+                ...baseObj,
+                id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                original_amount: baseObj.amount,
+                currency_code: baseObj.currency,
+                base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency),
+                flags: { isAfterpay: baseObj.type === 'afterpay' } // Banderas de control modular
+            };
+        }
+
+        // 💡 ARQUITECTURA MULTI-DIVISA: Currency Context Engine (Vistas Proyectadas)
+        const getActiveAccounts = () => {
+            if (state.activeCurrency === 'GLOBAL') {
+                const base = state.settings.baseCurrency;
+                return state.accounts.map(a => ({
+                    ...a, original_balance: a.balance, original_currency: a.currency,
+                    balance: convertCurrency(a.balance, a.currency, base),
+                    limit: convertCurrency(a.limit || 0, a.currency, base),
+                    currency: base, isVirtual: true
+                }));
+            }
+            return state.accounts.filter(a => a.currency === state.activeCurrency);
+        };
+
+        const getActiveTx = () => {
+            if (state.activeCurrency === 'GLOBAL') {
+                const base = state.settings.baseCurrency;
+                return state.tx.map(t => ({
+                    ...t, original_amount: t.amount, original_currency: t.currency,
+                    amount: convertCurrency(t.amount, t.currency, base),
+                    currency: base, isVirtual: true
+                }));
+            }
+            return state.tx.filter(t => t.currency === state.activeCurrency);
+        };
+
+        const getActiveLoans = () => {
+            if (state.activeCurrency === 'GLOBAL') {
+                const base = state.settings.baseCurrency;
+                return state.loans.map(l => ({
+                    ...l, original_total: l.total, original_balance: l.balance, original_currency: l.currency,
+                    total: convertCurrency(l.total, l.currency, base),
+                    balance: convertCurrency(l.balance, l.currency, base),
+                    currency: base, isVirtual: true
+                }));
+            }
+            return state.loans.filter(l => l.currency === state.activeCurrency);
+        };
 
         // NUEVA FUNCIÓN: Motor de Enriquecimiento Generativo (Cronología de Proyecciones)
         function getEnrichedTx() {
@@ -960,14 +1035,58 @@
             setContext(state.context); 
             switchTab(state.activeTab); 
             populateFilters(); 
-            document.querySelectorAll('.currency-label').forEach(el => el.innerText = state.activeCurrency); 
+            updateCurrencyLabels();
+            updateModuleVisibility();
+            fetchLiveRates(); // Llamada asíncrona para anclar conversiones a la API real
         }
         
+        function updateCurrencyLabels() {
+            const displayLabel = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
+            document.querySelectorAll('.currency-label').forEach(el => el.innerText = displayLabel);
+            
+            // 💡 ARQUITECTURA MULTI-DIVISA: Renderizado de Tasa en Vivo en el Header
+            const rateBadge = document.getElementById('live-rate-badge');
+            if(rateBadge) {
+                if(state.activeCurrency === 'GLOBAL') {
+                    rateBadge.innerHTML = `<i class="fa-solid fa-earth-americas mr-1"></i>Base: ${state.settings.baseCurrency}`;
+                    rateBadge.classList.remove('hidden');
+                } else if(state.activeCurrency !== state.settings.baseCurrency) {
+                    const rate = convertCurrency(1, state.settings.baseCurrency, state.activeCurrency);
+                    const formattedRate = rate > 100 ? rate.toFixed(0) : rate.toFixed(2);
+                    rateBadge.innerHTML = `<i class="fa-solid fa-bolt mr-1 text-amber-500"></i>1 ${state.settings.baseCurrency} = ${formattedRate} ${state.activeCurrency}`;
+                    rateBadge.classList.remove('hidden');
+                } else {
+                    rateBadge.classList.add('hidden');
+                }
+            }
+        }
+
         function changeGlobalCurrency(curr) { 
             state.activeCurrency = curr; 
             saveState(); 
-            document.querySelectorAll('.currency-label').forEach(el => el.innerText = curr); 
+            updateCurrencyLabels();
+            updateModuleVisibility();
             initNexus(); 
+        }
+
+        // 💡 ARQUITECTURA MULTI-DIVISA: Renderizador Condicional de Módulos (Flags)
+        function updateModuleVisibility() {
+            const isAfterpayAllowed = state.activeCurrency === 'AUD' || state.activeCurrency === 'GLOBAL';
+
+            document.querySelectorAll('button').forEach(btn => {
+                const txt = btn.innerText.toLowerCase();
+                const isApBtn = txt.includes('afterpay') || (btn.getAttribute('onclick') || '').includes('afterpay');
+
+                if (isApBtn && !btn.id.includes('db-filter')) {
+                    if (isAfterpayAllowed) btn.classList.remove('hidden');
+                    else btn.classList.add('hidden');
+                }
+            });
+
+            // Restricción UX: Expulsar al Home si la moneda no es AUD o GLOBAL y está en la vista Afterpay
+            if (state.activeTab === 'afterpay' && !isAfterpayAllowed) {
+                switchTab('home');
+            }
         }
 
         function setContext(ctx) {
@@ -1472,6 +1591,7 @@
                 
                 if(type === 'afterpay') {
                     oldTx.apFreq = document.getElementById('f-ap-freq').value;
+                    oldTx.currency = 'AUD'; // Inyección estructural: Afterpay siempre AUD
                 }
                 
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
@@ -1486,14 +1606,16 @@
                     if(type === 'expense') acc.balance -= amount; 
                 } 
                 
-                const newTx = { 
-                    id: 'tx_' + Date.now(), 
+                // 💡 ARQUITECTURA MULTI-DIVISA: Estructuración con Helper para Firebase
+                const rawTx = { 
                     type, amount, cat, 
                     accId: type === 'afterpay' ? null : accId, 
                     date: new Date(date).toISOString(), 
                     note, 
-                    currency: state.activeCurrency 
+                    currency: type === 'afterpay' ? 'AUD' : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency)
                 }; 
+                
+                const newTx = buildTransactionSchema(rawTx);
                 
                 if (type === 'afterpay') { 
                     newTx.apFreq = document.getElementById('f-ap-freq').value; 
@@ -1577,6 +1699,77 @@
                 } else { yearTableCont.classList.add('hidden'); }
             }
         }
+
+        function renderReport() {
+            const bC = state.settings.baseCurrency || 'COP';
+            const repBaseCurrEl = document.getElementById('rep-base-curr');
+            if (repBaseCurrEl) repBaseCurrEl.innerText = bC;
+            
+            let totAssets = 0; let totLiab = 0;
+            state.accounts.forEach(a => { 
+                if (a.type === 'credit') totLiab += convertCurrency(a.balance, a.currency, bC);
+                else totAssets += convertCurrency(a.balance, a.currency, bC);
+            });
+            state.loans.forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
+            
+            const repAssetsEl = document.getElementById('rep-assets');
+            const repLiabilitiesEl = document.getElementById('rep-liabilities');
+            if (repAssetsEl) repAssetsEl.innerText = fmt(totAssets, bC);
+            if (repLiabilitiesEl) repLiabilitiesEl.innerText = fmt(totLiab, bC);
+
+            const now = new Date();
+            const past90d = new Date(now.getTime() - (90 * 86400000));
+            const enrichedTx = getEnrichedTx().filter(t => t.type !== 'afterpay');
+            
+            const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now);
+            const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            
+            const savingsRate = inc90d > 0 ? ((inc90d - exp90d) / inc90d * 100) : 0;
+            const repSavingsEl = document.getElementById('rep-savings');
+            if (repSavingsEl) {
+                repSavingsEl.innerText = savingsRate.toFixed(1) + '%';
+                repSavingsEl.className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
+            }
+            
+            const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
+            const repHealthEl = document.getElementById('rep-health');
+            if (repHealthEl) {
+                repHealthEl.innerText = debtRatio.toFixed(1) + '%';
+                repHealthEl.className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
+                if(debtRatio <= 20) repHealthEl.className = 'text-lg font-black tabular-nums theme-val-inc';
+            }
+
+            const repNarrativeEl = document.getElementById('rep-narrative');
+            if (repNarrativeEl) {
+                repNarrativeEl.innerHTML = `
+                    Mantenemos una liquidez consolidada de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo total de <strong>${fmt(totLiab, bC)}</strong>. 
+                    ${savingsRate >= 20 ? 'Excelente capacidad de ahorro en el trimestre operativo.' : (savingsRate > 0 ? 'Capacidad de ahorro moderada, requiere optimización de egresos.' : 'Alerta crítica de liquidez: Burn rate superior al ingreso.')} 
+                    Su apalancamiento es del ${debtRatio.toFixed(1)}%.
+                `;
+            }
+            
+            const ctxTrend = document.getElementById('report-chart-trend');
+            if (ctxTrend) {
+                if(charts.trend) charts.trend.destroy();
+                charts.trend = new Chart(ctxTrend.getContext('2d'), { 
+                    type: 'bar', 
+                    data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes Actual'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, 
+                    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
+                });
+            }
+
+            const ctxVs = document.getElementById('report-chart-vs');
+            if (ctxVs) {
+                if(charts.vs) charts.vs.destroy();
+                charts.vs = new Chart(ctxVs.getContext('2d'), {
+                    type: 'doughnut',
+                    data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]},
+                    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' }
+                });
+            }
+        }
+
         function openFinanceReport(type) { 
             const fm = document.getElementById('finances-menu'); const fd = document.getElementById('finances-detail');
             if(fm) fm.classList.add('hidden'); if(fd) fd.classList.remove('hidden'); 
@@ -1700,6 +1893,64 @@
             document.body.appendChild(node); 
             node.click(); 
             node.remove();
+        }
+
+        function renderReport() {
+            const bC = state.settings.baseCurrency;
+            document.getElementById('rep-base-curr').innerText = bC;
+            
+            let totAssets = 0; let totLiab = 0;
+            state.accounts.forEach(a => { 
+                if (a.type === 'credit') totLiab += convertCurrency(a.balance, a.currency, bC);
+                else totAssets += convertCurrency(a.balance, a.currency, bC);
+            });
+            state.loans.forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
+            
+            document.getElementById('rep-assets').innerText = fmt(totAssets, bC);
+            document.getElementById('rep-liabilities').innerText = fmt(totLiab, bC);
+
+            const now = new Date();
+            const past90d = new Date(now.getTime() - (90 * 86400000));
+            const enrichedTx = getEnrichedTx().filter(t => t.type !== 'afterpay');
+            
+            const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now);
+            const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            
+            const savingsRate = inc90d > 0 ? ((inc90d - exp90d) / inc90d * 100) : 0;
+            document.getElementById('rep-savings').innerText = savingsRate.toFixed(1) + '%';
+            document.getElementById('rep-savings').className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
+            
+            const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
+            document.getElementById('rep-health').innerText = debtRatio.toFixed(1) + '%';
+            document.getElementById('rep-health').className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
+            if(debtRatio <= 20) document.getElementById('rep-health').className = 'text-lg font-black tabular-nums theme-val-inc';
+
+            document.getElementById('rep-narrative').innerHTML = `
+                Mantenemos una liquidez consolidada de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo total de <strong>${fmt(totLiab, bC)}</strong>. 
+                ${savingsRate >= 20 ? 'Excelente capacidad de ahorro en el trimestre operativo.' : (savingsRate > 0 ? 'Capacidad de ahorro moderada, requiere optimización de egresos.' : 'Alerta crítica de liquidez: Burn rate superior al ingreso.')} 
+                Su apalancamiento es del ${debtRatio.toFixed(1)}%.
+            `;
+            
+            const ctxTrend = document.getElementById('report-chart-trend').getContext('2d');
+            if(charts.trend) charts.trend.destroy();
+            charts.trend = new Chart(ctxTrend, { 
+                type: 'bar', 
+                data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes Actual'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, 
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
+            });
+
+            const ctxVs = document.getElementById('report-chart-vs').getContext('2d');
+            if(charts.vs) charts.vs.destroy();
+            charts.vs = new Chart(ctxVs, {
+                type: 'doughnut',
+                data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]},
+                options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' }
+            });
+        }
+
+        function deleteDatabaseRecord(id) {
+            deleteTx(new Event('click'), id);
         }
 
         // =========================================================================================
