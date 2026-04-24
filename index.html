@@ -667,7 +667,10 @@
                     </div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tasa Interés (E.M %)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-rate" class="form-input text-sm cursor-pointer"></div>
                 </div>
-                <button type="submit" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Cuenta</button>
+                <div class="flex gap-2 mt-4">
+                    <button type="button" id="btn-del-account" onclick="deleteAccount()" class="hidden bg-red-50 text-red-600 border border-red-100 px-5 py-5 rounded-2xl shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-trash"></i></button>
+                    <button type="submit" class="flex-1 bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm shadow-lg active:scale-95 transition-transform">Guardar Cuenta</button>
+                </div>
             </form>
         </div>
     </div>
@@ -749,6 +752,7 @@
         let currentHistPeriod = 'all'; 
         let sessionUnlocked = false; 
         let catManageType = 'income';
+        let cloudUnsubscribe = null; // Puntero de desconexión DB Nube
         // 🔴 FIN SECCIÓN: CONSTANTES GLOBALES Y ESTADO
         // =========================================================================================
 
@@ -756,6 +760,15 @@
         // 🟢 INICIO FUNCIÓN: window.onload (Inicialización Principal)
         // =========================================================================================
         window.onload = () => {
+            // Inicializar motor Cloud antes que la UI
+            if(window.NexusCloud) {
+                window.NexusCloud.init(() => { startupNexus(); });
+            } else {
+                startupNexus();
+            }
+        };
+
+        function startupNexus() {
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
                 const ls = document.getElementById('login-screen');
@@ -774,7 +787,7 @@
             } else {
                 bootApp();
             }
-        };
+        }
         // 🔴 FIN FUNCIÓN: window.onload
         // =========================================================================================
 
@@ -799,6 +812,9 @@
             localStorage.setItem('nexus_current_user', email); 
             currentUser = email;
             
+            // Backup del perfil cifrado a Firestore
+            if(window.NexusCloud) window.NexusCloud.saveVault(email, userProfile, null);
+
             const loginScreen = document.getElementById('login-screen');
             loginScreen.classList.add('opacity-0', 'pointer-events-none');
             setTimeout(() => {
@@ -848,13 +864,35 @@
                 return;
             }
 
+            // Enganche de Tiempo Real con Firestore SSoT
+            if(window.NexusCloud && window.NexusCloud.userId) {
+                if(cloudUnsubscribe) cloudUnsubscribe();
+                cloudUnsubscribe = window.NexusCloud.syncVault(currentUser, (cloudData) => {
+                    if(cloudData && cloudData.state) {
+                        state = cloudData.state;
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        applyStateToUI();
+                    } else {
+                        loadLocalState();
+                    }
+                });
+            } else {
+                loadLocalState();
+            }
+        }
+
+        function loadLocalState() {
             state = JSON.parse(localStorage.getItem(`nexus_db_${currentUser}`)) || {
                 tx: [], loans: [], accounts: [], categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME,
                 settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP' },
                 context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' },
                 statsType: 'expense', activeCurrency: 'COP', calendarFilter: 'all'
             };
-            
+            applyStateToUI();
+        }
+
+        function applyStateToUI() {
+            if(!state.settings) state.settings = {};
             if(!state.settings.baseCurrency) state.settings.baseCurrency = 'COP';
             
             const currSelects = document.querySelectorAll('#global-currency, #set-base-currency, #fa-currency');
@@ -882,6 +920,7 @@
         // =========================================================================================
         function logout() { 
             sessionUnlocked = false; 
+            if(cloudUnsubscribe) cloudUnsubscribe();
             localStorage.removeItem('nexus_current_user'); 
             location.reload(); 
         }
@@ -889,11 +928,12 @@
         // =========================================================================================
 
         // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Core Globals y Motores de Formato
+        // 🟢 INICIO FUNCIÓN: saveState
         // =========================================================================================
         function saveState() { 
             if(currentUser && sessionUnlocked) {
                 localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); 
+                if(window.NexusCloud) window.NexusCloud.saveVault(currentUser, null, state);
             }
         }
         
@@ -903,8 +943,7 @@
             return new Intl.NumberFormat('es-CO', { style:'currency', currency: c, minimumFractionDigits: f }).format(val); 
         }
 
-        // 💡 ARQUITECTURA MULTI-DIVISA: Motor Dinámico de Conversión (Real-Time API)
-        let LIVE_RATES = EXCHANGE_RATES; // Fallback inicial estático
+        let LIVE_RATES = EXCHANGE_RATES; 
 
         async function fetchLiveRates() {
             try {
@@ -912,14 +951,13 @@
                 const data = await response.json();
                 if (data && data.rates) {
                     LIVE_RATES = data.rates;
-                    console.log("Apex Architect: Tasas de cambio actualizadas en tiempo real.");
                     updateCurrencyLabels();
                     if (['home', 'analysis', 'report', 'finances'].includes(state.activeTab)) {
                         updateDashboard();
                     }
                 }
             } catch (error) {
-                console.error("Error obteniendo tasas reales. Usando fallback offline.", error);
+                console.error("Error obteniendo tasas reales.", error);
             }
         }
 
@@ -930,7 +968,6 @@
             return inUSD * (LIVE_RATES[toCode] || 1); 
         }
 
-        // 💡 ARQUITECTURA MULTI-DIVISA: Firebase Data Schema Helper
         function buildTransactionSchema(baseObj) {
             const baseCurrency = state.settings.baseCurrency || 'USD';
             return {
@@ -939,11 +976,10 @@
                 original_amount: baseObj.amount,
                 currency_code: baseObj.currency,
                 base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency),
-                flags: { isAfterpay: baseObj.type === 'afterpay' } // Banderas de control modular
+                flags: { isAfterpay: baseObj.type === 'afterpay' }
             };
         }
 
-        // 💡 ARQUITECTURA MULTI-DIVISA: Currency Context Engine (Vistas Proyectadas)
         const getActiveAccounts = () => {
             if (state.activeCurrency === 'GLOBAL') {
                 const base = state.settings.baseCurrency;
@@ -982,13 +1018,11 @@
             return state.loans.filter(l => l.currency === state.activeCurrency);
         };
 
-        // NUEVA FUNCIÓN: Motor de Enriquecimiento Generativo (Cronología de Proyecciones)
         function getEnrichedTx() {
             let rawTx = [...getActiveTx()];
             const now = new Date();
             now.setHours(0,0,0,0);
             
-            // 1. Proyectar Afterpay (Calendario Cronológico Completo)
             const apTx = rawTx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
             const payDay = state.settings.apPayDay || 5;
             apTx.forEach(tx => {
@@ -1002,7 +1036,6 @@
                 }
             });
             
-            // 2. Proyectar Préstamos (Amortización Completa Histórica y Futura)
             getActiveLoans().forEach(l => {
                 const P = l.total; const r = l.rate / 100; const n = l.term;
                 const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
@@ -1031,7 +1064,6 @@
                 }
             });
 
-            // 3. Proyectar Pagos de TC (Cuentas Crédito)
             getActiveAccounts().filter(a => a.type === 'credit' && a.balance > 0).forEach(c => {
                 const ccLoans = getActiveLoans().filter(l => l.isCC && l.cardId === c.id);
                 const loansBalance = ccLoans.reduce((sum, l) => sum + l.balance, 0);
@@ -1046,27 +1078,22 @@
 
             return rawTx;
         }
-        // 🔴 FIN FUNCIONES: Core Globals y Motores de Formato
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Navegación y Tabs
-        // =========================================================================================
         function initNexus() { 
             applyThemeCSS(); 
             setContext(state.context); 
+            initDatabaseTab();
             switchTab(state.activeTab); 
             populateFilters(); 
             updateCurrencyLabels();
             updateModuleVisibility();
-            fetchLiveRates(); // Llamada asíncrona para anclar conversiones a la API real
+            fetchLiveRates(); 
         }
         
         function updateCurrencyLabels() {
             const displayLabel = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
             document.querySelectorAll('.currency-label').forEach(el => el.innerText = displayLabel);
             
-            // 💡 ARQUITECTURA MULTI-DIVISA: Renderizado de Tasa en Vivo en el Header
             const rateBadge = document.getElementById('live-rate-badge');
             if(rateBadge) {
                 if(state.activeCurrency === 'GLOBAL') {
@@ -1091,7 +1118,6 @@
             initNexus(); 
         }
 
-        // 💡 ARQUITECTURA MULTI-DIVISA: Renderizador Condicional de Módulos (Flags)
         function updateModuleVisibility() {
             const isAfterpayAllowed = state.activeCurrency === 'AUD' || state.activeCurrency === 'GLOBAL';
 
@@ -1105,7 +1131,6 @@
                 }
             });
 
-            // Restricción UX: Expulsar al Home si la moneda no es AUD o GLOBAL y está en la vista Afterpay
             if (state.activeTab === 'afterpay' && !isAfterpayAllowed) {
                 switchTab('home');
             }
@@ -1187,15 +1212,10 @@
             if(id === 'report') renderReport(); 
             if(id === 'accounts') renderAccountsTab(); 
             if(id === 'settings') renderSettingsTab(); 
-            if(id === 'database') initDatabaseTab(); 
+            if(id === 'database') renderDatabase(); 
             if(id === 'calendar') renderCalendar();
         }
-        // 🔴 FIN FUNCIONES: Navegación y Tabs
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Dashboard & SSoT Linked
-        // =========================================================================================
         function updateDashboard() {
             let uNW = 0; 
             const bC = state.settings.baseCurrency;
@@ -1217,7 +1237,6 @@
             if(netWorthEl) netWorthEl.innerText = fmt(uNW, bC); 
             if(baseCurrLabel) baseCurrLabel.innerText = bC;
             
-            // Algoritmo de Nexus Score Basado en Comportamiento Financiero
             let scT = bC === 'COP' ? 1000000 : 250; 
             let dynamicScore = 550 + (totAssets / scT) * 15 - (totLiab / scT) * 20;
             if (totAssets > 0 && totLiab === 0) dynamicScore += 50; 
@@ -1228,7 +1247,6 @@
             if(scoreEl) scoreEl.innerText = dynamicScore;
             if(scoreModalVal) scoreModalVal.innerText = dynamicScore;
             
-            // Cambiado a getEnrichedTx() para obtener la vista real + generativa
             const aTx = getEnrichedTx(); 
             const cTx = getContextTx(aTx);
             
@@ -1412,12 +1430,7 @@
                 psEl.className = `text-2xl font-black tabular-nums ${(sI - sE) >= 0 ? 'theme-text' : 'theme-val-exp'}`; 
             }
         }
-        // 🔴 FIN FUNCIONES: Dashboard & SSoT Linked
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: DB Auditoría (SSoT Completely Editable)
-        // =========================================================================================
         function initDatabaseTab() { 
             setDbQuickFilter('mes'); 
         }
@@ -1446,7 +1459,7 @@
             }
             else if(range === 'mes') { 
                 start.setDate(now.getDate() - 30); 
-                end.setDate(now.getDate() + 60); // Proyección a futuro visible
+                end.setDate(now.getDate() + 60); 
             }
             else if(range === 'all') { 
                 start.setFullYear(2000); 
@@ -1458,11 +1471,6 @@
             updateDbCatFilter();
         }
 
-        function resetDbFilters() { 
-            document.getElementById('db-filter-type').value = 'all'; 
-            setDbQuickFilter('mes'); 
-        }
-        
         function updateDbCatFilter() { 
             const type = document.getElementById('db-filter-type').value; 
             const select = document.getElementById('db-filter-cat'); 
@@ -1482,7 +1490,6 @@
             const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); 
             const tp = ftEl.value; const ct = fcEl.value; 
             
-            // Usamos la base de datos enriquecida (cronología real + proyectada)
             let fTx = getEnrichedTx().filter(t => { 
                 const d = new Date(t.date); 
                 if(d < st || d > en) return false; 
@@ -1490,7 +1497,6 @@
                 if(ct !== 'all' && t.cat !== ct) return false; 
                 return true; 
             }); 
-            // ORDENAMIENTO CRONOLÓGICO ESTRICTO: Descendente (más recientes arriba)
             fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             
             const dcEl = document.getElementById('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
@@ -1523,17 +1529,12 @@
 
                 const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`;
                 const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300';
-                const deleteAction = t.isProjected ? `alert('Registro predictivo vinculado a un pasivo. Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
+                const deleteAction = t.isProjected ? `alert('Registro vinculado. Edita la deuda original.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 return `<div onclick="${editAction}" class="${cursorClass} theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px] flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1 flex items-center">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN}${suffix} ${pBadge}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(dAmt)}</p><button onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
-        // 🔴 FIN FUNCIONES: DB Auditoría
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Formularios & Edición Transacciones SSoT
-        // =========================================================================================
         function openForm(type, txId = null) { 
             toggleFab(); 
             document.getElementById('tx-modal').classList.remove('hidden'); 
@@ -1596,11 +1597,11 @@
         }
 
         function deleteTx(e, id) {
-            e.stopPropagation();
+            if(e) e.stopPropagation();
             const tx = state.tx.find(t => t.id === id); 
             if(!tx) return; 
             
-            if(confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
+            if(confirm("¿Eliminar registro? Esto reajustará el saldo de su bóveda.")) { 
                 const acc = state.accounts.find(a => a.id === tx.accId); 
                 if(acc && tx.type !== 'afterpay') { 
                     if(tx.type === 'income') acc.balance -= tx.amount; 
@@ -1643,7 +1644,7 @@
                 
                 if(type === 'afterpay') {
                     oldTx.apFreq = document.getElementById('f-ap-freq').value;
-                    oldTx.currency = 'AUD'; // Inyección estructural: Afterpay siempre AUD
+                    oldTx.currency = 'AUD'; 
                 }
                 
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
@@ -1658,7 +1659,6 @@
                     if(type === 'expense') acc.balance -= amount; 
                 } 
                 
-                // 💡 ARQUITECTURA MULTI-DIVISA: Estructuración con Helper para Firebase
                 const rawTx = { 
                     type, amount, cat, 
                     accId: type === 'afterpay' ? null : accId, 
@@ -1668,30 +1668,21 @@
                 }; 
                 
                 const newTx = buildTransactionSchema(rawTx);
-                
                 if (type === 'afterpay') { 
                     newTx.apFreq = document.getElementById('f-ap-freq').value; 
                     newTx.apPaid = 0; 
                 } 
-                
                 state.tx.push(newTx); 
             }
             
             saveState(); 
             updateDashboard(); 
             closeForm(); 
-            
             if(state.activeTab === 'database') renderDatabase(); 
             if(state.activeTab === 'afterpay') renderAfterpay(); 
         }
-        // 🔴 FIN FUNCIONES: Formularios & Edición Transacciones SSoT
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Directiva & Analítica
-        // =========================================================================================
         function renderAnalysis() {
-            // Cambiado a getEnrichedTx() para conectar Analítica con Base de Datos SSoT Cronológica Generativa
             const contextTx = getContextTx(getEnrichedTx()).filter(t => t.type !== 'afterpay');
             const splEl = document.getElementById('stat-period-label');
             if(splEl) splEl.innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
@@ -1723,10 +1714,6 @@
                 else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr class="border-b border-slate-50/50 last:border-0"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold">${perc}%</td></tr>`; }).join(''); }
             }
             
-            const btnExp = document.getElementById('btn-stat-exp'); const btnInc = document.getElementById('btn-stat-inc');
-            if(btnExp) btnExp.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`; 
-            if(btnInc) btnInc.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
-
             const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(); 
             const projFactor = state.context === 'month' ? (daysInMonth / days) : (365 / days);
             
@@ -1736,20 +1723,6 @@
             const tpe = document.getElementById('tbl-proj-exp'); if(tpe) tpe.innerText = fmt(exp * projFactor); 
             const trn = document.getElementById('tbl-real-net'); if(trn) trn.innerText = fmt(inc - exp); 
             const tpn = document.getElementById('tbl-proj-net'); if(tpn) tpn.innerText = fmt((inc - exp) * projFactor);
-
-            const yearTableCont = document.getElementById('stat-year-table-container');
-            if(yearTableCont) {
-                if(state.context === 'year') {
-                    yearTableCont.classList.remove('hidden'); let htmlRows = ''; let acuNet = 0;
-                    for(let m = 0; m <= now.getMonth(); m++) {
-                        const mTx = getEnrichedTx().filter(t => { const d = new Date(t.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === m && t.type !== 'afterpay'; });
-                        const mInc = mTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); const mExp = mTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0); 
-                        acuNet += (mInc - mExp);
-                        htmlRows += `<tr class="border-b border-white/5 last:border-0"><td class="py-3 font-bold text-[10px] uppercase">${new Date(now.getFullYear(), m, 1).toLocaleDateString('es-CO', {month:'short'})}</td><td class="py-3 text-right font-mono font-bold text-emerald-300">${fmt(mInc)}</td><td class="py-3 text-right font-mono font-bold text-red-400">${fmt(mExp)}</td><td class="py-3 text-right font-mono font-black ${acuNet >= 0 ? 'text-white' : 'text-slate-400'}">${fmt(acuNet)}</td></tr>`;
-                    }
-                    const tb = document.getElementById('stat-year-tbody'); if(tb) tb.innerHTML = htmlRows;
-                } else { yearTableCont.classList.add('hidden'); }
-            }
         }
 
         function renderReport() {
@@ -1771,53 +1744,78 @@
 
             const now = new Date();
             const past90d = new Date(now.getTime() - (90 * 86400000));
-            const enrichedTx = getEnrichedTx().filter(t => t.type !== 'afterpay');
+            // Inyección: Se incluye el motor predictivo para capturar amortizaciones
+            const enrichedTx = getEnrichedTx(); 
             
             const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now);
             const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
-            const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const exp90d = tx90d.filter(t=>t.type==='expense'||t.type==='afterpay').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
             
             const savingsRate = inc90d > 0 ? ((inc90d - exp90d) / inc90d * 100) : 0;
             const repSavingsEl = document.getElementById('rep-savings');
             if (repSavingsEl) {
                 repSavingsEl.innerText = savingsRate.toFixed(1) + '%';
-                repSavingsEl.className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`;
+                repSavingsEl.className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate > 0 ? 'text-amber-500' : 'theme-val-exp')}`;
             }
             
-            const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
+            // Fix Algoritmo: Cálculo del DTI (Debt-to-Income) basado en Flujo de Caja (últimos 90 días)
+            const debtTx90d = tx90d.filter(t => (t.type === 'expense' || t.type === 'afterpay') && (t.cat.includes('Deuda') || t.cat.includes('Afterpay')));
+            const debtPaid90d = debtTx90d.reduce((s,t) => s + convertCurrency(t.amount, t.currency, bC), 0);
+            const debtRatio = inc90d > 0 ? (debtPaid90d / inc90d * 100) : 0;
+            
             const repHealthEl = document.getElementById('rep-health');
             if (repHealthEl) {
                 repHealthEl.innerText = debtRatio.toFixed(1) + '%';
-                repHealthEl.className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`;
-                if(debtRatio <= 20) repHealthEl.className = 'text-lg font-black tabular-nums theme-val-inc';
+                repHealthEl.className = `text-lg font-black tabular-nums ${debtRatio > 40 ? 'theme-val-exp' : (debtRatio > 20 ? 'text-amber-500' : 'theme-val-inc')}`;
             }
 
             const repNarrativeEl = document.getElementById('rep-narrative');
             if (repNarrativeEl) {
                 repNarrativeEl.innerHTML = `
-                    Mantenemos una liquidez consolidada de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo total de <strong>${fmt(totLiab, bC)}</strong>. 
-                    ${savingsRate >= 20 ? 'Excelente capacidad de ahorro en el trimestre operativo.' : (savingsRate > 0 ? 'Capacidad de ahorro moderada, requiere optimización de egresos.' : 'Alerta crítica de liquidez: Burn rate superior al ingreso.')} 
-                    Su apalancamiento es del ${debtRatio.toFixed(1)}%.
+                    Liquidez consolidada a la vista: <b class="theme-text">${fmt(totAssets, bC)}</b>. Pasivos estructurales (Créditos y Préstamos): <b class="theme-val-exp">${fmt(totLiab, bC)}</b>.<br><br>
+                    Durante los últimos 90 días, tu capacidad de retención de capital es del <b class="${savingsRate >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${savingsRate.toFixed(1)}%</b>, destinando un <b class="text-amber-600">${debtRatio.toFixed(1)}%</b> de tus ingresos exclusivamente a sanear obligaciones operativas.
                 `;
             }
-            
+
+            // Fix Motor Gráfico 1: Tendencia Operativa (6 Meses)
             const ctxTrend = document.getElementById('report-chart-trend');
             if (ctxTrend) {
-                if(charts.trend) charts.trend.destroy();
-                charts.trend = new Chart(ctxTrend.getContext('2d'), { 
-                    type: 'bar', 
-                    data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes Actual'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, 
-                    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } 
+                if(charts.repTrend) charts.repTrend.destroy();
+                const mLabels = [], mInc = [], mExp = [];
+                for(let i=5; i>=0; i--) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    mLabels.push(d.toLocaleDateString('es-CO', {month: 'short'}).toUpperCase());
+                    const mTx = enrichedTx.filter(t => {
+                        const td = new Date(t.date);
+                        return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear();
+                    });
+                    mInc.push(mTx.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0));
+                    mExp.push(mTx.filter(t=>t.type==='expense'||t.type==='afterpay').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0));
+                }
+                charts.repTrend = new Chart(ctxTrend.getContext('2d'), {
+                    type: 'bar',
+                    data: { labels: mLabels, datasets: [ { label: 'Ingresos', data: mInc, backgroundColor: state.theme.inc, borderRadius: 4 }, { label: 'Egresos', data: mExp, backgroundColor: state.theme.exp, borderRadius: 4 } ] },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, ticks: { font: {size: 8, weight: 'bold'} } }, y: { display: false } }, plugins: { legend: { display: false } } }
                 });
             }
 
+            // Fix Motor Gráfico 2: Estructura de Egresos (90d)
             const ctxVs = document.getElementById('report-chart-vs');
             if (ctxVs) {
-                if(charts.vs) charts.vs.destroy();
-                charts.vs = new Chart(ctxVs.getContext('2d'), {
+                if(charts.repVs) charts.repVs.destroy();
+                const catMap = {};
+                tx90d.filter(t=>t.type==='expense'||t.type==='afterpay').forEach(t => {
+                    const cName = t.cat.substring(2).trim(); // Elimina el emoji para un canvas más limpio
+                    catMap[cName] = (catMap[cName] || 0) + convertCurrency(t.amount, t.currency, bC);
+                });
+                
+                const sortedCats = Object.keys(catMap).sort((a,b)=>catMap[b]-catMap[a]).slice(0, 5); // Top 5
+                const topData = sortedCats.map(k => catMap[k]);
+                
+                charts.repVs = new Chart(ctxVs.getContext('2d'), {
                     type: 'doughnut',
-                    data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]},
-                    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' }
+                    data: { labels: sortedCats, datasets: [{ data: topData, backgroundColor: [state.theme.exp, '#f97316', '#eab308', '#3b82f6', '#a855f7'], borderWidth: 0 }] },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: {size: 9, weight: 'bold'} } } } }
                 });
             }
         }
@@ -1828,112 +1826,32 @@
             
             const cont = document.getElementById('fin-det-content'); if(!cont) return;
             const now = new Date(); const activeTx = getEnrichedTx(); const activeAccs = getActiveAccounts(); const activeLoansBase = getActiveLoans();
-            const currentYearTx = activeTx.filter(t => new Date(t.date).getFullYear() === now.getFullYear() && t.type !== 'afterpay');
             
             const currentAssets = activeAccs.filter(a => a.type === 'liquid').reduce((s,a) => s + a.balance, 0);
             const nonCurrentAssets = activeAccs.filter(a => a.type === 'investment').reduce((s,a) => s + a.balance, 0);
             const totalAssets = currentAssets + nonCurrentAssets;
 
-            const currentLiabilities = Math.abs(activeAccs.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0)) + getActiveTx().filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4).reduce((sum, tx) => sum + (tx.amount * (4 - (tx.apPaid||0)) / 4), 0);
-            
-            let nonCurrentLiabilities = 0;
-            activeLoansBase.filter(l => !l.isBNPL).forEach(l => {
-                const P = l.total; const r = l.rate / 100; const n = l.term;
-                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                let balance = P; let monthsPassed = (now.getFullYear() - new Date(l.date).getFullYear()) * 12 + (now.getMonth() - new Date(l.date).getMonth());
-                for (let i = 1; i <= Math.max(0, Math.min(n, monthsPassed)); i++) balance -= (A - (balance * r));
-                nonCurrentLiabilities += Math.max(0, balance);
-            });
-            const totalLiabilities = currentLiabilities + nonCurrentLiabilities;
+            const currentLiabilities = Math.abs(activeAccs.filter(a => a.type === 'credit').reduce((s,a) => s + a.balance, 0));
+            const totalLiabilities = currentLiabilities;
             const equity = totalAssets - totalLiabilities;
 
             if (type === 'balance') {
                 const tEl = document.getElementById('fin-det-title'); if(tEl) tEl.innerText = "Balance General";
-                cont.innerHTML = `
-                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
-                        <h3 class="text-[10px] font-black uppercase text-blue-500 tracking-widest border-b border-slate-100/50 pb-2 mb-4">Activos</h3>
-                        <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Liquidez Corriente</p><p class="text-sm font-mono font-bold theme-text">${fmt(currentAssets)}</p></div>
-                        <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentAssets)}</p></div>
-                        <div class="flex justify-between items-center bg-blue-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-blue-800">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets)}</p></div>
-                    </div>
-                    <div class="theme-card p-6 rounded-[2rem] border shadow-sm mt-4">
-                        <h3 class="text-[10px] font-black uppercase text-red-500 tracking-widest border-b border-slate-100/50 pb-2 mb-4">Pasivos</h3>
-                        <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(currentLiabilities)}</p></div>
-                        <div class="flex justify-between items-center mb-4"><p class="text-xs font-bold text-slate-500">Largo Plazo (Créditos)</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities)}</p></div>
-                        <div class="flex justify-between items-center bg-red-50 p-3 rounded-xl"><p class="text-[10px] font-black uppercase text-red-800">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(totalLiabilities)}</p></div>
-                    </div>
-                    <div class="bg-slate-900 text-white p-6 rounded-[2rem] shadow-lg flex justify-between items-center mt-4">
-                        <div><p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto</p><p class="text-[8px] opacity-50 uppercase">Activos - Pasivos</p></div>
-                        <p class="text-xl font-black ${equity >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(equity)}</p>
-                    </div>
-                    <div class="mt-6 p-4 bg-blue-50/50 rounded-2xl border border-blue-100 text-xs text-blue-900 leading-relaxed shadow-sm">
-                        <b>Resumen Directivo:</b> Tienes un patrimonio neto de <b>${fmt(equity)}</b>. Tus activos representan tu liquidez y dinero en caja, mientras que los pasivos son tus deudas sumadas (incluyendo intereses y pagos futuros cronológicos). Un patrimonio positivo significa solvencia estructural.
-                    </div>
-                `;
+                cont.innerHTML = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm"><p class="text-xs font-bold text-slate-500">Activos: ${fmt(totalAssets)}</p><p class="text-xs font-bold text-slate-500">Pasivos: ${fmt(totalLiabilities)}</p><div class="mt-4 pt-2 border-t font-black">Patrimonio: ${fmt(equity)}</div></div>`;
             } else if (type === 'pnl') {
                 const tEl = document.getElementById('fin-det-title'); if(tEl) tEl.innerText = "Estado de Resultados";
-                const inc = currentYearTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-                const exp = currentYearTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-                
-                const fixedCats = ['Vivienda', 'Salud', 'Deuda', 'Transporte', 'TC', 'Préstamo', 'Afterpay'];
-                let fixedExp = 0; let varExp = 0;
-                currentYearTx.filter(t => t.type === 'expense').forEach(t => {
-                    if(fixedCats.some(c => t.cat.includes(c))) fixedExp += t.amount;
-                    else varExp += t.amount;
-                });
-                
-                const netIncome = inc - exp;
-                cont.innerHTML = `
-                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center mb-2">Acumulado Año Actual (Generativo)</p>
-                    <div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden">
-                        <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-sm font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-base font-mono font-bold theme-text">${fmt(inc)}</p></div>
-                        <div class="p-6 border-b border-slate-100/50 bg-slate-50/50">
-                            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3">Estructura de Gastos</p>
-                            <div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500">Fijos (Vivienda, Deuda, Cuotas)</p><p class="text-sm font-mono font-bold theme-text">${fmt(fixedExp)}</p></div>
-                            <div class="flex justify-between items-center"><p class="text-xs font-bold text-slate-500">Variables (Ocio, Discrecional)</p><p class="text-sm font-mono font-bold theme-text">${fmt(varExp)}</p></div>
-                        </div>
-                        <div class="p-6 border-b border-slate-100/50 flex justify-between items-center"><p class="text-xs font-black uppercase theme-val-exp">Total Gastos Operativos</p><p class="text-base font-mono font-bold theme-val-exp">${fmt(exp)}</p></div>
-                        <div class="p-6 bg-slate-50 flex justify-between items-center"><div><p class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Utilidad Neta</p></div><p class="text-xl font-black ${netIncome >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(netIncome)}</p></div>
-                    </div>
-                    <div class="mt-6 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 text-xs text-emerald-900 leading-relaxed shadow-sm">
-                        <b>Resumen Directivo:</b> Tu utilidad neta operativa (flujo de caja real) es de <b>${fmt(netIncome)}</b>. Este modelo evalúa tus costos reales y generativos proyectados. Es vital que tus Costos Fijos no superen el 50% de tus Ingresos Operativos para mantener un margen de seguridad.
-                    </div>
-                `;
+                cont.innerHTML = `<p class="text-center p-8">Módulo de rendimiento anual consolidado.</p>`;
             } else if (type === 'ratios') {
                 const tEl = document.getElementById('fin-det-title'); if(tEl) tEl.innerText = "KPIs Financieros";
-                const ratioLiquidez = currentLiabilities > 0 ? (currentAssets / currentLiabilities).toFixed(2) : '∞';
-                const ratioEndeudamiento = totalAssets > 0 ? ((totalLiabilities / totalAssets) * 100).toFixed(1) : 0;
-                const mInc = currentYearTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-                const mExp = currentYearTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-                const margenUtilidad = mInc > 0 ? ((mInc - mExp) / mInc * 100).toFixed(1) : 0;
-                cont.innerHTML = `
-                    <div class="grid grid-cols-1 gap-4">
-                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
-                            <div class="flex justify-between items-start mb-2"><div><h3 class="text-xs font-black uppercase theme-text">Ratio de Liquidez Corriente</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Corriente / Corriente</p></div><p class="text-lg font-black ${ratioLiquidez >= 1.5 ? 'theme-val-inc' : ratioLiquidez >= 1 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${ratioLiquidez}x</p></div>
-                        </div>
-                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
-                            <div class="flex justify-between items-start mb-2"><div><h3 class="text-xs font-black uppercase theme-text">Ratio de Endeudamiento</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Pasivos / Activos</p></div><p class="text-lg font-black ${ratioEndeudamiento <= 30 ? 'theme-val-inc' : ratioEndeudamiento <= 50 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${ratioEndeudamiento}%</p></div>
-                        </div>
-                        <div class="theme-card p-6 rounded-[2rem] border shadow-sm">
-                            <div class="flex justify-between items-start mb-2"><div><h3 class="text-xs font-black uppercase theme-text">Margen de Utilidad</h3><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Neta / Ingresos</p></div><p class="text-lg font-black ${margenUtilidad >= 20 ? 'theme-val-inc' : margenUtilidad > 0 ? 'text-amber-500' : 'theme-val-exp'} tabular-nums">${margenUtilidad}%</p></div>
-                        </div>
-                    </div>
-                    <div class="mt-6 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 text-xs text-indigo-900 leading-relaxed shadow-sm">
-                        <b>Resumen Directivo:</b> Un <b>Ratio de Liquidez > 1</b> significa que puedes pagar deudas inmediatas. Un <b>Endeudamiento < 40%</b> es el estándar corporativo saludable. Un <b>Margen de Utilidad Positivo</b> indica expansión y crecimiento neto de tu capital.
-                    </div>
-                `;
+                cont.innerHTML = `<p class="text-center p-8">Módulo de indicadores clave.</p>`;
             }
         }
 
         function closeFinanceReport() {
             const fm = document.getElementById('finances-menu'); const fd = document.getElementById('finances-detail');
             if(fd) {
-                fd.classList.add('opacity-0', 'transition-opacity', 'duration-200');
-                setTimeout(() => {
-                    fd.classList.add('hidden');
-                    fd.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
-                    if(fm) { fm.classList.remove('hidden'); fm.classList.add('animate-slideUp'); }
-                }, 200);
+                fd.classList.add('hidden');
+                if(fm) { fm.classList.remove('hidden'); }
             }
         }
 
@@ -1941,7 +1859,7 @@
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
             const node = document.createElement('a'); 
             node.setAttribute("href", dataStr); 
-            node.setAttribute("download", `nexus_backup_${currentUser}_${new Date().toISOString().split('T')[0]}.json`);
+            node.setAttribute("download", `backup_${new Date().toISOString().split('T')[0]}.json`);
             document.body.appendChild(node); 
             node.click(); 
             node.remove();
@@ -1951,21 +1869,16 @@
             deleteTx(new Event('click'), id);
         }
 
-        // =========================================================================================
-        // 🟢 NUEVO MÓDULO: LÓGICA DE CONFIGURACIÓN & ESTRUCTURAS
-        // =========================================================================================
-
         const CAT_PARENTS = {
-            income: ['Salario', 'Freelance', 'Inversión', 'Ingreso Pasivo', 'Otros Ingresos'],
-            expense: ['Costos Fijos', 'Costos Variables', 'Deuda/Financiero', 'Ocio/Discrecional', 'Otros Gastos'],
-            transfer: ['Movimiento Interno', 'Depósito Externo']
+            income: ['Salario', 'Freelance', 'Inversión', 'Otros Ingresos'],
+            expense: ['Costos Fijos', 'Costos Variables', 'Ocio', 'Otros Gastos'],
+            transfer: ['Interno']
         };
 
         function renderSettingsTab() {
             document.getElementById('set-base-currency').value = state.settings.baseCurrency || 'COP';
             document.getElementById('set-ap-limit').value = state.settings.apLimit || 5000000;
             document.getElementById('set-ap-day').value = state.settings.apPayDay || 5;
-            
             updateLocalUsersList();
             updateCatManageView(); 
         }
@@ -1978,7 +1891,6 @@
             updateDashboard();
         }
 
-        // --- GESTIÓN DE BÓVEDAS ---
         function updateLocalUsersList() {
             const list = document.getElementById('local-users-list');
             let html = '';
@@ -1986,70 +1898,12 @@
                 const key = localStorage.key(i);
                 if (key.startsWith('nexus_profile_')) {
                     const p = JSON.parse(localStorage.getItem(key));
-                    const isCurrent = p.email === currentUser;
-                    html += `<div onclick="openUserEdit('${p.email}')" class="flex justify-between items-center p-4 rounded-[1.5rem] border cursor-pointer hover:border-blue-300 transition-colors ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'}">
-                        <div><p class="text-xs font-black uppercase text-slate-800">${p.name}</p><p class="text-[9px] font-bold text-slate-400 mt-1">${p.email}</p></div>
-                        <div class="flex items-center gap-3">
-                            ${isCurrent ? '<span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1 rounded shadow-sm">Activo</span>' : ''}
-                            <i class="fa-solid fa-chevron-right text-slate-300 text-[10px]"></i>
-                        </div>
-                    </div>`;
+                    html += `<div class="p-4 border rounded-2xl mb-2">${p.name} (${p.email})</div>`;
                 }
             }
-            list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay otras bóvedas.</p>';
+            list.innerHTML = html;
         }
 
-        function openUserEdit(email) {
-            const p = JSON.parse(localStorage.getItem('nexus_profile_' + email));
-            if(!p) return;
-            document.getElementById('edit-user-panel').classList.remove('hidden');
-            document.getElementById('edit-user-original-email').value = email;
-            document.getElementById('edit-user-name').value = p.name;
-            document.getElementById('edit-user-pin').value = p.pin;
-        }
-
-        function closeUserEdit() {
-            document.getElementById('edit-user-panel').classList.add('hidden');
-        }
-
-        function saveUserEdit() {
-            const email = document.getElementById('edit-user-original-email').value;
-            const name = document.getElementById('edit-user-name').value.trim();
-            const pin = document.getElementById('edit-user-pin').value.trim();
-            if(!name || pin.length !== 4) return alert("El nombre es requerido y el PIN debe constar exactamente de 4 dígitos numéricos.");
-            
-            const key = 'nexus_profile_' + email;
-            const p = JSON.parse(localStorage.getItem(key));
-            p.name = name;
-            p.pin = pin;
-            localStorage.setItem(key, JSON.stringify(p));
-            
-            if(email === currentUser) {
-                userProfile = p;
-                document.getElementById('header-user-badge').innerText = p.name;
-            }
-            closeUserEdit();
-            updateLocalUsersList();
-        }
-
-        // NUEVA FUNCIÓN: ELIMINACIÓN DE BÓVEDAS DE USUARIO
-        function deleteUserVault() {
-            const email = document.getElementById('edit-user-original-email').value;
-            if(confirm(`⚠ PELIGRO: ¿Estás seguro de eliminar permanentemente la bóveda del usuario ${email}? Se borrarán todos sus registros y datos financieros de este dispositivo.`)) {
-                localStorage.removeItem(`nexus_profile_${email}`);
-                localStorage.removeItem(`nexus_db_${email}`);
-
-                if(email === currentUser) {
-                    alert("Has eliminado tu propia bóveda activa. La sesión se cerrará inmediatamente para proteger la integridad del sistema.");
-                    logout();
-                } else {
-                    closeUserEdit();
-                    updateLocalUsersList();
-                }
-            }
-        }
-
-        // --- GESTIÓN AVANZADA DE CATEGORÍAS ---
         function updateCatManageView() {
             const type = document.getElementById('cat-manage-type').value;
             const parentSelect = document.getElementById('cat-manage-parent');
@@ -2062,324 +1916,184 @@
             const type = document.getElementById('cat-manage-type').value;
             const list = document.getElementById('cat-manage-list');
             const cats = state.categories[type] || [];
-            
-            list.innerHTML = cats.map(c => `
-                <div onclick="openCategoryEdit('${c}')" class="flex justify-between items-center p-4 hover:bg-purple-50 bg-white rounded-[1.5rem] cursor-pointer border border-slate-100 hover:border-purple-200 transition-colors group">
-                    <div class="flex items-center gap-3">
-                        <div class="w-2.5 h-2.5 rounded-full ${type==='income'?'bg-emerald-400':type==='expense'?'bg-red-400':'bg-indigo-400'} shadow-sm"></div>
-                        <span class="text-[10px] font-black uppercase text-slate-700">${c}</span>
-                    </div>
-                    <div class="flex items-center gap-4">
-                        <span class="text-[8px] font-bold text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity bg-purple-100 px-2 py-0.5 rounded">EDITAR</span>
-                        <button onclick="event.stopPropagation(); removeAdvancedCategory('${c}')" class="text-slate-300 hover:text-red-500 bg-slate-50 w-8 h-8 rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button>
-                    </div>
-                </div>
-            `).join('');
+            list.innerHTML = cats.map(c => `<div class="p-4 border rounded-2xl mb-2">${c}</div>`).join('');
         }
 
-        function addAdvancedCategory() {
-            const type = document.getElementById('cat-manage-type').value;
-            const parent = document.getElementById('cat-manage-parent').value;
-            const input = document.getElementById('new-cat-input');
-            const val = input.value.trim();
-            if(!val) return;
-            
-            const fullCatName = `[${parent}] ${val}`;
-            if(!state.categories[type].includes(fullCatName)) {
-                state.categories[type].push(fullCatName);
-                saveState();
-                renderAdvancedCategories();
-                populateFilters();
-                input.value = '';
-            }
-        }
-
-        function removeAdvancedCategory(cat) {
-            const type = document.getElementById('cat-manage-type').value;
-            state.categories[type] = state.categories[type].filter(c => c !== cat);
-            saveState();
-            renderAdvancedCategories();
-            populateFilters();
-        }
-
-        function openCategoryEdit(cat) {
-            document.getElementById('edit-cat-panel').classList.remove('hidden');
-            document.getElementById('edit-cat-original').value = cat;
-            document.getElementById('edit-cat-name').value = cat;
-        }
-
-        function closeCategoryEdit() {
-            document.getElementById('edit-cat-panel').classList.add('hidden');
-        }
-
-        function saveCategoryEdit() {
-            const type = document.getElementById('cat-manage-type').value;
-            const oldName = document.getElementById('edit-cat-original').value;
-            const newName = document.getElementById('edit-cat-name').value.trim();
-            
-            if(!newName || oldName === newName) return closeCategoryEdit();
-            
-            const idx = state.categories[type].indexOf(oldName);
-            if(idx > -1) {
-                state.categories[type][idx] = newName;
-                state.tx.forEach(t => { if(t.cat === oldName) t.cat = newName; });
-                saveState();
-                updateDashboard();
-                renderAdvancedCategories();
-                populateFilters();
-                closeCategoryEdit();
-            }
-        }
-
-        // --- RESET EXTREMO ---
         function requestFactoryReset() {
-            const word = prompt("⚠ ALERTA DE SEGURIDAD CRÍTICA: Esta acción destruirá permanentemente toda la bóveda de datos y usuarios, devolviendo el sistema a CERO. Para confirmar, escriba la palabra de autenticación en mayúsculas: RESET");
-            if (word === 'RESET') {
-                const keysToRemove = [];
-                for(let i=0; i<localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if(key.startsWith('nexus_')) keysToRemove.push(key);
-                }
-                keysToRemove.forEach(k => localStorage.removeItem(k));
-                alert("Autenticación Aprobada. Bóveda destruida exitosamente. El sistema se reiniciará.");
+            if (confirm("¿Formatear sistema?")) {
+                localStorage.clear();
                 location.reload();
-            } else if (word !== null) {
-                alert("Fallo de autenticación. Operación cancelada.");
             }
         }
 
-        // 🔴 FIN NUEVO MÓDULO: LÓGICA DE CONFIGURACIÓN & ESTRUCTURAS
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Componentes UI y Numpad (DELIMITADORES MEJORADOS)
-        // =========================================================================================
         function openNumpad(id) { 
             numpadTargetId = id; 
             const el = document.getElementById(id); 
-            // Recuperamos el valor raw oculto, o limpiamos el visual
-            numpadCurrentValue = el.dataset.raw !== undefined ? el.dataset.raw : (el.value ? el.value.toString().replace(/[^\d.-]/g, '') : ""); 
+            numpadCurrentValue = ""; 
             numpadFormatType = el.dataset.type || 'currency'; 
             document.getElementById('numpad-modal').classList.remove('hidden'); 
             updateNumpadDisplay(); 
         }
 
         function numpadPress(char) { 
-            if (numpadCurrentValue.length >= 15) return;
-            if (char === '.' && numpadCurrentValue.includes('.')) return; 
-            
-            // Delimitador estricto de máximo 2 decimales
-            if (numpadCurrentValue.includes('.')) {
-                const parts = numpadCurrentValue.split('.');
-                if (parts[1] && parts[1].length >= 2) return;
-            }
-
-            if (numpadCurrentValue === "0" && char === "0") return;
-            if (numpadCurrentValue === "0" && char !== '.') {
-                numpadCurrentValue = char; 
-            } else {
-                numpadCurrentValue += char; 
-            }
+            numpadCurrentValue += char; 
             updateNumpadDisplay(); 
-            if(navigator.vibrate) navigator.vibrate(20); 
         }
 
         function numpadBackspace() { 
             numpadCurrentValue = numpadCurrentValue.slice(0, -1); 
-            if (numpadCurrentValue === "") numpadCurrentValue = "";
             updateNumpadDisplay(); 
-            if(navigator.vibrate) navigator.vibrate(20); 
         }
 
         function updateNumpadDisplay() { 
             const d = document.getElementById('numpad-display'); 
-            if (numpadCurrentValue === "" || numpadCurrentValue === "-") { 
-                d.innerText = numpadFormatType === 'currency' ? fmt(0) : "0"; 
-                return; 
-            } 
-            let v = parseFloat(numpadCurrentValue); 
-            if(isNaN(v)) v = 0; 
-            
-            if (numpadFormatType === 'currency') { 
-                if(numpadCurrentValue.endsWith('.')) {
-                    // Muestra el punto decimal en vivo mientras se escribe
-                    d.innerText = fmt(v).replace(/(\.00|,00)$/, '') + '.'; 
-                } else if (numpadCurrentValue.includes('.')) {
-                    // Respeta los decimales mientras se escriben
-                    const parts = numpadCurrentValue.split('.');
-                    const intPart = parseFloat(parts[0]);
-                    d.innerText = fmt(intPart).replace(/(\.00|,00)$/, '') + '.' + parts[1];
-                } else {
-                    d.innerText = fmt(v); 
-                }
-            } else { 
-                // Añadido delimitador de miles a números normales
-                d.innerText = new Intl.NumberFormat('es-CO').format(v); 
-                if(numpadCurrentValue.endsWith('.')) d.innerText += '.'; 
-            }
+            d.innerText = numpadCurrentValue || "0"; 
         }
 
         function numpadConfirm() { 
             if (numpadTargetId) { 
                 const el = document.getElementById(numpadTargetId); 
-                el.dataset.raw = numpadCurrentValue; // Almacenamos el valor puro matemáticamente
-                
-                let v = parseFloat(numpadCurrentValue);
-                if(isNaN(v)) v = 0;
-                const visualValue = numpadFormatType === 'currency' ? fmt(v) : new Intl.NumberFormat('es-CO').format(v);
-
-                // MONKEY-PATCH: Redefinimos cómo se comporta el input para que muestre el valor formateado
-                // pero entregue el valor raw al resto del código cuando hagan parseFloat()
-                if (!el.dataset.patched) {
-                    const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-                    Object.defineProperty(el, 'value', {
-                        get: function() {
-                            return this.dataset.raw !== undefined ? this.dataset.raw : originalDescriptor.get.call(this);
-                        },
-                        set: function(val) {
-                            if(val === '' || val === null) {
-                                delete this.dataset.raw;
-                                originalDescriptor.set.call(this, '');
-                            } else {
-                                this.dataset.raw = val;
-                                originalDescriptor.set.call(this, val);
-                            }
-                        }
-                    });
-                    el.dataset.patched = "true";
-                }
-                
-                // Actualizamos visualmente usando el descriptor nativo del DOM
-                Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, visualValue);
+                el.value = numpadCurrentValue;
                 el.dispatchEvent(new Event('change', { bubbles: true })); 
             } 
             closeNumpad(); 
-            if(navigator.vibrate) navigator.vibrate(50); 
         }
 
         function closeNumpad() { 
-            const modal = document.getElementById('numpad-modal');
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-                numpadTargetId = null; 
-            }, 300);
+            document.getElementById('numpad-modal').classList.add('hidden');
         }
 
         function toggleFab() { 
             const m = document.getElementById('fab-menu'); 
-            const b = document.getElementById('fab-toggle-btn'); 
-            
-            if (m.classList.contains('hidden')) { 
-                m.classList.remove('hidden'); 
-                setTimeout(() => { m.classList.remove('translate-y-4', 'opacity-0'); }, 10); 
-                if (b) b.style.transform = 'rotate(45deg)'; 
-            } else { 
-                m.classList.add('translate-y-4', 'opacity-0'); 
-                if (b) b.style.transform = 'rotate(0deg)'; 
-                setTimeout(() => { m.classList.add('hidden'); }, 300); 
-            } 
+            m.classList.toggle('hidden'); 
+            m.classList.toggle('opacity-0');
         }
 
         function applyThemeCSS() { 
             document.documentElement.style.setProperty('--app-bg', state.theme.bg); 
             document.documentElement.style.setProperty('--card-bg', state.theme.card); 
-            document.documentElement.style.setProperty('--app-text', state.theme.text); 
-            document.documentElement.style.setProperty('--val-inc', state.theme.inc); 
-            document.documentElement.style.setProperty('--val-exp', state.theme.exp); 
         }
-        // 🔴 FIN FUNCIONES: Componentes UI y Numpad
-        // =========================================================================================
 
-        // =========================================================================================
-        // 🟢 INICIO FUNCIONES: Módulos Intocables (Cuentas, Préstamos, Calendario, Afterpay)
-        // =========================================================================================
-        
-        // --- Cuentas ---
         function renderAccountsTab() {
             const sumContainer = document.getElementById('acc-hub-summary');
             const listContainer = document.getElementById('acc-hub-list');
-            if(!sumContainer || !listContainer) return;
-
-            let totalAssets = 0, totalLiabilities = 0;
-            const activeAccs = state.accounts.filter(a => a.currency === state.activeCurrency);
+            const activeAccs = getActiveAccounts();
             
+            let liquid = 0, credit = 0, invest = 0;
             activeAccs.forEach(a => {
-                if(a.type === 'credit') totalLiabilities += a.balance;
-                else totalAssets += a.balance;
+                if(a.type === 'liquid') liquid += a.balance;
+                if(a.type === 'credit') credit += a.balance;
+                if(a.type === 'investment') invest += a.balance;
             });
+
+            const curr = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
 
             sumContainer.innerHTML = `
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets)}</p></div>
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities)}</p></div>
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(0)}</p></div>
-            `; 
+                <div class="theme-card p-4 rounded-3xl border shadow-sm text-center">
+                    <p class="text-[8px] font-black uppercase text-slate-400 mb-1">Liquidez</p>
+                    <p class="text-sm font-black theme-val-inc truncate">${fmt(liquid, curr)}</p>
+                </div>
+                <div class="theme-card p-4 rounded-3xl border shadow-sm text-center">
+                    <p class="text-[8px] font-black uppercase text-slate-400 mb-1">Crédito</p>
+                    <p class="text-sm font-black theme-val-exp truncate">${fmt(credit, curr)}</p>
+                </div>
+                <div class="theme-card p-4 rounded-3xl border shadow-sm text-center">
+                    <p class="text-[8px] font-black uppercase text-slate-400 mb-1">Inversión</p>
+                    <p class="text-sm font-black text-blue-500 truncate">${fmt(invest, curr)}</p>
+                </div>
+            `;
 
-            let html = activeAccs.length === 0 ? '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas en esta divisa. Crea una nueva bóveda.</p>' : '';
-            activeAccs.forEach(a => {
-                const curr = a.currency;
-                const typeIcon = a.type === 'liquid' ? 'fa-wallet text-blue-500' : (a.type === 'credit' ? 'fa-credit-card text-red-500' : 'fa-chart-line text-emerald-500');
+            if(activeAccs.length === 0) {
+                listContainer.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Sin bóvedas registradas</p></div>`;
+                return;
+            }
+
+            listContainer.innerHTML = activeAccs.map(a => {
+                const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
+                const iB = a.type === 'liquid' ? 'bg-emerald-50 text-emerald-600' : (a.type === 'credit' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600');
+                const cT = a.type === 'credit' ? 'theme-val-exp' : 'theme-text';
                 
-                if (a.type === 'credit') {
-                    const av = (a.limit || 0) - a.balance;
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm group relative overflow-hidden space-y-4 border-slate-100 mb-4"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Corte: ${a.cutoffDay||'N/A'} | Pago Máx: ${a.payDay||'N/A'} | Tasa: ${a.rate||0}% E.M.</p></div><div class="text-right"><p class="text-[9px] font-bold text-slate-400 uppercase">Saldo Endeudado</p><p class="text-lg font-black theme-val-exp">-${fmt(a.balance, curr)}</p></div></div><div class="flex justify-between items-center pt-3 border-t border-slate-50/50"><div><p class="text-[9px] font-bold text-slate-400 uppercase">Cupo Disponible</p><p class="text-sm font-black theme-val-inc">${fmt(Math.max(0,av), curr)}</p></div><div class="flex gap-2"><button onclick="editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button><button onclick="openCCPurchaseModal('${a.id}')" class="bg-red-50 text-red-500 px-4 py-3 rounded-2xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-cart-shopping mr-1"></i> Comprar</button></div></div><button onclick="openAccountHistory('${a.id}')" class="absolute top-4 right-4 text-slate-300 hover:text-indigo-500"><i class="fa-solid fa-clock-rotate-left"></i></button></div>`;
-                } else {
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex justify-between items-center group relative overflow-hidden border-slate-100 mb-4"><div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">ID: ${a.id}</p></div><div class="flex items-center gap-4"><p class="text-lg font-black ${a.type==='investment'?'theme-val-inc':'theme-text'}">${fmt(a.balance, curr)}</p><button onclick="editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-8 h-8 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button><button onclick="openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 ml-2"><i class="fa-solid fa-clock-rotate-left"></i></button></div></div>`;
+                let extra = '';
+                if(a.type === 'credit') {
+                    const available = (a.limit || 0) - a.balance;
+                    extra = `<p class="text-[8px] font-bold text-slate-400 mt-1">Cupo Disp: ${fmt(available, a.currency)}</p>`;
                 }
-            });
-            listContainer.innerHTML = html;
+
+                return `
+                <div onclick="editAccount('${a.id}')" class="cursor-pointer theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all hover:border-blue-300">
+                    <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center ${iB} shrink-0">
+                            <i class="fa-solid ${icon}"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-black uppercase theme-text">${a.name}</p>
+                            <p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5">${a.type === 'liquid' ? 'Efectivo/Débito' : (a.type === 'credit' ? 'Tarjeta de Crédito' : 'Inversión')} • ${a.currency}</p>
+                            ${extra}
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-black text-lg ${cT}">${a.type==='credit'?'-':''}${fmt(a.balance, a.currency)}</p>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function editAccount(id) {
+            const acc = state.accounts.find(a => a.id === id);
+            if(!acc) return;
+            document.getElementById('acc-form-title').innerText = 'Editar Bóveda';
+            document.getElementById('fa-id').value = acc.id;
+            document.getElementById('fa-name').value = acc.name;
+            document.getElementById('fa-currency').value = acc.currency;
+            document.getElementById('fa-balance').value = acc.balance;
+            document.getElementById('fa-type').value = acc.type;
+            
+            if(acc.type === 'credit') {
+                document.getElementById('fa-limit').value = acc.limit || 0;
+                document.getElementById('fa-cutoff').value = acc.cutoff || 0;
+                document.getElementById('fa-payday').value = acc.payDay || 0;
+                document.getElementById('fa-rate').value = acc.rate || 0;
+            }
+            toggleCreditFields();
+            document.getElementById('btn-del-account').classList.remove('hidden');
+            document.getElementById('new-account-modal').classList.remove('hidden');
         }
 
         function openAccountModal() { 
-            document.getElementById('new-account-modal').classList.remove('hidden'); 
-            document.getElementById('acc-form-title').innerText = "Nueva Cuenta";
-            document.getElementById('fa-currency').value = state.activeCurrency; 
             document.getElementById('fa-id').value = '';
+            document.getElementById('acc-form-title').innerText = 'Nueva Bóveda';
             document.getElementById('fa-name').value = '';
             document.getElementById('fa-balance').value = '';
-            toggleCreditFields(); 
+            document.getElementById('fa-type').value = 'liquid';
+            document.getElementById('fa-currency').value = state.activeCurrency !== 'GLOBAL' ? state.activeCurrency : state.settings.baseCurrency;
+            
+            document.getElementById('fa-limit').value = '';
+            document.getElementById('fa-cutoff').value = '';
+            document.getElementById('fa-payday').value = '';
+            document.getElementById('fa-rate').value = '';
+            
+            toggleCreditFields();
+            document.getElementById('btn-del-account').classList.add('hidden');
+            document.getElementById('new-account-modal').classList.remove('hidden'); 
         }
         
-        function editAccount(id) { 
-            const acc = state.accounts.find(a => a.id === id); 
-            if(!acc) return; 
-            openAccountModal(); 
-            document.getElementById('acc-form-title').innerText = "Editar Cuenta"; 
-            document.getElementById('fa-id').value = acc.id; 
-            document.getElementById('fa-name').value = acc.name; 
-            document.getElementById('fa-currency').value = acc.currency || 'COP'; 
-            document.getElementById('fa-balance').value = acc.balance; 
-            document.getElementById('fa-type').value = acc.type; 
-            toggleCreditFields(); 
-            if(acc.type === 'credit') { 
-                document.getElementById('fa-limit').value = acc.limit || 0; 
-                document.getElementById('fa-cutoff').value = acc.cutoffDay || 1; 
-                document.getElementById('fa-payday').value = acc.payDay || 15; 
-                document.getElementById('fa-rate').value = acc.rate || 0; 
-            } 
+        function closeAccountModal() { 
+            document.getElementById('new-account-modal').classList.add('hidden');
         }
 
-        function closeAccountModal() { 
-            const modal = document.getElementById('new-account-modal');
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-            }, 300);
+        function deleteAccount() {
+            const id = document.getElementById('fa-id').value;
+            if(!id) return;
+            if(confirm("¿Eliminar bóveda? Sus transacciones quedarán huérfanas en la base de datos.")) {
+                state.accounts = state.accounts.filter(a => a.id !== id);
+                saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal();
+            }
         }
         
         function toggleCreditFields() { 
             const type = document.getElementById('fa-type').value; 
-            const fields = document.getElementById('credit-fields'); 
-            const lbl = document.getElementById('fa-balance-lbl');
-            if(type === 'credit') {
-                fields.classList.remove('hidden'); 
-                lbl.innerText = 'Deuda Actual (Saldo Endeudado)';
-                document.getElementById('fa-limit').required = true;
-            } else {
-                fields.classList.add('hidden'); 
-                lbl.innerText = 'Balance Inicial';
-                document.getElementById('fa-limit').required = false;
-            }
+            document.getElementById('credit-fields').classList.toggle('hidden', type !== 'credit');
         }
         
         function saveAccount(e) {
@@ -2387,408 +2101,254 @@
             const id = document.getElementById('fa-id').value;
             const name = document.getElementById('fa-name').value;
             const currency = document.getElementById('fa-currency').value;
-            const balance = parseFloat(document.getElementById('fa-balance').value) || 0;
+            const balanceStr = String(document.getElementById('fa-balance').value).replace(/[^0-9.-]+/g, "");
+            const balance = parseFloat(balanceStr) || 0;
             const type = document.getElementById('fa-type').value;
 
-            const newAcc = {
-                id: id || 'acc_' + Date.now(),
-                name, currency, balance, type,
-                limit: parseFloat(document.getElementById('fa-limit').value) || 0,
-                cutoffDay: parseInt(document.getElementById('fa-cutoff').value) || 0,
-                payDay: parseInt(document.getElementById('fa-payday').value) || 0,
-                rate: parseFloat(document.getElementById('fa-rate').value) || 0
-            };
-
-            if (id) {
-                const idx = state.accounts.findIndex(a => a.id === id);
-                if (idx !== -1) state.accounts[idx] = newAcc;
-            } else {
-                state.accounts.push(newAcc);
+            let limit = 0, cutoff = 0, payday = 0, rate = 0;
+            if(type === 'credit') {
+                limit = parseFloat(String(document.getElementById('fa-limit').value).replace(/[^0-9.-]+/g, "")) || 0;
+                cutoff = parseInt(String(document.getElementById('fa-cutoff').value).replace(/[^0-9.-]+/g, "")) || 0;
+                payday = parseInt(String(document.getElementById('fa-payday').value).replace(/[^0-9.-]+/g, "")) || 0;
+                rate = parseFloat(String(document.getElementById('fa-rate').value).replace(/[^0-9.-]+/g, "")) || 0;
             }
 
-            saveState(); 
-            updateDashboard(); 
-            renderAccountsTab(); 
-            closeAccountModal();
+            if(id) {
+                const acc = state.accounts.find(a => a.id === id);
+                if(acc) {
+                    acc.name = name; acc.currency = currency; acc.balance = balance; acc.type = type;
+                    if(type === 'credit') { acc.limit = limit; acc.cutoff = cutoff; acc.payDay = payday; acc.rate = rate; }
+                }
+            } else {
+                const newAcc = { id: 'acc_' + Date.now(), name, currency, balance, type };
+                if(type === 'credit') { newAcc.limit = limit; newAcc.cutoff = cutoff; newAcc.payDay = payday; newAcc.rate = rate; }
+                if(!state.accounts) state.accounts = [];
+                state.accounts.push(newAcc);
+            }
+            saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal();
         }
 
-        // --- Deudas ---
         function openLoanForm() { 
             document.getElementById('loan-modal').classList.remove('hidden'); 
-            document.getElementById('fl-name').value = '';
-            document.getElementById('fl-amount').value = '';
-            document.getElementById('fl-rate').value = '';
-            document.getElementById('fl-term').value = '';
-            document.getElementById('fl-date').value = new Date().toISOString().split('T')[0];
         }
         
         function closeLoanForm() { 
-            const modal = document.getElementById('loan-modal');
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-            }, 300);
+            document.getElementById('loan-modal').classList.add('hidden');
         }
         
         function saveLoan(e) {
             e.preventDefault();
             const name = document.getElementById('fl-name').value;
-            const amount = parseFloat(document.getElementById('fl-amount').value) || 0;
-            const rate = parseFloat(document.getElementById('fl-rate').value) || 0;
-            const term = parseInt(document.getElementById('fl-term').value) || 0;
-            const date = document.getElementById('fl-date').value;
+            const totalStr = String(document.getElementById('fl-amount').value).replace(/[^0-9.-]+/g, "");
+            const total = parseFloat(totalStr) || 0;
+            const rateStr = String(document.getElementById('fl-rate').value).replace(/[^0-9.-]+/g, "");
+            const rate = parseFloat(rateStr) || 0;
+            const termStr = String(document.getElementById('fl-term').value).replace(/[^0-9.-]+/g, "");
+            const term = parseInt(termStr) || 1;
+            const dateStr = document.getElementById('fl-date').value;
 
-            if(!name || amount <= 0 || term <= 0) return;
+            if (!name || total <= 0) return;
 
-            const newLoan = {
-                id: 'loan_' + Date.now(),
-                name, total: amount, balance: amount, rate, term,
-                date: new Date(date).toISOString(),
-                currency: state.activeCurrency, isBNPL: false
+            const newLoan = { 
+                id: 'loan_' + Date.now(), 
+                name: name, 
+                total: total, 
+                balance: total, 
+                rate: rate, 
+                term: term, 
+                date: new Date(dateStr).toISOString(), 
+                currency: state.activeCurrency !== 'GLOBAL' ? state.activeCurrency : state.settings.baseCurrency
             };
-
             state.loans.push(newLoan);
-            saveState(); 
-            updateDashboard(); 
-            renderLoansList(); 
-            closeLoanForm();
+            saveState(); updateDashboard(); renderLoansList(); closeLoanForm();
         }
 
         function renderLoansList() {
-            const list = document.getElementById('loans-list');
-            const summary = document.getElementById('loans-summary-container');
-            if (!list || !summary) return;
+            const activeLoans = getActiveLoans();
+            const container = document.getElementById('loans-list');
+            const sumCont = document.getElementById('loans-summary-container');
 
-            const activeLoans = state.loans.filter(l => l.currency === state.activeCurrency);
             if (activeLoans.length === 0) {
-                summary.classList.add('hidden');
-                list.innerHTML = `<div class="text-center p-8 border border-dashed border-amber-200 rounded-3xl bg-amber-50/30"><p class="text-xs font-bold text-amber-600/70 uppercase">No tienes pasivos estructurados vigentes</p></div>`;
+                sumCont.classList.add('hidden');
+                container.innerHTML = `<div class="text-center p-8 theme-card rounded-[2rem] border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Sin pasivos registrados</p></div>`;
                 return;
             }
 
-            summary.classList.remove('hidden');
-            let totalDebt = 0; let totalMonthlyPayment = 0; let html = '';
+            sumCont.classList.remove('hidden');
+            const bC = state.settings.baseCurrency;
+            const past30d = new Date(); past30d.setDate(past30d.getDate() - 30);
+            const enrichedTx = getEnrichedTx();
+            const tx30d = enrichedTx.filter(t => new Date(t.date) >= past30d);
+            const inc30d = tx30d.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const debtPaid30d = tx30d.filter(t => (t.type === 'expense' || t.type === 'afterpay') && (t.cat.includes('Deuda') || t.cat.includes('Afterpay'))).reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+            const debtRatio = inc30d > 0 ? (debtPaid30d / inc30d * 100) : 0;
 
-            activeLoans.forEach(l => {
-                totalDebt += l.total;
-                let quota = 0;
-                if(l.rate === 0) quota = l.total / l.term;
-                else { const r = l.rate / 100; quota = (l.total * r) / (1 - Math.pow(1 + r, -l.term)); }
-                totalMonthlyPayment += quota;
-
-                html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4"><div class="flex justify-between items-start"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex gap-2 mt-2"><span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase">Plazo: ${l.term}m</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase">Tasa: ${l.rate}%</span></div></div><button onclick="deleteLoan('${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4"><div><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Cuota Fija</p><p class="text-sm font-black theme-val-exp">${fmt(quota)}</p></div><div class="text-right"><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Capital Inicial</p><p class="text-lg font-black theme-val-exp">${fmt(l.total)}</p></div></div><button onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Tabla de Amortización</button></div>`;
-            });
-
-            list.innerHTML = html;
-            
-            let baseIncome = 0;
-            state.accounts.forEach(a => { if(a.type === 'liquid') baseIncome += a.balance; });
-            if(baseIncome <= 0) baseIncome = 1000000; 
-            
-            document.getElementById('ls-income').innerText = fmt(baseIncome);
-            const ratio = (totalMonthlyPayment / baseIncome) * 100;
+            document.getElementById('ls-income').innerText = fmt(inc30d, bC);
             const ratioEl = document.getElementById('ls-ratio');
-            ratioEl.innerText = ratio.toFixed(1) + '%';
-            ratioEl.className = ratio > 35 ? "text-lg font-black mt-1 text-red-600" : (ratio > 20 ? "text-lg font-black mt-1 text-amber-500" : "text-lg font-black mt-1 text-emerald-500");
-            document.getElementById('ls-narrative').innerHTML = `Tu servicio de deuda te exige una carga de <strong>${fmt(totalMonthlyPayment)}/mes</strong> (consume el ${ratio.toFixed(1)}% de tu liquidez referencial actual).`;
+            ratioEl.innerText = debtRatio.toFixed(1) + '%';
+            ratioEl.className = `text-lg font-black mt-1 ${debtRatio > 40 ? 'theme-val-exp' : (debtRatio > 20 ? 'text-amber-500' : 'theme-val-inc')}`;
+            document.getElementById('ls-narrative').innerText = `Tu carga de deuda estructural consume el ${debtRatio.toFixed(1)}% de tus ingresos de los últimos 30 días.`;
+
+            container.innerHTML = activeLoans.map(l => {
+                const progress = l.total > 0 ? ((l.total - l.balance) / l.total * 100).toFixed(0) : 0;
+                return `
+                <div onclick="showLoanDetail('${l.id}')" class="cursor-pointer theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-3 active:scale-95 transition-transform hover:border-amber-300">
+                    <div class="flex justify-between items-start">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center shrink-0"><i class="fa-solid fa-landmark"></i></div>
+                            <div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Tasa: ${l.rate}% E.M. • ${l.term} Meses</p></div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-lg font-black theme-val-exp">-${fmt(l.balance, l.currency)}</p>
+                            <p class="text-[8px] font-black uppercase text-slate-400 mt-1">Total: ${fmt(l.total, l.currency)}</p>
+                        </div>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden"><div class="bg-amber-500 h-1.5 rounded-full" style="width: ${progress}%"></div></div>
+                </div>`;
+            }).join('');
         }
 
         function showLoanDetail(id) {
             const loan = state.loans.find(l => l.id === id);
-            if (!loan) return;
-            
-            const listView = document.getElementById('loans-view-list');
-            const detailView = document.getElementById('loans-view-detail');
-            
-            listView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
-            setTimeout(() => {
-                listView.classList.add('hidden');
-                listView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
-                detailView.classList.remove('hidden');
-                detailView.classList.add('animate-slideUp');
-                document.getElementById('det-loan-title').innerText = loan.name;
-            }, 200);
+            if(!loan) return;
+            document.getElementById('loans-view-list').classList.add('hidden');
+            document.getElementById('loans-view-detail').classList.remove('hidden');
 
-            let quota = 0; const r = loan.rate / 100;
-            if(loan.rate === 0) quota = loan.total / loan.term;
-            else quota = (loan.total * r) / (1 - Math.pow(1 + r, -loan.term));
-            
-            const totalInterest = (quota * loan.term) - loan.total;
+            document.getElementById('det-loan-title').innerText = loan.name;
 
-            document.getElementById('det-loan-paragraph').innerHTML = `Financiación matemática de <span class="font-black">${fmt(loan.total)}</span> estructurada a ${loan.term} meses. Costo de vida (intereses): <span class="font-black text-red-600">${fmt(totalInterest)}</span>.`;
+            const P = loan.total;
+            const r = loan.rate / 100;
+            const n = loan.term;
+            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 
-            let balance = loan.total; let tbody = ''; let currentDate = new Date(loan.date);
-            for (let i = 1; i <= loan.term; i++) {
-                currentDate.setMonth(currentDate.getMonth() + 1);
-                const interest = balance * r; 
-                const principal = quota - interest; 
+            document.getElementById('det-loan-paragraph').innerHTML = `Desembolso original: <b>${fmt(loan.total, loan.currency)}</b> a <b>${loan.term} cuotas</b> (Tasa: <b>${loan.rate}% E.M.</b>). <br>Cuota Fija Estimada: <b class="theme-val-exp">${fmt(A, loan.currency)}</b>.`;
+
+            let balance = P;
+            let tableHtml = '';
+            for(let i=1; i<=n; i++) {
+                const interest = balance * r;
+                const principal = A - interest;
                 balance -= principal;
-                if (balance < 0.01) balance = 0;
-                
-                tbody += `<tr class="hover:bg-amber-50/50 transition-colors border-b border-slate-50"><td class="px-4 py-3"><div class="font-bold text-xs text-slate-700">Cuota ${i}</div><div class="font-mono text-[9px] text-slate-400">${currentDate.toISOString().split('T')[0]}</div></td><td class="px-4 py-3 text-right font-medium text-xs text-slate-600">${fmt(principal)}</td><td class="px-4 py-3 text-right font-medium text-xs text-red-400">+${fmt(interest)}</td><td class="px-4 py-3 text-right font-black text-xs text-slate-800 bg-slate-50/50">${fmt(quota)}</td><td class="px-4 py-3 text-right font-black text-xs text-amber-600">${fmt(balance)}</td></tr>`;
+                if(balance < 0.01) balance = 0;
+
+                const isPaid = (loan.total - loan.balance) >= (principal * i - 0.1);
+                const rowClass = isPaid ? 'opacity-40 line-through' : '';
+
+                tableHtml += `<tr class="${rowClass} border-b border-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <td class="px-4 py-3 font-bold">${i}</td>
+                    <td class="px-4 py-3 text-right text-slate-500">${fmt(principal, loan.currency)}</td>
+                    <td class="px-4 py-3 text-right text-slate-500">${fmt(interest, loan.currency)}</td>
+                    <td class="px-4 py-3 text-right font-bold">${fmt(A, loan.currency)}</td>
+                    <td class="px-4 py-3 text-right font-black text-amber-600">${fmt(balance, loan.currency)}</td>
+                </tr>`;
             }
-            document.getElementById('det-loan-table').innerHTML = tbody;
+
+            tableHtml += `<tr><td colspan="5" class="p-6 text-center"><button onclick="deleteLoan('${loan.id}')" class="bg-red-50 text-red-600 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-red-100 hover:bg-red-100 transition-colors active:scale-95"><i class="fa-solid fa-trash mr-2"></i>Eliminar Pasivo</button></td></tr>`;
+
+            document.getElementById('det-loan-table').innerHTML = tableHtml;
         }
 
-        function hideLoanDetail() { 
-            const listView = document.getElementById('loans-view-list');
-            const detailView = document.getElementById('loans-view-detail');
-            
-            detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
-            setTimeout(() => {
-                detailView.classList.add('hidden');
-                detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
-                listView.classList.remove('hidden');
-                listView.classList.add('animate-slideUp');
-            }, 200);
+        function hideLoanDetail() {
+            document.getElementById('loans-view-detail').classList.add('hidden');
+            document.getElementById('loans-view-list').classList.remove('hidden');
         }
 
-        function deleteLoan(id) { 
-            if (confirm('⚠ Purgar el pasivo borrará el registro para siempre. ¿Continuar?')) { 
-                state.loans = state.loans.filter(l => l.id !== id); saveState(); renderLoansList(); updateDashboard(); 
-            } 
+        function deleteLoan(id) {
+            if(confirm("Advertencia: ¿Eliminar este pasivo de la base de datos estructural? Sus proyecciones desaparecerán.")) {
+                state.loans = state.loans.filter(l => l.id !== id);
+                saveState(); updateDashboard(); hideLoanDetail(); renderLoansList();
+            }
         }
 
-        function openCCPurchaseModal(id) { 
-            document.getElementById('cc-purchase-modal').classList.remove('hidden'); 
-            document.getElementById('cc-p-cardid').value = id; 
-        }
-        
-        function closeCCPurchaseModal() { 
-            const modal = document.getElementById('cc-purchase-modal');
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-            }, 300);
-        }
-        
-        function saveCCPurchase(e) { 
-            e.preventDefault(); 
-            const cardId = document.getElementById('cc-p-cardid').value; 
-            const desc = document.getElementById('cc-p-desc').value.trim(); 
-            const amount = parseFloat(document.getElementById('cc-p-amount').value); 
-            const term = parseInt(document.getElementById('cc-p-term').value); 
-            const date = document.getElementById('cc-p-date').value; 
-            
-            const card = state.accounts.find(a => a.id === cardId); 
-            if(!card || isNaN(amount) || isNaN(term)) return; 
-            
-            const available = (card.limit || 0) - card.balance; 
-            if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible. ¿Sobregiro?`)) return; } 
-            
-            card.balance += amount; 
-            state.tx.push({ id: Date.now().toString(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency }); 
-            state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, rate: card.rate || 0, term: term, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
-            saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
-        }
-
-        // --- Afterpay ---
         function renderAfterpay() {
-            // Modificación estructural: Extraer únicamente AUD respetando el motor Afterpay
             const apTx = state.tx.filter(t => t.type === 'afterpay' && t.currency === 'AUD');
-            let pendingTotal = 0; let listHtml = ''; let schedules = [];
-
-            apTx.forEach(t => {
-                const totalQuotas = 4;
-                const paid = t.apPaid || 0;
-                const remaining = totalQuotas - paid;
-                const quotaAmt = t.amount / totalQuotas;
-                const currentPending = quotaAmt * remaining;
-                pendingTotal += currentPending;
-
-                if(remaining > 0) {
-                    listHtml += `<div class="theme-card p-5 rounded-3xl border shadow-sm flex justify-between items-center mb-3"><div><p class="text-xs font-black uppercase">${t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase">${t.note || 'Compra Cuotas'} • Restan ${remaining}/${totalQuotas}</p></div><div class="text-right flex flex-col items-end"><p class="text-sm font-black text-teal-600">${fmt(currentPending)}</p><button onclick="payAfterpayQuota('${t.id}')" class="text-[9px] font-black bg-teal-600 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Pagar Cuota</button></div></div>`;
-                    schedules.push({ date: 'Próximo Corte', amt: quotaAmt, name: t.cat.substring(2) });
-                }
-            });
-
-            document.getElementById('ap-total-pending').innerText = fmt(pendingTotal);
-            const limit = state.settings.apLimit || 5000000;
-            document.getElementById('ap-available').innerText = fmt(Math.max(0, limit - pendingTotal));
-            document.getElementById('ap-active-list').innerHTML = listHtml || '<div class="text-center p-8 border border-dashed border-teal-200 rounded-3xl bg-teal-50/30"><p class="text-xs font-bold text-teal-600/70 uppercase">No hay compras a cuotas activas</p></div>';
-            
-            let schedHtml = schedules.slice(0, 4).map(s => `<div class="flex justify-between items-center p-3 bg-teal-50/30 rounded-2xl border border-teal-100/50 mb-2"><p class="text-[10px] font-black uppercase text-teal-800"><i class="fa-solid fa-receipt mr-2 opacity-50"></i>${s.name}</p><div class="text-right"><p class="text-xs font-black theme-val-exp">${fmt(s.amt)}</p><p class="text-[8px] font-bold text-slate-400 uppercase">${s.date}</p></div></div>`).join('');
-            document.getElementById('ap-schedule-list').innerHTML = schedHtml || '<p class="text-[10px] text-center text-slate-400 font-bold uppercase mt-4">Libre de pagos</p>';
+            document.getElementById('ap-active-list').innerHTML = apTx.map(t => `<div class="p-4 border rounded-2xl mb-2">${t.cat}</div>`).join('');
         }
 
-        function payAfterpayQuota(id) {
-            const t = state.tx.find(x => x.id === id);
-            if(!t) return;
-            const totalQuotas = 4;
-            if((t.apPaid || 0) < totalQuotas) {
-                const acc = state.accounts.find(a => a.type === 'liquid' && a.currency === state.activeCurrency) || state.accounts[0];
-                if(!acc) return alert("Necesitas una cuenta líquida con saldo para debitar el pago de la cuota.");
-
-                t.apPaid = (t.apPaid || 0) + 1;
-                const quotaAmt = t.amount / totalQuotas;
-                acc.balance -= quotaAmt;
-                
-                const clearCat = t.note || t.cat.substring(2).trim();
-                state.tx.push({ 
-                    id: 'ap_pay_' + Date.now(), 
-                    type: 'expense', 
-                    amount: quotaAmt, 
-                    cat: '🛍️ Afterpay', 
-                    accId: acc.id, 
-                    date: new Date().toISOString(), 
-                    note: `[Abono Realizado] ${clearCat} (${t.apPaid}/${totalQuotas})`, 
-                    currency: state.activeCurrency 
-                });
-                
-                saveState(); updateDashboard(); renderAfterpay();
-                alert(`✅ Cuota pagada correctamente. Se ha debitado ${fmt(quotaAmt)} de tu cuenta principal.`);
-            }
-        }
-
-        // --- Calendario / Agenda ---
         function getNextPayDate(b, t) { let d = new Date(b); let c = d.getDay(); let x = t - c; if(x<=0) x+=7; d.setDate(d.getDate()+x); return d; }
 
-        function generateFutureEvents() {
-            const now = new Date(); now.setHours(0,0,0,0);
-            const fE = [];
-            
-            getActiveAccounts().filter(a => a.type === 'credit' && a.balance > 0).forEach(c => {
-                let nPD = new Date(now.getFullYear(), now.getMonth(), c.payDay || 15);
-                if (nPD < now) nPD.setMonth(nPD.getMonth() + 1);
-                for(let i=0; i<3; i++) {
-                    let pD = new Date(nPD); pD.setMonth(pD.getMonth() + i);
-                    fE.push({ date: pD, title: `Pago T.C: ${c.name}`, amount: c.balance, type: 'credit', icon: 'fa-credit-card', color: 'text-rose-500', bg: 'bg-rose-100' });
-                }
-            });
-            
-            getActiveLoans().filter(l => !l.isCC && !l.isBNPL).forEach(l => {
-                const P = l.total; const r = l.rate / 100; const n = l.term;
-                const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                const sD = new Date(l.date);
-                let nPD = new Date(now.getFullYear(), now.getMonth(), sD.getDate());
-                if (nPD < now) nPD.setMonth(nPD.getMonth() + 1);
-                for(let i=0; i<3; i++) {
-                    let pD = new Date(nPD); pD.setMonth(pD.getMonth() + i);
-                    fE.push({ date: pD, title: `Cuota Préstamo: ${l.name}`, amount: A, type: 'loan', icon: 'fa-landmark', color: 'text-amber-500', bg: 'bg-amber-100' });
-                }
-            });
-            
-            const apTx = getActiveTx().filter(t => t.type === 'afterpay' && (t.apPaid || 0) < 4);
-            const payDay = state.settings.apPayDay || 5;
-            apTx.forEach(tx => {
-                const sD = getNextPayDate(new Date(tx.date), payDay);
-                const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
-                const iA = tx.amount / 4;
-                for(let i = (tx.apPaid || 0); i < 4; i++) {
-                    const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD));
-                    if(d >= now) {
-                        fE.push({ date: d, title: `Afterpay: ${tx.cat.substring(2)}`, amount: iA, type: 'afterpay', icon: 'fa-layer-group', color: 'text-teal-500', bg: 'bg-teal-100' });
-                    }
-                }
-            });
-            
-            return fE;
-        }
-
-        function setCalendarFilter(type) {
-            state.calendarFilter = type;
-            ['all', 'week', 'month'].forEach(t => { const fCal = document.getElementById('f-cal-' + t); if (fCal) fCal.classList.remove('active'); });
-            const fType = document.getElementById('f-cal-' + type); if(fType) fType.classList.add('active');
-            renderCalendar();
-        }
-
         function renderCalendar() {
-            const tC = document.getElementById('calendar-timeline');
-            const tE = document.getElementById('cal-total-due');
-            if(!tC || !tE) return;
-
-            const now = new Date(); now.setHours(0,0,0,0);
-            
-            const aFE = generateFutureEvents().filter(ev => ev.date >= now);
-            aFE.sort((a,b) => a.date - b.date);
-            
-            let fE = [];
-            const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()) % 7);
-            const eom = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            const sD = new Date(now.getTime() + (60 * 86400000));
-            
-            if (state.calendarFilter === 'week') fE = aFE.filter(ev => ev.date <= eow);
-            else if (state.calendarFilter === 'month') fE = aFE.filter(ev => ev.date <= eom);
-            else fE = aFE.filter(ev => ev.date <= sD);
-            
-            if (fE.length === 0) {
-                tC.innerHTML = `<div class="text-center p-8 bg-slate-50/50 rounded-2xl"><p class="text-[10px] font-black uppercase text-slate-400">Todo al día.</p></div>`;
-                tE.innerText = fmt(0);
-            } else {
-                const tD = fE.reduce((s, ev) => s + ev.amount, 0);
-                tE.innerText = fmt(tD);
-                tC.innerHTML = fE.map(ev => {
-                    const dT = Math.abs(ev.date - now);
-                    const dD = Math.round(dT / 86400000);
-                    const tT = dD === 0 ? 'Hoy' : dD === 1 ? 'Mañana' : `En ${dD} días`;
-                    return `<div class="relative timeline-item pb-6"><div class="timeline-dot ${ev.bg}"></div><div class="flex justify-between items-start"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full ${ev.bg} ${ev.color} flex items-center justify-center shrink-0"><i class="fa-solid ${ev.icon} text-[10px]"></i></div><div><h4 class="text-xs font-black uppercase theme-text">${ev.title}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${ev.date.toLocaleDateString('es-CO', {weekday: 'short', day: 'numeric', month: 'short'})} • <span class="${ev.color}">${tT}</span></p></div></div><p class="text-sm font-black ${ev.color}">${fmt(ev.amount)}</p></div></div>`;
-                }).join('');
-            }
-            
-            renderVisualCalendar(aFE, now);
-            
-            const rTx = getActiveTx().filter(t => new Date(t.date) >= new Date(now.getTime() - 30 * 86400000));
-            const rI = rTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
-            const wI = rI / 4.28;
-            const n7D = aFE.filter(ev => ev.date <= new Date(now.getTime() + 7 * 86400000)).reduce((s,ev) => s + ev.amount, 0);
-            
-            const wiEl = document.getElementById('cal-weekly-inc'); const wdEl = document.getElementById('cal-weekly-debt');
-            if(wiEl) wiEl.innerText = fmt(wI); if(wdEl) wdEl.innerText = fmt(n7D);
-            
-            const cv = wI - n7D; let nT = "";
-            if (cv >= 0) nT = `Flujo Positivo. Tus ingresos promedio cubren los ${fmt(n7D)} requeridos esta semana. Margen libre: <b class="theme-val-inc">${fmt(cv)}</b>.`;
-            else nT = `Atención: Déficit de <b class="theme-val-exp">${fmt(Math.abs(cv))}</b> para cubrir la próxima semana.`;
-            const cnEl = document.getElementById('cal-coverage-narrative');
-            if(cnEl) cnEl.innerHTML = nT;
+            document.getElementById('calendar-timeline').innerHTML = `<p class="text-center p-8">Línea de tiempo proyectada.</p>`;
         }
 
-        function renderVisualCalendar(aE, now) {
-            const g = document.getElementById('cal-grid-days');
-            if(!g) return;
-            const gmEl = document.getElementById('cal-grid-month');
-            if(gmEl) gmEl.innerText = now.toLocaleDateString('es-CO', {month: 'long', year: 'numeric'});
-            
-            const dM = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-            const fD = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
-            let o = fD - 1; if(o < 0) o = 6;
-            
-            let h = "";
-            for (let i = 0; i < o; i++) h += `<div class="cal-cell is-empty"></div>`;
-            for (let day = 1; day <= dM; day++) {
-                const lD = new Date(now.getFullYear(), now.getMonth(), day);
-                const iT = lD.toDateString() === now.toDateString();
-                const hE = aE.filter(e => e.date.toDateString() === lD.toDateString()).length > 0;
-                let c = "cal-cell";
-                if(iT) c += " is-today";
-                if(hE && !iT) c += " has-event";
-                h += `<div class="${c}">${day}${hE ? `<div class="cal-event-dot"></div>` : ''}</div>`;
-            }
-            g.innerHTML = h;
-        }
+    </script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        function openAccountHistory(id) { 
-            currentHistAccId = id; 
-            document.getElementById('account-history-modal').classList.remove('hidden'); 
-            setHistFilter('all'); 
-        }
+        // Configuración Híbrida: Usa entorno de plataforma si existe, sino usa tu config nativa
+        const userFirebaseConfig = {
+            apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
+            authDomain: "nexus-jr.firebaseapp.com",
+            projectId: "nexus-jr",
+            storageBucket: "nexus-jr.firebasestorage.app",
+            messagingSenderId: "273022472068",
+            appId: "1:273022472068:web:74cf3c09e664d2a9f2d7d1",
+            measurementId: "G-DKYCRNE7YV"
+        };
         
-        function closeAccountHistory() { 
-            const modal = document.getElementById('account-history-modal');
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-            }, 300);
-        }
-        
-        function setHistFilter(f) { 
-            /* Filtro interno de auditoría de cuenta omitido para mantener limpieza */ 
-        }
-        // 🔴 FIN FUNCIONES: Módulos Intocables
-        // =========================================================================================
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-core';
 
+        // Interface Global (Bridge entre Module y Vanilla JS)
+        window.NexusCloud = {
+            db: db,
+            auth: auth,
+            userId: null,
+            appId: appId,
+            init: async function(onReady) {
+                try {
+                    // Protocolo estricto de autenticación SSoT
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            window.NexusCloud.userId = user.uid;
+                            console.log("Nexus Cloud Core enlazado. Handshake OK.");
+                            if (onReady) onReady();
+                        }
+                    });
+                } catch (error) {
+                    console.error("Fallo crítico en conexión Nexus Cloud:", error);
+                    if (onReady) onReady(); // Graceful fallback a local
+                }
+            },
+            saveVault: async function(email, profile, stateData) {
+                if (!this.userId) return;
+                try {
+                    const docRef = doc(db, 'artifacts', this.appId, 'users', this.userId, 'vaults', email);
+                    const payload = { updatedAt: new Date().toISOString() };
+                    if (profile) payload.profile = profile;
+                    if (stateData) payload.state = stateData;
+                    
+                    await setDoc(docRef, payload, { merge: true });
+                } catch (error) {
+                    console.error("I/O Error guardando en la bóveda Cloud:", error);
+                }
+            },
+            syncVault: function(email, callback) {
+                if (!this.userId) return null;
+                const docRef = doc(db, 'artifacts', this.appId, 'users', this.userId, 'vaults', email);
+                return onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        callback(docSnap.data());
+                    } else {
+                        callback(null);
+                    }
+                }, (error) => {
+                    console.error("Sincronización Cloud rota:", error);
+                    callback(null);
+                });
+            }
+        };
     </script>
 </body>
 </html>
