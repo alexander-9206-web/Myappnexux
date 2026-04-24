@@ -1295,6 +1295,117 @@
             return rawTx;
         }
 
+        // =========================================================================================
+        // 🚀 INICIO PARCHE: CORE ENGINE & CRUD (Añadido para estabilización)
+        // =========================================================================================
+
+        function updateDashboard() {
+            const bC = state.settings.baseCurrency || 'COP';
+            let currentNW = 0;
+            
+            // Consolidación global de liquidez y deuda actual
+            getActiveAccounts().forEach(a => {
+                const bal = convertCurrency(a.balance, a.currency, bC);
+                if(a.type === 'credit') currentNW -= bal;
+                else currentNW += bal;
+            });
+            getActiveLoans().forEach(l => { currentNW -= convertCurrency(l.balance, l.currency, bC); });
+            
+            document.getElementById('net-worth').innerText = fmt(currentNW, bC);
+            
+            // Disparadores de renderizado reactivo
+            if(state.context === 'day') renderDashboardProjections();
+            if(state.activeTab === 'accounts') renderAccountsTab();
+            if(state.activeTab === 'loans') renderLoansList();
+            if(state.activeTab === 'finances') renderFinancesUnified();
+            if(state.activeTab === 'report') renderReport();
+        }
+
+        // CRUD Básico de Transacciones SSoT
+        function openForm(type) {
+            document.getElementById('f-id').value = '';
+            document.getElementById('f-type').value = type;
+            document.getElementById('form-title').innerText = type === 'income' ? 'Ingreso' : (type === 'expense' ? 'Gasto' : (type === 'afterpay' ? 'Afterpay' : 'Transferencia'));
+            document.getElementById('f-amount').value = '';
+            document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('f-note').value = '';
+            
+            const catSelect = document.getElementById('f-cat');
+            // Cargar categorías dinámicas
+            catSelect.innerHTML = (state.categories[type] || ['General']).map(c => `<option value="${c}">${c}</option>`).join('');
+            
+            const accSelect = document.getElementById('f-account');
+            accSelect.innerHTML = state.accounts.map(a => `<option value="${a.id}">${a.name} (${fmt(a.balance, a.currency)})</option>`).join('');
+            
+            // Lógica específica para Afterpay
+            document.getElementById('ap-freq-container').classList.toggle('hidden', type !== 'afterpay');
+            if (type === 'afterpay') {
+                const apAcc = state.accounts.find(a => a.currency === 'AUD'); // Requiere cuenta en AUD
+                if(apAcc) accSelect.value = apAcc.id;
+            }
+
+            document.getElementById('tx-modal').classList.remove('hidden');
+            const fabMenu = document.getElementById('fab-menu');
+            if(fabMenu) {
+                fabMenu.classList.add('hidden');
+                document.getElementById('fab-toggle-btn').style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function closeForm() { document.getElementById('tx-modal').classList.add('hidden'); }
+
+        function saveTransaction(e) {
+            e.preventDefault();
+            const id = document.getElementById('f-id').value || 'tx_' + Date.now();
+            const type = document.getElementById('f-type').value;
+            const amount = parseFloat(String(document.getElementById('f-amount').value).replace(/[^0-9.-]+/g, "")) || 0;
+            const cat = document.getElementById('f-cat').value;
+            const accId = document.getElementById('f-account').value;
+            const date = document.getElementById('f-date').value;
+            const note = document.getElementById('f-note').value;
+            
+            const acc = state.accounts.find(a => a.id === accId);
+            if(!acc && type !== 'transfer') { alert("Se requiere una cuenta origen/destino"); return; }
+
+            const tx = { id, type, amount, cat, accId, date: new Date(date).toISOString(), note, currency: acc ? acc.currency : state.settings.baseCurrency };
+            if (type === 'afterpay') { tx.apFreq = document.getElementById('f-ap-freq').value; tx.apPaid = 0; }
+
+            // Impacto Financiero Inmediato
+            if (acc) {
+                if(type === 'income') acc.balance += amount;
+                if(type === 'expense' || type === 'afterpay') acc.balance -= amount;
+            }
+
+            state.tx = state.tx.filter(t => t.id !== id);
+            state.tx.push(tx);
+            
+            saveState(); updateDashboard(); closeForm();
+            if (state.activeTab === 'database') renderDatabase();
+        }
+
+        // Controladores UI Restantes (Stubs para estabilización MVP)
+        function showScoreModal() { 
+            document.getElementById('score-modal-val').innerText = '720'; 
+            document.getElementById('score-modal').classList.remove('hidden'); 
+        }
+        function closeScoreModal() { document.getElementById('score-modal').classList.add('hidden'); }
+        function initDatabaseTab() { /* Inicializado lazy */ }
+        function renderDatabase() { document.getElementById('db-list').innerHTML = `<p class="text-[10px] text-center text-slate-400 font-bold p-4">Base de datos lista.</p>`; }
+        function renderAnalysis() { /* Renderizado lazy */ }
+        function populateFilters() { /* Filtros lazy */ }
+        function setDbQuickFilter(f) { /* Filtro UI */ }
+        function updateDbCatFilter() { /* Filtro UI */ }
+        function setPeriodFilter(type, val) { /* Filtro UI Dashboard */ }
+        function setCalendarFilter(val) { /* Filtro UI Calendario */ }
+        function setStatsType(type) { /* Analítica toggle */ }
+        function addAdvancedCategory() { /* Configuración cat */ }
+        function saveCategoryEdit() { /* Configuración cat */ }
+        function closeCategoryEdit() { document.getElementById('edit-cat-panel').classList.add('hidden'); }
+
+        // =========================================================================================
+        // 🔴 FIN PARCHE
+        // =========================================================================================
+
         function initNexus() { 
             applyThemeCSS(); 
             setContext(state.context); 
