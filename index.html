@@ -155,8 +155,8 @@
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Tasa Retención</p><h4 id="rep-savings" class="text-lg font-black theme-val-inc tabular-nums">--</h4></div>
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm text-center"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Deuda/Ingreso</p><h4 id="rep-health" class="text-lg font-black text-amber-500 tabular-nums">--</h4></div>
             </div>
-            <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Tendencia (6 Meses)</h3><div class="h-[150px]"><canvas id="report-chart-trend"></canvas></div></div>
-            <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Estructura Egresos</h3><div class="h-[150px]"><canvas id="report-chart-vs"></canvas></div></div>
+            <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Tendencia (6 Meses)</h3><div class="h-[150px]"><canvas id="report-chart-trend"></canvas></div><div id="rep-trend-text" class="text-[11px] font-medium text-slate-600 bg-slate-50 p-4 rounded-xl leading-relaxed border border-slate-100 mt-2 text-center"></div></div>
+            <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><h3 class="text-[10px] font-black uppercase theme-text opacity-50 tracking-widest text-center">Estructura Ingresos y Egresos</h3><div class="h-[150px]"><canvas id="report-chart-vs"></canvas></div><div id="rep-structure-text" class="text-[11px] font-medium text-slate-600 bg-slate-50 p-4 rounded-xl leading-relaxed border border-slate-100 mt-2 text-center"></div></div>
         </section>
 
         <!-- 🟢 TAB PRESUPUESTOS Y METAS -->
@@ -993,8 +993,44 @@
             const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
             const rH = $id('rep-health'); if(rH) { rH.innerText = debtRatio.toFixed(1) + '%'; rH.className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`; if(debtRatio <= 20) rH.className = 'text-lg font-black tabular-nums theme-val-inc'; }
             const rN = $id('rep-narrative'); if(rN) rN.innerHTML = `Mantenemos liquidez de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo de <strong>${fmt(totLiab, bC)}</strong>. Apalancamiento del ${debtRatio.toFixed(1)}%.`;
-            const rCT = $id('report-chart-trend'); if(rCT) { const ctxTrend = rCT.getContext('2d'); if(charts.trend) charts.trend.destroy(); charts.trend = new Chart(ctxTrend, { type: 'bar', data: { labels: ['M-5', 'M-4', 'M-3', 'M-2', 'M-1', 'Mes'], datasets: [{ label:'Ingresos', data: [0,0,0,0,0,inc90d/3], backgroundColor: state.theme.inc }, { label:'Egresos', data: [0,0,0,0,0,exp90d/3], backgroundColor: state.theme.exp }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); }
-            const rCV = $id('report-chart-vs'); if(rCV) { const ctxVs = rCV.getContext('2d'); if(charts.vs) charts.vs.destroy(); charts.vs = new Chart(ctxVs, { type: 'doughnut', data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [exp90d*0.6, exp90d*0.4], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' } }); }
+            
+            // NEW CODE FOR 6 MONTHS TREND
+            const trendLabels = []; const trendInc = []; const trendExp = []; let totalInc6m = 0; let totalExp6m = 0;
+            for(let i=5; i>=0; i--) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                trendLabels.push(d.toLocaleDateString('es-CO', { month: 'short' }));
+                const mTx = enrichedTx.filter(t => new Date(t.date).getMonth() === d.getMonth() && new Date(t.date).getFullYear() === d.getFullYear() && !t.isProjected);
+                const mI = mTx.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+                const mE = mTx.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.amount, t.currency, bC),0);
+                trendInc.push(mI); trendExp.push(mE); totalInc6m += mI; totalExp6m += mE;
+            }
+
+            const rCT = $id('report-chart-trend'); if(rCT) { const ctxTrend = rCT.getContext('2d'); if(charts.trend) charts.trend.destroy(); charts.trend = new Chart(ctxTrend, { type: 'bar', data: { labels: trendLabels, datasets: [{ label:'Ingresos', data: trendInc, backgroundColor: state.theme.inc }, { label:'Egresos', data: trendExp, backgroundColor: state.theme.exp }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); }
+            
+            // Structure calculation
+            let fixedExp = 0; let varExp = 0;
+            const fixedCats = ['vivienda', 'salud', 'transporte', 'deuda', 'afterpay', 'tc', 'préstamo', 'cuota', 'fijos', 'fijo'];
+            tx90d.filter(t=>t.type==='expense').forEach(t => { if(fixedCats.some(k => t.cat.toLowerCase().includes(k))) fixedExp += convertCurrency(t.amount, t.currency, bC); else varExp += convertCurrency(t.amount, t.currency, bC); });
+            if(fixedExp === 0 && varExp === 0) { fixedExp = exp90d*0.6; varExp = exp90d*0.4; } // Fallback
+
+            const rCV = $id('report-chart-vs'); if(rCV) { const ctxVs = rCV.getContext('2d'); if(charts.vs) charts.vs.destroy(); charts.vs = new Chart(ctxVs, { type: 'doughnut', data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [fixedExp, varExp], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' } }); }
+
+            // NEW TEXT BOXES POPULATION
+            const rTrendText = $id('rep-trend-text');
+            if(rTrendText) {
+                const avgInc6m = totalInc6m / 6 || 0; const avgExp6m = totalExp6m / 6 || 0;
+                const diff = trendInc[5] - trendInc[4]; const dir = diff >= 0 ? 'crecimiento' : 'caída';
+                rTrendText.innerHTML = `En el último semestre, el ingreso promedio mensual fue de <span class="theme-val-inc font-black">${fmt(avgInc6m, bC)}</span> frente a egresos de <span class="theme-val-exp font-black">${fmt(avgExp6m, bC)}</span>. El mes actual presenta una ${dir} de <span class="font-black">${fmt(Math.abs(diff), bC)}</span> respecto al mes anterior.`;
+            }
+
+            const rStrText = $id('rep-structure-text');
+            if(rStrText) {
+                const incCat = {}; tx90d.filter(t=>t.type==='income').forEach(t => incCat[t.cat] = (incCat[t.cat]||0) + convertCurrency(t.amount, t.currency, bC));
+                const sortedInc = Object.entries(incCat).sort((a,b)=>b[1]-a[1]).slice(0,2);
+                let incStr = sortedInc.map(x => `<span class="font-black">${x[0].substring(2)}</span> (${((x[1]/inc90d)*100||0).toFixed(0)}%)`).join(' y ');
+                const totE = fixedExp + varExp || 1;
+                rStrText.innerHTML = `Tu principal fuente de ingresos son ${incStr || 'entradas diversas'}. Los egresos (90D) se componen de un <span class="font-black">${((fixedExp/totE)*100).toFixed(0)}%</span> en obligaciones fijas y <span class="font-black">${((varExp/totE)*100).toFixed(0)}%</span> en gastos variables.`;
+            }
         }
 
         // AFTERPAY
