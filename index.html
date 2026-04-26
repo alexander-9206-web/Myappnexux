@@ -251,7 +251,7 @@
                 <p id="cal-coverage-narrative" class="text-[10px] text-rose-900 font-medium"></p>
             </div>
             <div class="theme-card p-5 rounded-[2rem] border shadow-sm"><div class="flex justify-between items-center mb-3"><h3 id="cal-grid-month" class="text-[10px] font-black uppercase theme-text">--</h3><div class="w-2 h-2 rounded-full bg-red-500"></div></div><div class="cal-grid text-[8px] text-center font-black text-slate-400 mb-2"><div>LUN</div><div>MAR</div><div>MIÉ</div><div>JUE</div><div>VIE</div><div>SÁB</div><div>DOM</div></div><div id="cal-grid-days" class="cal-grid"></div></div>
-            <div class="space-y-4"><div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2"><button onclick="setCalendarFilter('all')" type="button" class="filter-chip active" id="f-cal-all">60 Días</button><button onclick="setCalendarFilter('week')" type="button" class="filter-chip" id="f-cal-week">Semana</button><button onclick="setCalendarFilter('month')" type="button" class="filter-chip" id="f-cal-month">Mes</button></div><div class="theme-card p-6 rounded-[2rem] border shadow-sm"><div class="flex items-center justify-between border-b border-slate-100/50 pb-3 mb-4"><h3 class="text-[10px] font-black uppercase theme-text">Línea Tiempo</h3><p id="cal-total-due" class="text-xs font-black theme-val-exp tabular-nums">$0</p></div><div id="calendar-timeline" class="pl-4 space-y-5"></div></div></div>
+            <div class="space-y-4"><div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2"><button onclick="setCalendarFilter('all')" type="button" class="filter-chip active" id="f-cal-all">60 Días</button><button onclick="setCalendarFilter('week')" type="button" class="filter-chip" id="f-cal-week">Semana</button><button onclick="setCalendarFilter('month')" type="button" class="filter-chip" id="f-cal-month">Mes</button><button onclick="setCalendarFilter('custom')" type="button" class="filter-chip" id="f-cal-custom">Periodo</button></div><div id="cal-custom-range" class="hidden grid grid-cols-2 gap-4 theme-card p-4 rounded-2xl border shadow-sm"><div><label class="text-[9px] font-black uppercase text-slate-400 ml-2">Desde</label><input type="date" id="cal-filter-start" class="form-input text-xs mt-1 py-2" onchange="renderCalendar()"></div><div><label class="text-[9px] font-black uppercase text-slate-400 ml-2">Hasta</label><input type="date" id="cal-filter-end" class="form-input text-xs mt-1 py-2" onchange="renderCalendar()"></div></div><div class="theme-card p-6 rounded-[2rem] border shadow-sm"><div class="flex items-center justify-between border-b border-slate-100/50 pb-3 mb-4"><h3 class="text-[10px] font-black uppercase theme-text">Línea Tiempo</h3><p id="cal-total-due" class="text-xs font-black theme-val-exp tabular-nums">$0</p></div><div id="calendar-timeline" class="pl-4 space-y-5"></div></div></div>
         </section>
     </main>
 
@@ -1068,9 +1068,26 @@
         function renderCalendar() {
             const tC = $id('calendar-timeline'); const tE = $id('cal-total-due'); if(!tC || !tE) return;
             const now = new Date(); now.setHours(0,0,0,0);
-            const aFE = generateFutureEvents().filter(ev => ev.date >= now); aFE.sort((a,b) => a.date - b.date);
+            
+            let aFE = generateFutureEvents();
+            if(state.calendarFilter !== 'custom') aFE = aFE.filter(ev => ev.date >= now);
+            aFE.sort((a,b) => a.date - b.date);
+
             let fE = []; const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()) % 7); const eom = new Date(now.getFullYear(), now.getMonth() + 1, 0); const sD = new Date(now.getTime() + (60 * 86400000));
-            if (state.calendarFilter === 'week') fE = aFE.filter(ev => ev.date <= eow); else if (state.calendarFilter === 'month') fE = aFE.filter(ev => ev.date <= eom); else fE = aFE.filter(ev => ev.date <= sD);
+            
+            let customSt = new Date(0); let customEn = new Date(2100, 0, 1); let customDays = 30;
+            if (state.calendarFilter === 'custom') {
+                const fs = $id('cal-filter-start'); const fe = $id('cal-filter-end');
+                if(fs && fs.value) customSt = new Date(fs.value + 'T00:00:00');
+                if(fe && fe.value) customEn = new Date(fe.value + 'T23:59:59');
+                customDays = Math.max(1, Math.ceil((customEn - customSt) / 86400000));
+            }
+
+            if (state.calendarFilter === 'week') fE = aFE.filter(ev => ev.date <= eow); 
+            else if (state.calendarFilter === 'month') fE = aFE.filter(ev => ev.date <= eom); 
+            else if (state.calendarFilter === 'custom') fE = aFE.filter(ev => ev.date >= customSt && ev.date <= customEn);
+            else fE = aFE.filter(ev => ev.date <= sD);
+
             if (fE.length === 0) { tC.innerHTML = `<div class="text-center p-8 bg-slate-50/50 rounded-2xl"><p class="text-[10px] font-black uppercase text-slate-400">Todo al día.</p></div>`; tE.innerText = fmt(0); } 
             else {
                 const tD = fE.reduce((s, ev) => s + ev.amount, 0); tE.innerText = fmt(tD);
@@ -1088,6 +1105,7 @@
             let accInc = 0;
             if (state.calendarFilter === 'week') accInc = rI / 4.28;
             else if (state.calendarFilter === 'month') accInc = rI;
+            else if (state.calendarFilter === 'custom') accInc = (rI / 30) * customDays;
             else accInc = rI * 2;
 
             const baseC = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
@@ -1127,6 +1145,11 @@
             state.calendarFilter = f;
             $qAll('#tab-calendar .filter-chip').forEach(b => b.classList.remove('active'));
             const btn = $id('f-cal-' + f); if(btn) btn.classList.add('active');
+            const customRange = $id('cal-custom-range');
+            if (customRange) {
+                if (f === 'custom') customRange.classList.remove('hidden');
+                else customRange.classList.add('hidden');
+            }
             renderCalendar();
         }
 
