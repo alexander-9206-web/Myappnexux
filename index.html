@@ -838,7 +838,9 @@
         function renderDatabase() { 
             const fsEl = $id('db-filter-start'); const feEl = $id('db-filter-end'); const ftEl = $id('db-filter-type'); const fcEl = $id('db-filter-cat'); if(!fsEl || !feEl || !ftEl || !fcEl) return;
             const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); const tp = ftEl.value; const ct = fcEl.value; 
-            let fTx = getEnrichedTx().filter(t => { const d = new Date(t.date); if(d < st || d > en) return false; if(tp !== 'all' && t.type !== tp) return false; if(ct !== 'all' && t.cat !== ct) return false; return true; }); 
+            
+            // Reemplazo de getEnrichedTx por getActiveTx para purgar las proyecciones y mantener el SSoT 100% puro.
+            let fTx = getActiveTx().filter(t => { const d = new Date(t.date); if(d < st || d > en) return false; if(tp !== 'all' && t.type !== tp) return false; if(ct !== 'all' && t.cat !== ct) return false; return true; }); 
             
             fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
             
@@ -848,17 +850,30 @@
             
             const tV = fTx.reduce((s,t) => {
                 const amt = convertCurrency(t.amount, t.currency, targetCurr);
-                return t.type === 'income' ? s + amt : ((t.type === 'expense' || t.type === 'afterpay') ? s - amt : s);
+                // Se ignora "afterpay" en el flujo neto inicial, porque el descuento real al bolsillo ocurre en el pago de las cuotas (type 'expense').
+                return t.type === 'income' ? s + amt : (t.type === 'expense' ? s - amt : s);
             }, 0); 
             
             const tE = $id('db-total'); if(tE) { tE.innerText = fmt(tV, targetCurr); tE.className = tV >= 0 ? "theme-val-inc" : "theme-val-exp"; }
             
             const lC = $id('db-list'); if(!lC) return; if(fTx.length === 0) { lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`; return; } 
+            
             lC.innerHTML = fTx.map(t => { 
-                const iI = t.type === 'income'; const iE = t.type === 'expense' || t.type === 'afterpay'; const cT = iI ? 'theme-val-inc' : iE ? 'theme-val-exp' : 'theme-text'; const iB = iI ? 'bg-emerald-50 text-emerald-600' : iE ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-600'; const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; let dAmt = t.amount; let suffix = ''; if(t.type === 'afterpay' && !t.isProjected) { const q = t.apQuotas || 4; dAmt = t.amount / q; suffix = ' (Cuota Periodo)'; }
-                let pBadge = ''; if(t.isProjected) { const isPast = new Date(t.date) <= new Date(); const bTxt = isPast ? (t.cat.includes('Afterpay') ? 'PENDIENTE' : 'AMORTIZADO') : 'PROYECTADO'; const bCls = isPast ? (t.cat.includes('Afterpay') ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-100 text-blue-600 border-blue-200') : 'bg-amber-100 text-amber-600 border-amber-200'; pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200">AMORTIZADO</span>`; }
-                const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`; const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300'; const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
-                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px] flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1 flex items-center">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN}${suffix} ${pBadge}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(dAmt, t.currency)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                const iI = t.type === 'income'; const iE = t.type === 'expense' || t.type === 'afterpay'; 
+                const cT = iI ? 'theme-val-inc' : iE ? 'theme-val-exp' : 'theme-text'; 
+                const iB = iI ? 'bg-emerald-50 text-emerald-600' : iE ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-600'; 
+                const aN = state.accounts.find(a=>a.id===t.accId)?.name||(t.type==='afterpay'?'Afterpay Hub':'--'); 
+                
+                let pBadge = ''; 
+                if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
+                    pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200">AMORTIZADO</span>`; 
+                } else if (t.type === 'afterpay') { 
+                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200">COMPRA ORIGINAL</span>`; 
+                } else if (t.note && t.note.includes('[TC]')) {
+                    pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">COMPRA TC</span>`;
+                }
+                
+                return `<div onclick="editTransaction('${t.id}')" class="cursor-pointer hover:border-blue-300 theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px] flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1 flex items-center">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(t.amount, t.currency)}</p><button type="button" onclick="event.stopPropagation(); deleteDatabaseRecord('${t.id}')" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(new Event('click'), id); }
