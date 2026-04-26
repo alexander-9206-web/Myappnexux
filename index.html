@@ -881,10 +881,12 @@
         // ANALÍTICA
         function setStatsType(type) { state.statsType = type; renderAnalysis(); }
         function renderAnalysis() {
-            const contextTx = getContextTx(getEnrichedTx()).filter(t => t.type !== 'afterpay');
+            const now = new Date();
+            // Hacker Fix: Filtramos estrictamente hasta la fecha actual (<= now) para proyecciones precisas basadas en la realidad ejecutada, ignorando futuros.
+            const contextTx = getContextTx(getActiveTx()).filter(t => t.type !== 'afterpay' && new Date(t.date) <= now);
             const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
             const inc = contextTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); const exp = contextTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
-            let days = 1; const now = new Date(); if (state.context === 'month') days = now.getDate() || 1; if (state.context === 'year') { const sy = new Date(now.getFullYear(), 0, 1); days = Math.floor((now - sy) / 86400000) + 1; }
+            let days = 1; if (state.context === 'month') days = now.getDate() || 1; if (state.context === 'year') { const sy = new Date(now.getFullYear(), 0, 1); days = Math.floor((now - sy) / 86400000) + 1; }
             const sbEl = $id('stat-burn'); const ssEl = $id('stat-save'); if(sbEl) sbEl.innerText = fmt(exp / days); const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; if(ssEl) { ssEl.innerText = saveEff + '%'; ssEl.className = `text-lg font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
             const typeTx = contextTx.filter(t => t.type === state.statsType); const totalType = typeTx.reduce((s,t) => s + t.amount, 0); const catGroup = {}; typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount); const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
             const tbody = $id('stat-top-table'); if(tbody) { if (sortedCats.length === 0) { tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos</td></tr>`; } else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr class="border-b border-slate-50/50 last:border-0"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold">${perc}%</td></tr>`; }).join(''); } }
