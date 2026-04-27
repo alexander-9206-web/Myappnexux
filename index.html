@@ -387,6 +387,18 @@
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota</label><input type="text" id="f-note" class="form-input text-xs"></div></div>
+                    
+                    <div id="recur-container" class="hidden animate-slideUp border-t border-slate-100 pt-4">
+                        <label class="relative inline-flex items-center cursor-pointer ml-2">
+                            <input type="checkbox" id="f-is-recur" class="sr-only peer" onchange="toggleRecurFields()">
+                            <div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+                            <span class="ml-2 text-[10px] font-black uppercase text-purple-600">¿Gasto Recurrente?</span>
+                        </label>
+                        <div id="recur-fields" class="hidden mt-2 flex gap-2">
+                            <select id="f-recur-freq" class="form-input border-purple-200 bg-purple-50 text-purple-900 flex-1 py-3 text-xs"><option value="weekly">Semanal</option><option value="fortnightly">Quincenal</option><option value="monthly" selected>Mensual</option><option value="yearly">Anual</option></select>
+                            <input type="number" id="f-recur-count" value="12" min="2" max="120" class="form-input border-purple-200 bg-purple-50 text-purple-900 w-24 text-center font-black py-3 text-xs" placeholder="N° Veces">
+                        </div>
+                    </div>
                 </div>
                 <button type="submit" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Registro</button>
             </form>
@@ -599,6 +611,18 @@
                     const interest = balance * r; const principal = A - interest; balance -= principal; if(balance < 0.01) balance = 0; 
                     const int_orig = bal_orig * r; const prin_orig = A_orig - int_orig; bal_orig -= prin_orig; if(bal_orig < 0.01) bal_orig = 0;
                     rawTx.push({ id: 'proj_loan_'+l.id+'_'+i, type: 'expense', amount: A, original_amount: A_orig, original_currency: l.original_currency || l.currency, cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda', accId: null, date: pD.toISOString(), note: `[Cuota ${i+1}/${n}] ${l.name} (Cap:${fmt(prin_orig, l.original_currency||l.currency)} | Int:${fmt(int_orig, l.original_currency||l.currency)})`, isProjected: true, currency: l.currency }); 
+                }
+            });
+            rawTx.filter(t => t.isRecurrent).forEach(tx => {
+                const count = tx.recurCount || 12; const freq = tx.recurFreq || 'monthly'; const origDate = new Date(tx.date);
+                for(let i=1; i<count; i++) {
+                    const d = new Date(origDate.getTime());
+                    if (freq === 'weekly') d.setDate(d.getDate() + (i*7));
+                    else if (freq === 'fortnightly') d.setDate(d.getDate() + (i*14));
+                    else if (freq === 'monthly') d.setMonth(d.getMonth() + i);
+                    else if (freq === 'yearly') d.setFullYear(d.getFullYear() + i);
+                    const clearCat = tx.note || tx.cat.substring(2).trim();
+                    rawTx.push({ id: 'proj_recur_'+tx.id+'_'+i, type: tx.type, amount: tx.amount, original_amount: tx.original_amount || tx.amount, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Recurrente] ${clearCat} (${i+1}/${count})`, isProjected: true, currency: tx.currency });
                 }
             });
             return rawTx;
@@ -894,6 +918,7 @@
 
         // FORMULARIO MAESTRO DE TRANSACCIONES (SSoT)
         function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
+        function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
         function openForm(type, txId = null) { 
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
@@ -904,7 +929,8 @@
             const aS = $id('f-account'); const accCont = $id('account-container');
             if(type === 'afterpay') { if(accCont) accCont.classList.add('hidden'); aS.required = false; } else { if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = ''; getActiveAccounts().forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; }); }
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
-            if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; }
+            const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
+            if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
             checkTxAccount();
         }
         
@@ -912,7 +938,9 @@
         
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
-            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; } checkTxAccount();
+            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; } 
+            if($id('f-is-recur')) { $id('f-is-recur').checked = !!tx.isRecurrent; toggleRecurFields(); if(tx.isRecurrent) { $id('f-recur-freq').value = tx.recurFreq || 'monthly'; $id('f-recur-count').value = tx.recurCount || 12; } }
+            checkTxAccount();
         }
 
         function deleteTx(e, id) {
@@ -951,12 +979,14 @@
                 if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
                 oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(date).toISOString(); oldTx.note = note;
                 if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = 'AUD'; }
+                const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
                 if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
                 const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? 'AUD' : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency) }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = 0; } 
+                const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); 
             }
             saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
