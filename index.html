@@ -156,16 +156,21 @@
             <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-600">Analítica Pro</h2></div>
             <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Periodo de Análisis: <span id="stat-period-label" class="text-indigo-500"></span></p>
             
-            <div id="stat-kpi-container" class="grid grid-cols-2 gap-4 md:gap-6">
-                <div class="theme-card p-6 rounded-3xl border shadow-sm text-center flex flex-col justify-center">
-                    <p class="text-[9px] md:text-xs font-black opacity-40 uppercase mb-2 theme-text">Burn Rate Diario</p>
-                    <h4 id="stat-burn" class="text-lg md:text-2xl font-black tabular-nums theme-text">--</h4>
-                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-2 leading-tight">Ritmo de gasto por día. Proyecta tu liquidez real.</p>
+            <div id="stat-kpi-container" class="grid grid-cols-3 gap-3 md:gap-6">
+                <div class="theme-card p-4 md:p-6 rounded-2xl md:rounded-3xl border shadow-sm text-center flex flex-col justify-center">
+                    <p class="text-[8px] md:text-xs font-black opacity-40 uppercase mb-1 md:mb-2 theme-text">Ingreso Real</p>
+                    <h4 id="stat-real-inc" class="text-sm md:text-2xl font-black tabular-nums theme-val-inc">--</h4>
+                    <p class="text-[6px] md:text-[9px] text-slate-400 mt-1 md:mt-2 leading-tight">Total percibido hasta hoy.</p>
                 </div>
-                <div class="theme-card p-6 rounded-3xl border shadow-sm text-center flex flex-col justify-center">
-                    <p class="text-[9px] md:text-xs font-black opacity-40 uppercase mb-2 theme-text">Eficiencia Ahorro</p>
-                    <h4 id="stat-save" class="text-lg md:text-2xl font-black tabular-nums theme-val-inc">--%</h4>
-                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-2 leading-tight">Porcentaje de ingresos libres de gasto mensual.</p>
+                <div class="theme-card p-4 md:p-6 rounded-2xl md:rounded-3xl border shadow-sm text-center flex flex-col justify-center">
+                    <p class="text-[8px] md:text-xs font-black opacity-40 uppercase mb-1 md:mb-2 theme-text">Burn Rate</p>
+                    <h4 id="stat-burn" class="text-sm md:text-2xl font-black tabular-nums theme-text">--</h4>
+                    <p class="text-[6px] md:text-[9px] text-slate-400 mt-1 md:mt-2 leading-tight">Ritmo de gasto por día.</p>
+                </div>
+                <div class="theme-card p-4 md:p-6 rounded-2xl md:rounded-3xl border shadow-sm text-center flex flex-col justify-center">
+                    <p class="text-[8px] md:text-xs font-black opacity-40 uppercase mb-1 md:mb-2 theme-text">Eficiencia</p>
+                    <h4 id="stat-save" class="text-sm md:text-2xl font-black tabular-nums theme-val-inc">--%</h4>
+                    <p class="text-[6px] md:text-[9px] text-slate-400 mt-1 md:mt-2 leading-tight">Retención mensual.</p>
                 </div>
             </div>
             
@@ -639,7 +644,7 @@
             const isBack = id === 'home' && state.activeTab !== 'home'; state.activeTab = id;
             $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
             const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
-            const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
+            const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
             
             if(id === 'loans') renderLoansList(); if(id === 'analysis') renderAnalysis(); if(id === 'afterpay') renderAfterpay(); if(id === 'report') renderReport(); if(id === 'accounts') renderAccountsTab(); if(id === 'settings') renderSettingsTab(); if(id === 'database') initDatabaseTab(); if(id === 'calendar') renderCalendar(); if(id === 'finances') renderFinancesUnified(); if(id === 'budget') renderBudgetTab();
         }
@@ -1040,17 +1045,27 @@
         function setStatsType(type) { state.statsType = type; renderAnalysis(); }
         function renderAnalysis() {
             const now = new Date();
-            // Hacker Fix: Filtramos estrictamente hasta la fecha actual (<= now) para proyecciones precisas basadas en la realidad ejecutada, ignorando futuros.
-            const contextTx = getContextTx(getActiveTx()).filter(t => t.type !== 'afterpay' && new Date(t.date) <= now);
-            const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
-            const inc = contextTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); const exp = contextTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
+            // Motor unificado: Filtra automáticamente el mes en curso descartando dependencias de pestañas superiores y futuros.
+            const currentMonthTx = getActiveTx().filter(t => {
+                const d = new Date(t.date);
+                return t.type !== 'afterpay' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && d <= now;
+            });
+            const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = 'Mes Actual (Unificado)';
+            const inc = currentMonthTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); 
+            const exp = currentMonthTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
             
-            let days = 1; if (state.context === 'month') days = now.getDate() || 1; if (state.context === 'year') { const sy = new Date(now.getFullYear(), 0, 1); days = Math.floor((now - sy) / 86400000) + 1; }
-            if (state.context === 'day') days = 1;
+            let days = now.getDate() || 1; 
 
-            const sbEl = $id('stat-burn'); const ssEl = $id('stat-save'); if(sbEl) sbEl.innerText = fmt(exp / days); const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; if(ssEl) { ssEl.innerText = saveEff + '%'; ssEl.className = `text-lg md:text-2xl font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
+            const sriEl = $id('stat-real-inc'); if(sriEl) sriEl.innerText = fmt(inc);
+            const sbEl = $id('stat-burn'); const ssEl = $id('stat-save'); 
+            if(sbEl) sbEl.innerText = fmt(exp / days); 
+            const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; 
+            if(ssEl) { ssEl.innerText = saveEff + '%'; ssEl.className = `text-sm md:text-2xl font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
             
-            const typeTx = contextTx.filter(t => t.type === state.statsType); const totalType = typeTx.reduce((s,t) => s + t.amount, 0); const catGroup = {}; typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount); const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
+            const typeTx = currentMonthTx.filter(t => t.type === state.statsType); 
+            const totalType = typeTx.reduce((s,t) => s + t.amount, 0); 
+            const catGroup = {}; typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount); 
+            const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
             const tbody = $id('stat-top-table'); if(tbody) { if (sortedCats.length === 0) { tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos</td></tr>`; } else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr class="border-b border-slate-50/50 last:border-0"><td class="py-3 font-bold theme-text">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold">${perc}%</td></tr>`; }).join(''); } }
             
             const btnExp = $id('btn-stat-exp'); const btnInc = $id('btn-stat-inc'); if(btnExp) btnExp.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`; if(btnInc) btnInc.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
