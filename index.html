@@ -27,10 +27,6 @@
         #numpad-modal { touch-action: none; overscroll-behavior: none; }
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
-        
-        /* Animaciones para el Indicador de Sincronización */
-        @keyframes pulse-fast { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
-        .animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
 <body class="pb-40">
@@ -61,11 +57,7 @@
         <div class="max-w-5xl mx-auto w-full">
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
                 <div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div>
-                <div class="flex items-center gap-2 sm:gap-3">
-                    <div id="cloud-sync-indicator" class="flex items-center gap-1.5 px-2 py-1 rounded-full border bg-slate-50 border-slate-200 transition-all duration-300">
-                        <div id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-colors duration-300"></div>
-                        <span id="sync-text" class="text-[8px] font-black uppercase tracking-widest text-slate-500 transition-colors duration-300">Local</span>
-                    </div>
+                <div class="flex items-center gap-2">
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
                     <button onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
                 </div>
@@ -735,34 +727,12 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, LIVE_RATES = EXCHANGE_RATES; 
 
-        // --- MOTOR DE NUBE (FIREBASE SINC) ---
+        // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS + SOCKETS) ---
         let cloudDb = null, cloudAuth = null, fsLib = null, cloudUserId = null;
+        let unsubMain = null, unsubTx = null; // Controladores de sockets
         const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-jr';
 
-        // --- SISTEMA DE TELEMETRÍA (SYNC INDICATOR) ---
-        const SYNC_STATES = {
-            CONNECTING: { text: 'Conectando', dotClass: 'bg-amber-400 animate-pulse-fast', bgClass: 'bg-amber-50 border-amber-200', textClass: 'text-amber-600' },
-            ONLINE:     { text: 'Conectado', dotClass: 'bg-emerald-500', bgClass: 'bg-emerald-50 border-emerald-200', textClass: 'text-emerald-600' },
-            SYNCING:    { text: 'Pendiente', dotClass: 'bg-indigo-500 animate-pulse-fast', bgClass: 'bg-indigo-50 border-indigo-200', textClass: 'text-indigo-600' },
-            ERROR:      { text: 'Error', dotClass: 'bg-red-500', bgClass: 'bg-red-50 border-red-200', textClass: 'text-red-600' },
-            OFFLINE:    { text: 'Local', dotClass: 'bg-slate-400', bgClass: 'bg-slate-50 border-slate-200', textClass: 'text-slate-500' }
-        };
-
-        function updateSyncUI(status) {
-            const ind = $id('cloud-sync-indicator'); const dot = $id('sync-dot'); const txt = $id('sync-text');
-            if(!ind || !dot || !txt) return;
-            ind.className = `flex items-center gap-1.5 px-2 py-1 rounded-full border transition-all duration-300 ${status.bgClass}`;
-            dot.className = `w-1.5 h-1.5 rounded-full transition-colors duration-300 ${status.dotClass}`;
-            txt.className = `text-[8px] font-black uppercase tracking-widest transition-colors duration-300 ${status.textClass}`;
-            txt.innerText = status.text;
-        }
-
-        window.addEventListener('online', () => { if(cloudDb) updateSyncUI(SYNC_STATES.ONLINE); });
-        window.addEventListener('offline', () => updateSyncUI(SYNC_STATES.OFFLINE));
-
         async function initCloud() {
-            if(!navigator.onLine) { updateSyncUI(SYNC_STATES.OFFLINE); return; }
-            updateSyncUI(SYNC_STATES.CONNECTING);
             try {
                 // Importamos dinámicamente los módulos faltantes sin alterar el bloque base
                 const appLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js");
@@ -782,50 +752,117 @@
                 // Autenticación obligatoria antes de cualquier query
                 const cred = await authLib.signInAnonymously(cloudAuth);
                 cloudUserId = cred.user.uid;
-                updateSyncUI(SYNC_STATES.ONLINE);
-                console.log("☁️ Arquitectura de Nube Activa. UID:", cloudUserId);
-            } catch(e) { console.error("Error conectando a la nube:", e); updateSyncUI(SYNC_STATES.ERROR); }
-        }
-
-        async function fetchCloudState() {
-            if (!navigator.onLine) return;
-            if (!cloudDb || !cloudUserId || !currentUser) return;
-            updateSyncUI(SYNC_STATES.SYNCING);
-            try {
-                // Query estructural con rutas seguras: artifacts/appId/users/userId/collection/docId
-                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
-                const snap = await fsLib.getDoc(docRef);
-                if (snap.exists()) {
-                    const data = snap.data();
-                    if(data.state) localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(data.state));
-                    if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
-                }
-                updateSyncUI(SYNC_STATES.ONLINE);
-            } catch(e) { console.error("Error sincronizando bóveda remota:", e); updateSyncUI(SYNC_STATES.ERROR); }
-        }
-
-                cloudAuth = authLib.getAuth(app);
-                cloudDb = fsLib.getFirestore(app);
-
-                // Autenticación obligatoria antes de cualquier query
-                const cred = await authLib.signInAnonymously(cloudAuth);
-                cloudUserId = cred.user.uid;
-                console.log("☁️ Arquitectura de Nube Activa. UID:", cloudUserId);
+                console.log("☁️ Arquitectura de Nube Activa (Tiempo Real). UID:", cloudUserId);
             } catch(e) { console.error("Error conectando a la nube:", e); }
         }
 
         async function fetchCloudState() {
             if (!cloudDb || !cloudUserId || !currentUser) return;
             try {
-                // Query estructural con rutas seguras: artifacts/appId/users/userId/collection/docId
+                // Query estructural con rutas seguras
                 const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
                 const snap = await fsLib.getDoc(docRef);
+                
                 if (snap.exists()) {
                     const data = snap.data();
-                    if(data.state) localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(data.state));
+                    let loadedState = data.state ? { ...data.state } : null;
+                    
+                    if (loadedState) {
+                        // Descargamos la subcolección de transacciones
+                        const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
+                        const txSnap = await fsLib.getDocs(txCollRef);
+                        let subCollTx = [];
+                        txSnap.forEach(doc => subCollTx.push(doc.data()));
+
+                        // MIGRACIÓN AUTOMÁTICA: Movemos tx viejas a subcolección
+                        if (loadedState.tx && loadedState.tx.length > 0 && subCollTx.length === 0) {
+                            console.log("🔄 Migrando transacciones a subcolección...");
+                            const batch = fsLib.writeBatch(cloudDb);
+                            loadedState.tx.forEach(tx => {
+                                const txRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
+                                batch.set(txRef, tx);
+                            });
+                            await batch.commit();
+                            subCollTx = loadedState.tx; 
+                            console.log("✅ Migración completada.");
+                        }
+                        
+                        loadedState.tx = subCollTx; // Transacciones estrictamente de la subcolección
+                        state = loadedState;
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                    }
                     if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
                 }
+                
+                setupCloudListeners(); // Iniciamos sockets
             } catch(e) { console.error("Error sincronizando bóveda remota:", e); }
+        }
+
+        function setupCloudListeners() {
+            if (!cloudDb || !cloudUserId || !currentUser) return;
+            
+            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
+            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
+            
+            if(unsubMain) unsubMain();
+            if(unsubTx) unsubTx();
+
+            // 1. Socket Documento Principal (Cuentas, Config, etc)
+            unsubMain = fsLib.onSnapshot(docRef, (snap) => {
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data.state) {
+                        const currentTx = state.tx || []; // Preservamos TX actuales
+                        state = { ...data.state, tx: currentTx };
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        if (sessionUnlocked) { updateDashboard(); switchTab(state.activeTab); }
+                    }
+                }
+            });
+
+            // 2. Socket Subcolección (Transacciones en vivo)
+            unsubTx = fsLib.onSnapshot(txCollRef, (snapshot) => {
+                let currentTx = state.tx || [];
+                let hasChanges = false;
+                
+                snapshot.docChanges().forEach((change) => {
+                    hasChanges = true;
+                    const txData = change.doc.data();
+                    if (change.type === "added" || change.type === "modified") {
+                        const idx = currentTx.findIndex(t => t.id === txData.id);
+                        if (idx >= 0) currentTx[idx] = txData; else currentTx.push(txData);
+                    }
+                    if (change.type === "removed") {
+                        currentTx = currentTx.filter(t => t.id !== change.doc.id);
+                    }
+                });
+
+                if (hasChanges) {
+                    state.tx = currentTx;
+                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                    if (sessionUnlocked) { 
+                        updateDashboard(); 
+                        if(state.activeTab === 'database') renderDatabase(); 
+                        if(state.activeTab === 'accounts') renderAccountsTab(); 
+                        if(state.activeTab === 'afterpay') renderAfterpay(); 
+                    }
+                }
+            });
+        }
+
+        // Helpers de Escritura para Subcolección
+        function saveCloudTx(tx) {
+            if (cloudDb && cloudUserId && currentUser) {
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
+                fsLib.setDoc(txDoc, tx).catch(e => console.error("Error guardando TX:", e));
+            }
+        }
+        
+        function deleteCloudTx(id) {
+            if (cloudDb && cloudUserId && currentUser) {
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', id);
+                fsLib.deleteDoc(txDoc).catch(e => console.error("Error borrando TX:", e));
+            }
         }
 
         window.onload = async () => {
@@ -915,17 +952,12 @@
             if(currentUser && sessionUnlocked && state) {
                 localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); 
                 
-                // Interceptamos la persistencia atómica para escribir en Firestore
+                // Interceptamos la persistencia atómica para escribir en Firestore (Protegiendo el límite de 1MB)
                 if (cloudDb && cloudUserId) {
-                    if(!navigator.onLine) {
-                        updateSyncUI(SYNC_STATES.OFFLINE);
-                        return;
-                    }
-                    updateSyncUI(SYNC_STATES.SYNCING);
                     const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
-                    fsLib.setDoc(docRef, { state: state, updatedAt: new Date().toISOString() }, {merge: true})
-                        .then(() => setTimeout(() => updateSyncUI(SYNC_STATES.ONLINE), 500))
-                        .catch(e => { console.error("Fallo de sincronización en Nube:", e); updateSyncUI(SYNC_STATES.ERROR); });
+                    const stateWithoutTx = { ...state };
+                    delete stateWithoutTx.tx; // <-- Previene Crash del límite 1MB
+                    fsLib.setDoc(docRef, { state: stateWithoutTx, updatedAt: new Date().toISOString() }, {merge: true}).catch(e => console.error("Fallo de sincronización en Nube:", e));
                 }
             } 
         }
@@ -1268,7 +1300,8 @@
             if((l.paidQuotas || 0) >= l.term) return alert("Deuda saldada.");
             const r = l.rate / 100; const quotaAmt = (l.rate === 0) ? (l.total / l.term) : (l.total * r) / (1 - Math.pow(1 + r, -l.term));
             l.paidQuotas = (l.paidQuotas || 0) + 1; acc.balance -= quotaAmt;
-            state.tx.push({ id: 'loan_pay_' + Date.now(), type: 'expense', amount: quotaAmt, cat: l.isCC ? '💳 Abono TC' : '💳 Pago Deuda', accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${l.name} (${l.paidQuotas}/${l.term})`, currency: l.currency });
+            const newTx = { id: 'loan_pay_' + Date.now(), type: 'expense', amount: quotaAmt, cat: l.isCC ? '💳 Abono TC' : '💳 Pago Deuda', accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${l.name} (${l.paidQuotas}/${l.term})`, currency: l.currency };
+            state.tx.push(newTx); saveCloudTx(newTx);
             saveState(); updateDashboard(); switchTab('loans'); alert(`✅ Cuota pagada correctamente.`);
         }
 
@@ -1320,7 +1353,9 @@
             e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
             const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
-            card.balance += amount; state.tx.push({ id: Date.now().toString(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency }); 
+            card.balance += amount; 
+            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency };
+            state.tx.push(newTx); saveCloudTx(newTx);
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
             saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
         }
@@ -1369,7 +1404,8 @@
             if(confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
                 const acc = state.accounts.find(a => a.id === tx.accId); 
                 if(acc && tx.type !== 'afterpay' && tx.type !== 'transfer') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } } 
-                state.tx = state.tx.filter(t => t.id !== id); saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); 
+                state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
+                saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); 
             } 
         }
 
@@ -1389,7 +1425,7 @@
                     acc.balance += amount; 
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(date).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency });
                     ccTx.isCCPurchase = true;
-                    state.tx.push(ccTx); 
+                    state.tx.push(ccTx); saveCloudTx(ccTx);
                     state.loans.push({ id: 'CC_' + Date.now(), name: `${note||cat.substring(2)} (${acc.name})`, total: amount, balance: amount, rate: acc.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: acc.id, date: new Date(date).toISOString(), currency: acc.currency }); 
                     saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); return; 
                 }
@@ -1403,12 +1439,13 @@
                 const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
                 if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
+                saveCloudTx(oldTx);
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
                 const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? 'AUD' : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency) }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
-                state.tx.push(newTx); 
+                state.tx.push(newTx); saveCloudTx(newTx);
             }
             saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
         }
@@ -1750,7 +1787,8 @@
             let deductAmt = tx.amount / quotas;
             if(acc.currency !== tx.currency) deductAmt = convertCurrency(deductAmt, tx.currency, acc.currency);
             tx.apPaid = (tx.apPaid || 0) + 1; acc.balance -= deductAmt;
-            state.tx.push(buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: acc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${tx.note || tx.cat.substring(2)} (${tx.apPaid}/${quotas})`, currency: acc.currency }));
+            const newTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: acc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${tx.note || tx.cat.substring(2)} (${tx.apPaid}/${quotas})`, currency: acc.currency });
+            state.tx.push(newTx); saveCloudTx(newTx); saveCloudTx(tx);
             saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); if(state.activeTab === 'database') renderDatabase(); alert(`✅ Cuota ${tx.apPaid}/${quotas} pagada.`);
         }
 
@@ -2202,7 +2240,7 @@
                         else acc.balance -= tx.amount;
                     }
                 }
-                state.tx.push(newTx);
+                state.tx.push(newTx); saveCloudTx(newTx);
             });
             
             saveState();
@@ -2212,28 +2250,5 @@
             switchTab('database');
         }
     </script>
-    <script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
-
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
-    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-    authDomain: "nexus-jr.firebaseapp.com",
-    projectId: "nexus-jr",
-    storageBucket: "nexus-jr.firebasestorage.app",
-    messagingSenderId: "273022472068",
-    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-    measurementId: "G-LGT2X8EC0R"
-  };
-
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-</script>
 </body>
 </html>
