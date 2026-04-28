@@ -728,9 +728,9 @@
         let catManageType = 'income', inactivityTimer = null, LIVE_RATES = EXCHANGE_RATES; 
 
         // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS + SOCKETS) ---
-        let cloudDb = null, cloudAuth = null, fsLib = null, cloudUserId = null;
-        let unsubMain = null, unsubTx = null; // Controladores de sockets
-        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-jr';
+        // Controladores de Paginación
+        window.currentTxCutoff = null; 
+        window.isFetchingOlderTx = false;
 
         async function initCloud() {
             try {
@@ -763,6 +763,11 @@
                 const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
                 const snap = await fsLib.getDoc(docRef);
                 
+                // 1. Cargar caché local primero para no perder la historia antigua durante la paginación
+                const localDbStr = localStorage.getItem(`nexus_db_${currentUser}`);
+                const localDb = localDbStr ? JSON.parse(localDbStr) : null;
+                const cachedTx = localDb && localDb.tx ? localDb.tx : [];
+                
                 if (snap.exists()) {
                     const data = snap.data();
                     let loadedState = data.state ? { ...data.state } : null;
@@ -770,32 +775,126 @@
                     if (loadedState) {
                         // Descargamos la subcolección de transacciones
                         const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
-                        const txSnap = await fsLib.getDocs(txCollRef);
+                        
+                        // --- PAGINACIÓN / OPTIMIZACIÓN DE LECTURA ---
+                        // Establecer límite de carga inicial: Últimos 90 días
+                        window.currentTxCutoff = new Date();
+                        window.currentTxCutoff.setDate(window.currentTxCutoff.getDate() - 90);
+                        const cutoffIso = window.currentTxCutoff.toISOString();
+                        
+                        // Limitamos la consulta a recientes para ahorrar lecturas y RAM
+                        const recentTxQuery = fsLib.query(txCollRef, fsLib.where('date', '>=', cutoffIso));
+                        const txSnap = await fsLib.getDocs(recentTxQuery);
+                        
                         let subCollTx = [];
-                        txSnap.forEach(doc => subCollTx.push(doc.data()));
+                        const cloudRecentIds = new Set();
+                        txSnap.forEach(doc => {
+                            const d = doc.data();
+                            subCollTx.push(d);
+                            cloudRecentIds.add(d.id);
+                        });
 
-                        // MIGRACIÓN AUTOMÁTICA: Movemos tx viejas a subcolección
-                        if (loadedState.tx && loadedState.tx.length > 0 && subCollTx.length === 0) {
-                            console.log("🔄 Migrando transacciones a subcolección...");
-                            const batch = fsLib.writeBatch(cloudDb);
-                            loadedState.tx.forEach(tx => {
-                                const txRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
-                                batch.set(txRef, tx);
-                            });
-                            await batch.commit();
-                            subCollTx = loadedState.tx; 
-                            console.log("✅ Migración completada.");
+                        // Fusión SSoT local-first (Mantiene transacciones antiguas que ya estaban en caché)
+                        const localTxMap = new Map(cachedTx.map(t => [t.id, t]));
+                        
+                        // Limpiar caché local de transacciones recientes que fueron borradas en la nube (otro dispositivo)
+                        for (const [id, tx] of localTxMap.entries()) {
+                            if (new Date(tx.date) >= window.currentTxCutoff && !cloudRecentIds.has(id)) {
+                                localTxMap.delete(id);
+                            }
                         }
                         
-                        loadedState.tx = subCollTx; // Transacciones estrictamente de la subcolección
+                        // MIGRACIÓN AUTOMÁTICA MEJORADA (Purgar Bóveda Principal si tiene datos viejos)
+                        if (data.state && data.state.tx && data.state.tx.length > 0) {
+                            console.log("🔄 Migrando TX heredadas al modelo de subcolección...");
+                            const batch = fsLib.writeBatch(cloudDb);
+                            data.state.tx.forEach(tx => {
+                                const txRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
+                                batch.set(txRef, tx);
+                                localTxMap.set(tx.id, tx); 
+                            });
+                            await batch.commit();
+                            
+                            // Purgar del documento principal para siempre (Liberar 1MB límite)
+                            delete loadedState.tx;
+                            await fsLib.updateDoc(docRef, { "state.tx": fsLib.deleteField() });
+                            console.log("✅ Migración y purga completadas.");
+                        }
+
+                        // Sobrescribe caché con versión fresca de la nube (últimos 90 días)
+                        subCollTx.forEach(t => localTxMap.set(t.id, t));
+                        loadedState.tx = Array.from(localTxMap.values());
+                        
                         state = loadedState;
                         localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        
+                        if (sessionUnlocked) {
+                            updateDashboard();
+                            if(state.activeTab) switchTab(state.activeTab);
+                        }
                     }
                     if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
                 }
                 
                 setupCloudListeners(); // Iniciamos sockets
             } catch(e) { console.error("Error sincronizando bóveda remota:", e); }
+        }
+
+        // CARGA DIFERIDA / PAGINACIÓN (Activada por Scroll en DB)
+        async function loadOlderTransactions() {
+            if (!cloudDb || !cloudUserId || !currentUser || window.isFetchingOlderTx) return;
+            window.isFetchingOlderTx = true;
+            
+            const spinner = $id('db-load-spinner');
+            if(spinner) { spinner.classList.remove('hidden'); spinner.classList.add('flex'); }
+
+            try {
+                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
+                
+                const currentCutoff = window.currentTxCutoff || new Date();
+                const newCutoff = new Date(currentCutoff);
+                newCutoff.setDate(newCutoff.getDate() - 90); // Pedimos otros 90 días hacia atrás
+
+                // Traer bloque anterior (No usamos limit() para evadir índices complejos, usamos rangos de tiempo)
+                const olderQuery = fsLib.query(
+                    txCollRef, 
+                    fsLib.where('date', '<', currentCutoff.toISOString()),
+                    fsLib.where('date', '>=', newCutoff.toISOString())
+                );
+                
+                const snap = await fsLib.getDocs(olderQuery);
+                const localTxMap = new Map((state.tx || []).map(t => [t.id, t]));
+                
+                let countNew = 0;
+                const olderCloudIds = new Set();
+                
+                snap.forEach(doc => {
+                    olderCloudIds.add(doc.id);
+                    if (!localTxMap.has(doc.id)) countNew++;
+                    localTxMap.set(doc.id, doc.data());
+                });
+                
+                // Limpiar registros borrados en este rango específico
+                for (const [id, tx] of localTxMap.entries()) {
+                    const tDate = new Date(tx.date);
+                    if (tDate < currentCutoff && tDate >= newCutoff && !olderCloudIds.has(id)) {
+                        localTxMap.delete(id);
+                    }
+                }
+                
+                state.tx = Array.from(localTxMap.values());
+                window.currentTxCutoff = newCutoff; // Actualizar globalmente
+                localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                
+                renderDatabase(); // Refrescar pantalla
+                
+                if (countNew > 0) { console.log(`📥 Paginación exitosa: ${countNew} TX descargadas.`); }
+            } catch(e) {
+                console.error("Error en paginación de auditoría:", e);
+            } finally {
+                window.isFetchingOlderTx = false;
+                if(spinner) { spinner.classList.add('hidden'); spinner.classList.remove('flex'); }
+            }
         }
 
         function setupCloudListeners() {
@@ -866,15 +965,29 @@
         }
 
         window.onload = async () => {
-            await initCloud(); // Arrancamos el motor cloud primero
+            // Activar Evento Global de Scroll para Lazy Loading
+            window.addEventListener('scroll', () => {
+                if (state.activeTab === 'database') {
+                    if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 100) {
+                        loadOlderTransactions();
+                    }
+                }
+            });
+
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
+                initCloud(); // Inicializa nube en fondo para el login
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 const le = $id('login-email');
                 if(le) le.addEventListener('input', (e) => { const em = e.target.value.trim().toLowerCase(); const rf = $id('register-fields'); if(rf) { if(em && !localStorage.getItem(`nexus_profile_${em}`)) rf.classList.remove('hidden'); else rf.classList.add('hidden'); } });
             } else {
-                await fetchCloudState(); // Forzamos hidratación desde la nube
-                bootApp();
+                // ARRANQUE LOCAL-FIRST: Carga la app al instante con datos locales
+                bootApp(); 
+                
+                // SINCRONIZACIÓN EN SEGUNDO PLANO
+                initCloud().then(() => {
+                    fetchCloudState();
+                });
             }
         };
 
@@ -890,10 +1003,20 @@
             }
             localStorage.setItem('nexus_current_user', email); currentUser = email; sessionUnlocked = true; 
             
-            await fetchCloudState(); // Descargamos datos si el usuario ya existía en la nube
-            
+            // ARRANQUE LOCAL INSTANTÁNEO TRAS LOGIN
             const loginScreen = $id('login-screen');
-            if(loginScreen) { loginScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(() => { loginScreen.classList.add('hidden'); loginScreen.classList.remove('opacity-0', 'pointer-events-none'); bootApp(); }, 300); } else bootApp();
+            if(loginScreen) { 
+                loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                setTimeout(() => { 
+                    loginScreen.classList.add('hidden'); 
+                    loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
+                    bootApp(); 
+                    fetchCloudState(); // Sincronizar tras la animación
+                }, 300); 
+            } else {
+                bootApp();
+                fetchCloudState();
+            }
         }
 
         function unlockSession() {
