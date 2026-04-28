@@ -727,16 +727,62 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, LIVE_RATES = EXCHANGE_RATES; 
 
-        window.onload = () => {
+        // --- MOTOR DE NUBE (FIREBASE SINC) ---
+        let cloudDb = null, cloudAuth = null, fsLib = null, cloudUserId = null;
+        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-jr';
+
+        async function initCloud() {
+            try {
+                // Importamos dinámicamente los módulos faltantes sin alterar el bloque base
+                const appLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js");
+                const authLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js");
+                fsLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js");
+
+                // Capturamos la app inicializada por tu bloque inferior (o la creamos si hubo delay)
+                let app = appLib.getApps().length ? appLib.getApp() : null;
+                if(!app) {
+                    const firebaseConfig = { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
+                    app = appLib.initializeApp(firebaseConfig);
+                }
+
+                cloudAuth = authLib.getAuth(app);
+                cloudDb = fsLib.getFirestore(app);
+
+                // Autenticación obligatoria antes de cualquier query
+                const cred = await authLib.signInAnonymously(cloudAuth);
+                cloudUserId = cred.user.uid;
+                console.log("☁️ Arquitectura de Nube Activa. UID:", cloudUserId);
+            } catch(e) { console.error("Error conectando a la nube:", e); }
+        }
+
+        async function fetchCloudState() {
+            if (!cloudDb || !cloudUserId || !currentUser) return;
+            try {
+                // Query estructural con rutas seguras: artifacts/appId/users/userId/collection/docId
+                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
+                const snap = await fsLib.getDoc(docRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if(data.state) localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(data.state));
+                    if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
+                }
+            } catch(e) { console.error("Error sincronizando bóveda remota:", e); }
+        }
+
+        window.onload = async () => {
+            await initCloud(); // Arrancamos el motor cloud primero
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 const le = $id('login-email');
                 if(le) le.addEventListener('input', (e) => { const em = e.target.value.trim().toLowerCase(); const rf = $id('register-fields'); if(rf) { if(em && !localStorage.getItem(`nexus_profile_${em}`)) rf.classList.remove('hidden'); else rf.classList.add('hidden'); } });
-            } else bootApp();
+            } else {
+                await fetchCloudState(); // Forzamos hidratación desde la nube
+                bootApp();
+            }
         };
 
-        function handleLogin() {
+        async function handleLogin() {
             const email = $id('login-email').value.trim().toLowerCase(); if (!email) return alert("Ingresa tu ID de correo.");
             let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
             if (existingProfile) { userProfile = JSON.parse(existingProfile); } 
@@ -744,8 +790,12 @@
                 const name = $id('login-name').value.trim(), pin = $id('login-pin').value.trim();
                 if (!name || pin.length !== 4) return alert("Nombre y PIN numérico de 4 dígitos.");
                 userProfile = { name, email, pin }; localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+                if (cloudDb && cloudUserId) fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', email), { profile: userProfile }, {merge: true}).catch(e=>console.log(e));
             }
             localStorage.setItem('nexus_current_user', email); currentUser = email; sessionUnlocked = true; 
+            
+            await fetchCloudState(); // Descargamos datos si el usuario ya existía en la nube
+            
             const loginScreen = $id('login-screen');
             if(loginScreen) { loginScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(() => { loginScreen.classList.add('hidden'); loginScreen.classList.remove('opacity-0', 'pointer-events-none'); bootApp(); }, 300); } else bootApp();
         }
@@ -801,7 +851,19 @@
         }
 
         function logout() { sessionUnlocked = false; localStorage.removeItem('nexus_current_user'); location.reload(); }
-        function saveState() { if(currentUser && sessionUnlocked && state) localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); }
+        
+        function saveState() { 
+            if(currentUser && sessionUnlocked && state) {
+                localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); 
+                
+                // Interceptamos la persistencia atómica para escribir en Firestore
+                if (cloudDb && cloudUserId) {
+                    const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
+                    fsLib.setDoc(docRef, { state: state, updatedAt: new Date().toISOString() }, {merge: true}).catch(e => console.error("Fallo de sincronización en Nube:", e));
+                }
+            } 
+        }
+        
         function fmt(val, forceCurrency = null) { const c = forceCurrency || (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : (state.activeCurrency || 'COP')); const hideDec = state.settings && state.settings.hideDecimals; const f = (['COP', 'JPY'].includes(c) || hideDec) ? 0 : 2; return new Intl.NumberFormat('es-CO', { style:'currency', currency: c, minimumFractionDigits: f, maximumFractionDigits: f }).format(val); }
 
         async function fetchLiveRates() {
