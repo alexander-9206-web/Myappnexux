@@ -27,6 +27,10 @@
         #numpad-modal { touch-action: none; overscroll-behavior: none; }
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
+        
+        /* Animaciones para el Indicador de Sincronización */
+        @keyframes pulse-fast { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
+        .animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
 <body class="pb-40">
@@ -57,7 +61,11 @@
         <div class="max-w-5xl mx-auto w-full">
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
                 <div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 sm:gap-3">
+                    <div id="cloud-sync-indicator" class="flex items-center gap-1.5 px-2 py-1 rounded-full border bg-slate-50 border-slate-200 transition-all duration-300">
+                        <div id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-colors duration-300"></div>
+                        <span id="sync-text" class="text-[8px] font-black uppercase tracking-widest text-slate-500 transition-colors duration-300">Local</span>
+                    </div>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
                     <button onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
                 </div>
@@ -731,7 +739,30 @@
         let cloudDb = null, cloudAuth = null, fsLib = null, cloudUserId = null;
         const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-jr';
 
+        // --- SISTEMA DE TELEMETRÍA (SYNC INDICATOR) ---
+        const SYNC_STATES = {
+            CONNECTING: { text: 'Conectando', dotClass: 'bg-amber-400 animate-pulse-fast', bgClass: 'bg-amber-50 border-amber-200', textClass: 'text-amber-600' },
+            ONLINE:     { text: 'Conectado', dotClass: 'bg-emerald-500', bgClass: 'bg-emerald-50 border-emerald-200', textClass: 'text-emerald-600' },
+            SYNCING:    { text: 'Pendiente', dotClass: 'bg-indigo-500 animate-pulse-fast', bgClass: 'bg-indigo-50 border-indigo-200', textClass: 'text-indigo-600' },
+            ERROR:      { text: 'Error', dotClass: 'bg-red-500', bgClass: 'bg-red-50 border-red-200', textClass: 'text-red-600' },
+            OFFLINE:    { text: 'Local', dotClass: 'bg-slate-400', bgClass: 'bg-slate-50 border-slate-200', textClass: 'text-slate-500' }
+        };
+
+        function updateSyncUI(status) {
+            const ind = $id('cloud-sync-indicator'); const dot = $id('sync-dot'); const txt = $id('sync-text');
+            if(!ind || !dot || !txt) return;
+            ind.className = `flex items-center gap-1.5 px-2 py-1 rounded-full border transition-all duration-300 ${status.bgClass}`;
+            dot.className = `w-1.5 h-1.5 rounded-full transition-colors duration-300 ${status.dotClass}`;
+            txt.className = `text-[8px] font-black uppercase tracking-widest transition-colors duration-300 ${status.textClass}`;
+            txt.innerText = status.text;
+        }
+
+        window.addEventListener('online', () => { if(cloudDb) updateSyncUI(SYNC_STATES.ONLINE); });
+        window.addEventListener('offline', () => updateSyncUI(SYNC_STATES.OFFLINE));
+
         async function initCloud() {
+            if(!navigator.onLine) { updateSyncUI(SYNC_STATES.OFFLINE); return; }
+            updateSyncUI(SYNC_STATES.CONNECTING);
             try {
                 // Importamos dinámicamente los módulos faltantes sin alterar el bloque base
                 const appLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js");
@@ -744,6 +775,34 @@
                     const firebaseConfig = { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
                     app = appLib.initializeApp(firebaseConfig);
                 }
+
+                cloudAuth = authLib.getAuth(app);
+                cloudDb = fsLib.getFirestore(app);
+
+                // Autenticación obligatoria antes de cualquier query
+                const cred = await authLib.signInAnonymously(cloudAuth);
+                cloudUserId = cred.user.uid;
+                updateSyncUI(SYNC_STATES.ONLINE);
+                console.log("☁️ Arquitectura de Nube Activa. UID:", cloudUserId);
+            } catch(e) { console.error("Error conectando a la nube:", e); updateSyncUI(SYNC_STATES.ERROR); }
+        }
+
+        async function fetchCloudState() {
+            if (!navigator.onLine) return;
+            if (!cloudDb || !cloudUserId || !currentUser) return;
+            updateSyncUI(SYNC_STATES.SYNCING);
+            try {
+                // Query estructural con rutas seguras: artifacts/appId/users/userId/collection/docId
+                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
+                const snap = await fsLib.getDoc(docRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if(data.state) localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(data.state));
+                    if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
+                }
+                updateSyncUI(SYNC_STATES.ONLINE);
+            } catch(e) { console.error("Error sincronizando bóveda remota:", e); updateSyncUI(SYNC_STATES.ERROR); }
+        }
 
                 cloudAuth = authLib.getAuth(app);
                 cloudDb = fsLib.getFirestore(app);
@@ -858,8 +917,15 @@
                 
                 // Interceptamos la persistencia atómica para escribir en Firestore
                 if (cloudDb && cloudUserId) {
+                    if(!navigator.onLine) {
+                        updateSyncUI(SYNC_STATES.OFFLINE);
+                        return;
+                    }
+                    updateSyncUI(SYNC_STATES.SYNCING);
                     const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
-                    fsLib.setDoc(docRef, { state: state, updatedAt: new Date().toISOString() }, {merge: true}).catch(e => console.error("Fallo de sincronización en Nube:", e));
+                    fsLib.setDoc(docRef, { state: state, updatedAt: new Date().toISOString() }, {merge: true})
+                        .then(() => setTimeout(() => updateSyncUI(SYNC_STATES.ONLINE), 500))
+                        .catch(e => { console.error("Fallo de sincronización en Nube:", e); updateSyncUI(SYNC_STATES.ERROR); });
                 }
             } 
         }
