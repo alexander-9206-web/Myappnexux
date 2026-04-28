@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
+    <style>  
         :root { --app-bg: #f8fafc; --card-bg: #ffffff; --app-text: #0f172a; --val-inc: #10b981; --val-exp: #ef4444; --nexus-black: #000000; }
         body { background-color: var(--app-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; transition: background-color 0.3s ease; }
         .theme-bg { background-color: var(--app-bg) !important; } .theme-card { background-color: var(--card-bg) !important; transition: background-color 0.3s ease; } .theme-text { color: var(--app-text) !important; transition: color 0.3s ease; } .theme-val-inc { color: var(--val-inc) !important; transition: color 0.3s ease; } .theme-val-exp { color: var(--val-exp) !important; transition: color 0.3s ease; }
@@ -110,11 +110,23 @@
                     <button onclick="switchTab('taxes')" type="button" class="glass-btn"><i class="fa-solid fa-file-invoice text-emerald-700 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Impuestos</span></button>
                 </div>
                 <div class="space-y-4 pt-4 border-t border-slate-100"><h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Cuentas (Sumador)</h3><div id="accounts-container" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0"></div></div>
-            <div id="scanner-processing" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm text-center animate-slideUp">
-                <i class="fa-solid fa-circle-notch fa-spin text-3xl text-blue-500 mb-3"></i>
-                <h4 class="text-sm font-black theme-text">Analizando Documento...</h4>
-                <p class="text-[10px] text-slate-400 font-bold uppercase mt-1">Extrayendo transacciones</p>
-                <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-4"><div id="scanner-progress" class="h-full bg-blue-500 rounded-full transition-all duration-300" style="width: 0%"></div></div>
+            </div>
+
+            <div id="view-period" class="space-y-8 hidden">
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
+                    <h3 class="text-[10px] font-black opacity-30 uppercase italic tracking-widest theme-text">Distribución de Flujo</h3>
+                    <div class="h-[150px] md:h-[250px]"><canvas id="chart-period"></canvas></div>
+                </div>
+                <div class="space-y-4 pt-4 border-t border-slate-100">
+                    <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
+                        <button onclick="setPeriodFilter('type', 'all')" type="button" class="filter-chip active" id="f-type-all">Todos</button>
+                        <button onclick="setPeriodFilter('type', 'income')" type="button" class="filter-chip" id="f-type-income">Ingresos</button>
+                        <button onclick="setPeriodFilter('type', 'expense')" type="button" class="filter-chip" id="f-type-expense">Gastos</button>
+                    </div>
+                    <div class="flex items-center gap-4 bg-slate-100 p-2 rounded-xl border border-slate-200"><i class="fa-solid fa-filter text-slate-400 ml-2"></i><select id="period-cat-filter" onchange="setPeriodFilter('cat', this.value)" class="bg-transparent font-black text-xs text-slate-600 outline-none w-full"></select></div>
+                    <div class="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-slate-100"><div class="flex gap-4"><p class="text-[10px] font-black text-emerald-500 flex flex-col"><span class="opacity-50 text-[8px] uppercase">Ingresos</span><span id="period-sub-inc">0</span></p><p class="text-[10px] font-black text-red-500 flex flex-col"><span class="opacity-50 text-[8px] uppercase">Gastos</span><span id="period-sub-exp">0</span></p></div><div class="text-right"><p class="text-[8px] font-black text-slate-400 uppercase">Neto Periodo</p><p id="period-subtotal" class="text-2xl font-black tabular-nums">0</p></div></div>
+                    <div id="period-list" class="space-y-3 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0 pb-12"></div>
+                </div>
             </div>
         </section>
 
@@ -953,8 +965,19 @@
 
         function renderPeriodChart(cTx) { 
             const canvas = $id('chart-period'); if(!canvas) return; const ctx = canvas.getContext('2d'); if(charts.period) charts.period.destroy(); 
-            const grp = {}; cTx.forEach(t => { if(t.type === 'afterpay') return; const dStr = new Date(t.date).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }); grp[dStr] = (grp[dStr]||0) + (t.type==='income' ? t.amount : -t.amount); }); 
-            const l = Object.keys(grp); charts.period = new Chart(ctx, { type: 'line', data: { labels: l, datasets: [{ data: l.map(x=>grp[x]), borderColor: state.theme.text, backgroundColor: 'rgba(0,0,0,0.05)', fill: true, tension: 0.4, borderWidth: 2 }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); 
+            const grp = {}; 
+            cTx.forEach(t => { 
+                if(t.type === 'afterpay') return; 
+                const dStr = t.date.split('T')[0]; 
+                grp[dStr] = (grp[dStr]||0) + (t.type==='income' ? t.amount : -t.amount); 
+            }); 
+            const sortedKeys = Object.keys(grp).sort();
+            const l = sortedKeys.map(k => {
+                const [y,m,d] = k.split('-'); 
+                return new Date(y, m-1, d).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+            });
+            const dataVals = sortedKeys.map(k => grp[k]);
+            charts.period = new Chart(ctx, { type: 'line', data: { labels: l, datasets: [{ data: dataVals, borderColor: state.theme.text, backgroundColor: 'rgba(0,0,0,0.05)', fill: true, tension: 0.4, borderWidth: 2 }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); 
         }
 
         function populateFilters() { const select = $id('period-cat-filter'); if(!select) return; select.innerHTML = '<option value="all">Todas las Categorías</option>'; const allCats = [...(state.categories.income||[]), ...(state.categories.expense||[]), ...(state.categories.transfer||[])]; allCats.forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`); }
