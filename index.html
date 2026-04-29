@@ -571,8 +571,8 @@
             </div>
             <div class="grid grid-cols-2 gap-4 md:gap-6"><div class="bg-teal-50 p-6 md:p-8 rounded-[2rem] text-center border border-teal-100 shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase text-teal-800">Pendiente Total</p><h3 id="ap-total-pending" class="text-2xl md:text-4xl font-black text-teal-600 mt-2 tabular-nums">$0</h3></div><div class="theme-card p-6 md:p-8 rounded-[2rem] text-center border shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase theme-text">Disponible</p><h3 id="ap-available" class="text-xl md:text-3xl font-black theme-text mt-2 tabular-nums">$0</h3></div></div>
             <div class="grid grid-cols-2 gap-4 md:gap-6">
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Esta Semana (0-7d)</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3></div>
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Próx. Semana (8-14d)</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Esta Sem. / Vencidas</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Días 8 a 14</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><div class="border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-[10px] font-black uppercase theme-text">Calendario Pagos</h3></div><div id="ap-schedule-list" class="space-y-3 max-h-[300px] overflow-y-auto hide-scrollbar pb-2"></div></div>
@@ -2063,23 +2063,38 @@
             if (!totalPendingEl || !availableEl || !scheduleList || !activeList) return;
             let totalPending = 0; const apTx = state.tx.filter(t => t.type === 'afterpay'); const activeAp = apTx.filter(t => (t.apPaid || 0) < (t.apQuotas || 4));
             let activeHtml = '';
+            
+            const dispCurr = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
+
             activeAp.forEach(t => {
                 const quotas = t.apQuotas || 4;
-                const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); totalPending += convertCurrency(pendingForThis, t.currency, 'AUD'); const pct = ((t.apPaid || 0) / quotas) * 100;
+                const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
+                totalPending += convertCurrency(pendingForThis, t.currency, dispCurr); 
+                const pct = ((t.apPaid || 0) / quotas) * 100;
                 activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO')} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, t.currency)}</p></div></div>`;
             });
             if (activeAp.length === 0) activeHtml = `<div class="text-center p-6 border border-dashed border-teal-200 rounded-[1.5rem] bg-teal-50/30"><p class="text-[10px] font-bold text-teal-600/70 uppercase">Sin compras vigentes</p></div>`;
             activeList.innerHTML = activeHtml;
-            const limit = state.settings.apLimit || 5000000; totalPendingEl.innerText = fmt(totalPending, 'AUD'); availableEl.innerText = fmt(limit - totalPending, 'AUD');
+            
+            const limit = convertCurrency((state.settings.apLimit || 5000000), 'AUD', dispCurr); 
+            totalPendingEl.innerText = fmt(totalPending, dispCurr); 
+            availableEl.innerText = fmt(limit - totalPending, dispCurr);
+            
             const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => new Date(a.date) - new Date(b.date));
             
             const now = new Date(); now.setHours(0,0,0,0);
             const in7Days = new Date(now); in7Days.setDate(now.getDate() + 7);
-            const in14Days = new Date(now); in14Days.setDate(now.getDate() + 14);
+            const in15Days = new Date(now); in15Days.setDate(now.getDate() + 15);
             let thisWeekTotal = 0; let nextWeekTotal = 0;
-            projAp.forEach(t => { const d = new Date(t.date); if (d >= now && d < in7Days) thisWeekTotal += convertCurrency(t.amount, t.currency, 'AUD'); else if (d >= in7Days && d < in14Days) nextWeekTotal += convertCurrency(t.amount, t.currency, 'AUD'); });
-            const thisWeekEl = $id('ap-this-week'); if(thisWeekEl) thisWeekEl.innerText = fmt(thisWeekTotal, 'AUD');
-            const nextWeekEl = $id('ap-next-week'); if(nextWeekEl) nextWeekEl.innerText = fmt(nextWeekTotal, 'AUD');
+            
+            projAp.forEach(t => { 
+                const d = new Date(t.date); 
+                d.setHours(0,0,0,0);
+                if (d < in7Days) thisWeekTotal += convertCurrency(t.amount, t.currency, dispCurr); 
+                else if (d >= in7Days && d < in15Days) nextWeekTotal += convertCurrency(t.amount, t.currency, dispCurr); 
+            });
+            const thisWeekEl = $id('ap-this-week'); if(thisWeekEl) thisWeekEl.innerText = fmt(thisWeekTotal, dispCurr);
+            const nextWeekEl = $id('ap-next-week'); if(nextWeekEl) nextWeekEl.innerText = fmt(nextWeekTotal, dispCurr);
 
             if (projAp.length === 0) scheduleList.innerHTML = `<p class="text-center text-[10px] text-slate-400 font-bold p-4 uppercase tracking-widest">Libre de Deuda</p>`;
             else scheduleList.innerHTML = projAp.slice(0, 10).map(t => { const isPast = new Date(t.date) <= new Date(); return `<div class="flex justify-between items-center p-3 rounded-xl border ${isPast ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100/50'}"><div><p class="text-[10px] font-black uppercase ${isPast ? 'text-red-600' : 'text-slate-600'}">${t.note}</p><p class="text-[8px] font-bold ${isPast ? 'text-red-400' : 'text-slate-400'} uppercase mt-0.5">${new Date(t.date).toLocaleDateString('es-CO')}</p></div><p class="text-xs font-black ${isPast ? 'text-red-600' : 'theme-text'}">${fmt(t.amount, t.currency)}</p></div>`; }).join('');
