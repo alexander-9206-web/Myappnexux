@@ -149,7 +149,6 @@
                     <h3 class="text-sm font-black uppercase theme-text">Auditor Forense IA</h3>
                     <p class="text-[10px] font-bold text-slate-400 uppercase mt-2">Sube un extracto bancario o recibo. La IA extraerá los datos y validará las transacciones.</p>
                 </div>
-                <!-- Parche iOS WebKit: accept dual sin force capture -->
                 <input type="file" id="nexusFileScanner" accept="application/pdf,image/*" class="hidden" onchange="processScannerFile(event)">
                 <button onclick="document.getElementById('nexusFileScanner').click()" id="btnTriggerScanner" class="w-full bg-blue-500 text-white p-5 rounded-2xl font-black uppercase text-sm shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
                     <i class="fa-solid fa-upload"></i> Abrir Escáner / Archivos
@@ -175,45 +174,66 @@
                         <option value="COP">COP (Colombia)</option><option value="USD">USD (USA)</option><option value="EUR">EUR (Europa)</option><option value="AUD">AUD (Australia)</option>
                     </select>
                 </div>
-                <div class="flex items-center justify-between relative z-10">
-                        <div class="pt-4 border-t border-slate-100">
-                        <label class="text-[10px] font-black text-slate-400 ml-2">Límite Afterpay (AUD)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="set-ap-limit" class="form-input text-center text-teal-700 bg-teal-50 mt-1" onchange="updateSettings()">
-                        <label class="text-[10px] font-black text-slate-400 ml-2 block mt-2">Día Pago Afterpay</label><select id="set-ap-day" class="form-input text-center mt-1" onchange="updateSettings()"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option></select>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10 pt-4 border-t border-emerald-200/50 mt-4">
+                    <div>
+                        <h4 class="text-[10px] font-black uppercase text-emerald-900">Tasa Impositiva (%)</h4>
+                        <input type="number" id="tax-rate-input" class="form-input text-center w-full text-emerald-900 bg-emerald-100/50 border-emerald-200 font-black text-sm p-2 mt-1" onchange="saveTaxSettings()" placeholder="19">
                     </div>
-                    <div class="pt-4 border-t border-slate-100">
-                        <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Auto-Backup Local</h4><p class="text-[8px] text-slate-400">Exportar JSON programado</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
-                        <div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-[8px] font-black text-slate-400 ml-2">Hora (HH:MM)</label><input type="time" id="set-backup-time" class="form-input text-xs mt-1" onchange="updateSettings()"></div><div><label class="text-[8px] font-black text-slate-400 ml-2">Sufijo Archivo</label><input type="text" id="set-backup-folder" placeholder="Ej: iCloud" class="form-input text-xs mt-1" onchange="updateSettings()"></div></div>
+                    <div>
+                        <h4 class="text-[10px] font-black uppercase text-emerald-900">Límite Deducible (%)</h4>
+                        <input type="number" id="tax-deductible-pct-input" class="form-input text-center w-full text-emerald-900 bg-emerald-100/50 border-emerald-200 font-black text-sm p-2 mt-1" onchange="saveTaxSettings()" placeholder="100">
+                    </div>
+                    <div>
+                        <h4 class="text-[10px] font-black uppercase text-emerald-900">Retenciones (Pagado)</h4>
+                        <input type="number" id="tax-withheld-input" class="form-input text-center w-full text-emerald-900 bg-emerald-100/50 border-emerald-200 font-black text-sm p-2 mt-1" onchange="saveTaxSettings()" placeholder="0">
                     </div>
                 </div>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-                <div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
-                    <p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Ingresos Declarables</p>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
+                    <p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Ingresos Brutos</p>
                     <h4 id="tax-income" class="text-lg md:text-2xl font-black theme-val-inc tabular-nums">--</h4>
-                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Total ingresos brutos del año en curso.</p>
+                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Total ingresos declarables.</p>
                 </div>
-                <div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
-                    <p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Deducciones (Gastos)</p>
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
+                    <p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Gastos Deducibles</p>
                     <h4 id="tax-expense" class="text-lg md:text-2xl font-black theme-val-exp tabular-nums">--</h4>
-                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Gastos operativos aplicables.</p>
+                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Gastos operativos aceptados.</p>
                 </div>
-                <div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center">
                     <p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Base Gravable Neta</p>
                     <h4 id="tax-base" class="text-lg md:text-2xl font-black theme-text tabular-nums">--</h4>
-                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Monto líquido sujeto a impuestos.</p>
+                    <p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Monto sujeto a impuestos.</p>
+                </div>
+                
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center bg-amber-50 border-amber-100">
+                    <p class="text-[9px] font-black uppercase mb-1 text-amber-800 opacity-60">Impuesto Estimado Bruto</p>
+                    <h4 id="tax-estimated" class="text-lg md:text-2xl font-black text-amber-600 tabular-nums">--</h4>
+                    <p class="text-[7px] md:text-[9px] text-amber-500 mt-1 leading-tight">Cálculo antes de retenciones.</p>
+                </div>
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center bg-red-50 border-red-100">
+                    <p class="text-[9px] font-black uppercase mb-1 text-red-800 opacity-60">Saldo a Pagar</p>
+                    <h4 id="tax-payable" class="text-lg md:text-2xl font-black text-red-600 tabular-nums">--</h4>
+                    <p class="text-[7px] md:text-[9px] text-red-500 mt-1 leading-tight">Impuesto final menos retenciones.</p>
+                </div>
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex flex-col justify-center bg-blue-50 border-blue-100">
+                    <p class="text-[9px] font-black uppercase mb-1 text-blue-800 opacity-60">Tasa Efectiva</p>
+                    <h4 id="tax-effective" class="text-lg md:text-2xl font-black text-blue-600 tabular-nums">--</h4>
+                    <p class="text-[7px] md:text-[9px] text-blue-500 mt-1 leading-tight">% Real sobre ingresos brutos.</p>
                 </div>
             </div>
             
             <div class="theme-card p-6 md:p-8 rounded-[2rem] border shadow-sm space-y-4">
-                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center">Desglose de Impacto Fiscal Anual</h3>
+                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-center">Distribución: Ingresos vs Impuestos</h3>
                 <div class="w-full bg-slate-100 h-6 rounded-full overflow-hidden flex">
                     <div id="tax-bar-net" class="h-full bg-emerald-400 transition-all flex items-center px-3 text-[8px] font-black text-white overflow-hidden whitespace-nowrap" style="width: 100%">NETO 100%</div>
                     <div id="tax-bar-tax" class="h-full bg-red-400 transition-all flex items-center px-3 text-[8px] font-black text-white justify-end overflow-hidden whitespace-nowrap" style="width: 0%"></div>
                 </div>
                 <div class="flex justify-between px-2 text-[9px] font-bold text-slate-500 uppercase">
-                    <span>Beneficio Libre</span>
-                    <span>Carga Tributaria</span>
+                    <span>Capital Retenido</span>
+                    <span>Aporte Fiscal Neto</span>
                 </div>
             </div>
         </section>
@@ -463,7 +483,13 @@
 
         <!-- 🟢 TAB CUENTAS -->
         <section id="tab-accounts" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter theme-text">Bóvedas</h2></div><button onclick="openAccountModal()" type="button" class="w-10 h-10 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button></div>
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter theme-text">Bóvedas</h2></div>
+                <div class="flex gap-2">
+                    <button onclick="openLinkSharedModal()" type="button" class="w-10 h-10 bg-purple-600 text-white rounded-full shadow-lg shadow-purple-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-link"></i></button>
+                    <button onclick="openAccountModal()" type="button" class="w-10 h-10 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                </div>
+            </div>
             <div class="grid grid-cols-3 gap-3 md:gap-6" id="acc-hub-summary"></div><div class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-6 md:space-y-0" id="acc-hub-list"></div>
         </section>
 
@@ -593,8 +619,11 @@
             <form id="data-form" onsubmit="saveTransaction(event)">
                 <input type="hidden" id="f-id"><input type="hidden" id="f-type">
                 <div class="space-y-4">
-                    <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio de Pago</label><select id="f-account" class="form-input" required onchange="checkTxAccount()"></select></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="f-currency" class="form-input text-sm text-center" onchange="populateFormAccounts()"></select></div>
+                        <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
+                    </div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span id="f-currency-label" class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input"></select></div>
                     <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
                     <div id="ap-freq-container" class="hidden">
@@ -623,49 +652,6 @@
         </div>
     </div>
 
-    <!-- MODAL PASIVOS / DEUDAS -->
-    <div id="loan-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase text-amber-600 tracking-tighter">Nuevo Pasivo</h3><button type="button" onclick="closeLoanForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-            <form onsubmit="saveLoan(event)" class="space-y-4">
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre de la Deuda</label><input type="text" id="fl-name" required class="form-input text-sm"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Total (<span class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fl-amount" required class="form-input text-3xl font-black text-center text-amber-600 cursor-pointer"></div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tasa % (E.M)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fl-rate" class="form-input text-sm cursor-pointer" placeholder="0 = Sin interés"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Plazo (Meses)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fl-term" required class="form-input text-sm cursor-pointer"></div>
-                </div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Adquisición</label><input type="date" id="fl-date" required class="form-input text-xs"></div>
-                <button type="submit" class="w-full bg-amber-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Registrar Pasivo</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- MODAL PENDIENTES (UN SOLO PAGO) -->
-    <div id="pending-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase text-rose-600 tracking-tighter">Obligación Única</h3><button type="button" onclick="closePendingForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-            <form onsubmit="savePending(event)" class="space-y-4">
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Descripción (Multa, Impuesto, etc)</label><input type="text" id="fp-name" required class="form-input text-sm"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto a Pagar (<span class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fp-amount" required class="form-input text-3xl font-black text-center text-rose-600 cursor-pointer"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite de Pago</label><input type="date" id="fp-date" required class="form-input text-xs"></div>
-                <button type="submit" class="w-full bg-rose-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Registrar Pendiente</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- MODAL METAS AHORRO -->
-    <div id="goal-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
-            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase tracking-tighter text-orange-500">Nueva Meta</h3><button type="button" onclick="closeGoalForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
-            <form onsubmit="saveGoal(event)" class="space-y-4">
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre</label><input type="text" id="g-name" required class="form-input text-sm"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Objetivo (<span class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="g-amount" required class="form-input text-3xl font-black text-center text-orange-600 cursor-pointer"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Objetivo</label><input type="date" id="g-date" required class="form-input text-sm"></div>
-                <button type="submit" class="w-full bg-orange-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Proyectar Meta</button>
-            </form>
-        </div>
-    </div>
-
     <!-- MODAL CALCULADORA NUMPAD -->
     <div id="numpad-modal" class="fixed inset-0 z-[120] hidden bg-slate-900/60 backdrop-blur-md flex flex-col justify-end sm:justify-center">
         <div class="bg-slate-100 w-full max-w-md md:max-w-lg mx-auto rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden numpad-modal-content shadow-2xl flex flex-col h-[75vh] sm:h-auto sm:max-h-[90vh]">
@@ -686,6 +672,24 @@
     </div>
     
     <!-- MODALES DE CUENTAS / COMPRAS -->
+    <div id="shared-account-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase theme-text tracking-tighter text-purple-600">Conexión P2P</h3><button type="button" onclick="closeLinkSharedModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="space-y-4">
+                <div class="bg-purple-50 p-4 rounded-2xl border border-purple-100 text-center">
+                    <i class="fa-solid fa-satellite-dish text-3xl text-purple-400 mb-2"></i>
+                    <p class="text-[10px] font-black uppercase text-purple-800 tracking-widest">Vincular Bóveda Externa</p>
+                    <p class="text-[8px] text-purple-600 mt-1">Pega el token de invitación para sincronizar una cuenta compartida en tiempo real.</p>
+                </div>
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Token de Sincronización (Base64)</label>
+                    <input type="text" id="shared-token-input" placeholder="nx_..." class="form-input text-xs font-mono bg-slate-100 mt-1 text-center tracking-widest">
+                </div>
+                <button onclick="processSharedToken()" class="w-full bg-purple-600 text-white p-5 rounded-2xl font-black uppercase text-sm mt-2 shadow-lg active:scale-95 transition-transform">Sincronizar Cuenta</button>
+            </div>
+        </div>
+    </div>
+
     <div id="new-account-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
         <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-2"><h3 id="acc-form-title" class="text-2xl font-black uppercase theme-text tracking-tighter">Cuenta</h3><button type="button" onclick="closeAccountModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
@@ -693,7 +697,7 @@
                 <input type="hidden" id="fa-id">
                 <div class="grid grid-cols-3 gap-3"><div class="col-span-2"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre</label><input type="text" id="fa-name" required class="form-input text-sm"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda</label><select id="fa-currency" class="form-input text-sm text-center"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div></div>
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2" id="fa-balance-lbl">Balance Inicial</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fa-balance" required class="form-input text-2xl font-black text-center text-black cursor-pointer"></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Naturaleza</label><select id="fa-type" class="form-input" required onchange="toggleCreditFields()"><option value="liquid">Liquidez (Efectivo)</option><option value="credit">Tarjeta Crédito</option><option value="investment">Inversión</option></select></div>
+                <div class="grid grid-cols-2 gap-4"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Naturaleza</label><select id="fa-type" class="form-input" required onchange="toggleCreditFields()"><option value="liquid">Liquidez (Efectivo)</option><option value="credit">Tarjeta Crédito</option><option value="investment">Inversión</option></select></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Ámbito</label><select id="fa-scope" class="form-input" required><option value="personal">Privada (Personal)</option><option value="shared">Compartida (P2P)</option></select></div></div>
                 <div id="credit-fields" class="hidden space-y-4 pt-4 border-t border-slate-100/50 animate-slideUp">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cupo (Límite)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fa-limit" class="form-input text-lg font-black text-center text-red-600 cursor-pointer"></div>
                     <div class="grid grid-cols-2 gap-4"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Día Corte</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-cutoff" class="form-input text-sm cursor-pointer"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Día Pago</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-payday" class="form-input text-sm cursor-pointer"></div></div>
@@ -726,7 +730,7 @@
     </div>
 
     <!-- 🟢 SCRIPTS MINIFICADOS (FUNCIONALIDAD COMPLETA) -->
-    <script>
+        <script>
         const $id = id => document.getElementById(id); const $qAll = sel => document.querySelectorAll(sel);
         const DEFAULT_CATEGORIES = { income: ["💰 Salario", "💼 Freelance", "📈 Inversión"], expense: ["🏠 Vivienda", "🍎 Comida", "🚗 Transporte", "🍿 Ocio", "🏥 Salud", "🛍️ Compras", "💳 Pago Deuda", "🛍️ Afterpay"], transfer: ["🔀 Entre Cuentas", "⬇️ Retiro Efectivo"] };
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
@@ -1009,6 +1013,8 @@
 
             state = savedState || defaultDemoData;
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
+            if(!state.taxes.withheld) state.taxes.withheld = {};
+            if(!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
 
             setupInactivityLock(); 
             setupAutoBackup();
@@ -1180,10 +1186,12 @@
             if (!numpadCurrentValue) numpadCurrentValue = "";
             if (char === 'C') { numpadCurrentValue = ""; } else if (char === '=') { numpadEvaluate(); } else {
                 if (numpadCurrentValue.length >= 30) return; const tokens = numpadCurrentValue.split(/[\+\-\*/()]/); const lastToken = tokens[tokens.length - 1];
-                if (char === '.' && lastToken.includes('.')) return; numpadCurrentValue += char;
+                if (char === '.' && lastToken.includes('.')) return; 
+                if (numpadCurrentValue === "0" && !isNaN(char) && char !== '.') numpadCurrentValue = char;
+                else numpadCurrentValue += char;
             } updateNumpadDisplay(); if(navigator.vibrate) navigator.vibrate(20); 
         }
-        function numpadEvaluate() { try { if (numpadCurrentValue) { const sanitized = numpadCurrentValue.replace(/[^0-9+\-*/.()]/g, ''); if(sanitized) { const result = new Function('return ' + sanitized)(); numpadCurrentValue = Number.isFinite(result) ? result.toString() : ""; } } } catch(e) {} }
+        function numpadEvaluate() { try { if (numpadCurrentValue) { let sanitized = numpadCurrentValue.replace(/[^0-9+\-*/.()]/g, ''); if(sanitized) { sanitized = sanitized.replace(/[\+\-\*/]+$/, ''); sanitized = sanitized.replace(/\b0+(\d)/g, '$1'); const result = new Function('return ' + sanitized)(); numpadCurrentValue = Number.isFinite(result) ? result.toString() : ""; } } } catch(e) { numpadCurrentValue = ""; } }
         function numpadBackspace() { if (!numpadCurrentValue) return; numpadCurrentValue = numpadCurrentValue.slice(0, -1); updateNumpadDisplay(); if(navigator.vibrate) navigator.vibrate(20); }
         function updateNumpadDisplay() { 
             const d = $id('numpad-display'); if(!d) return;
@@ -1353,11 +1361,11 @@
             }
         }
 
-        function openAccountModal() { const mod = $id('new-account-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('acc-form-title').innerText = "Nueva Cuenta"; $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; $id('fa-id').value = ''; $id('fa-name').value = ''; const balEl = $id('fa-balance'); balEl.value = ''; balEl.dataset.raw = ''; toggleCreditFields(); }
-        function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); $id('acc-form-title').innerText = "Editar Cuenta"; $id('fa-id').value = acc.id; $id('fa-name').value = acc.name; $id('fa-currency').value = acc.currency || 'COP'; const balEl = $id('fa-balance'); balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; $id('fa-type').value = acc.type; toggleCreditFields(); if(acc.type === 'credit') { const limEl = $id('fa-limit'); limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; const cutEl = $id('fa-cutoff'); cutEl.value = acc.cutoffDay||1; cutEl.dataset.raw = acc.cutoffDay||1; const payEl = $id('fa-payday'); payEl.value = acc.payDay||15; payEl.dataset.raw = acc.payDay||15; const rateEl = $id('fa-rate'); rateEl.value = acc.rate||0; rateEl.dataset.raw = acc.rate||0; } }
+        function openAccountModal() { const mod = $id('new-account-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('acc-form-title').innerText = "Nueva Cuenta"; $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; $id('fa-id').value = ''; $id('fa-name').value = ''; const scp = $id('fa-scope'); if(scp) scp.value = 'personal'; const balEl = $id('fa-balance'); balEl.value = ''; balEl.dataset.raw = ''; toggleCreditFields(); }
+        function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); $id('acc-form-title').innerText = "Editar Cuenta"; $id('fa-id').value = acc.id; $id('fa-name').value = acc.name.replace('👥 ', ''); $id('fa-currency').value = acc.currency || 'COP'; const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal'; const balEl = $id('fa-balance'); balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; $id('fa-type').value = acc.type; toggleCreditFields(); if(acc.type === 'credit') { const limEl = $id('fa-limit'); limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; const cutEl = $id('fa-cutoff'); cutEl.value = acc.cutoffDay||1; cutEl.dataset.raw = acc.cutoffDay||1; const payEl = $id('fa-payday'); payEl.value = acc.payDay||15; payEl.dataset.raw = acc.payDay||15; const rateEl = $id('fa-rate'); rateEl.value = acc.rate||0; rateEl.dataset.raw = acc.rate||0; } }
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         function toggleCreditFields() { const type = $id('fa-type').value; const fields = $id('credit-fields'); const lbl = $id('fa-balance-lbl'); if(type === 'credit') { if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; const lim = $id('fa-limit'); if(lim) lim.required = true; } else { if(fields) fields.classList.add('hidden'); if(lbl) lbl.innerText = 'Balance Inicial'; const lim = $id('fa-limit'); if(lim) lim.required = false; } }
-        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, limit: parseFloat($id('fa-limit').dataset.raw) || 0, cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: parseInt($id('fa-payday').dataset.raw) || 0, rate: parseFloat($id('fa-rate').dataset.raw) || 0 }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
+        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: parseFloat($id('fa-limit').dataset.raw) || 0, cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: parseInt($id('fa-payday').dataset.raw) || 0, rate: parseFloat($id('fa-rate').dataset.raw) || 0 }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && typeof fsLib !== 'undefined' && cloudDb) { fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
 
         function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; }
         function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
@@ -1423,6 +1431,69 @@
 
         function openCCPurchaseModal(id) { const mod = $id('cc-purchase-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('cc-p-cardid').value = id; $id('cc-p-desc').value = ''; const amtEl = $id('cc-p-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const termEl = $id('cc-p-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('cc-p-date').value = new Date().toISOString().split('T')[0]; }
         function closeCCPurchaseModal() { const modal = $id('cc-purchase-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        
+        // --- MOTOR P2P: CUENTAS COMPARTIDAS (BETA STRUCTURAL) ---
+        function openLinkSharedModal() { const mod = $id('shared-account-modal'); if(mod) mod.classList.remove('hidden'); $id('shared-token-input').value = ''; }
+        function closeLinkSharedModal() { const modal = $id('shared-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        
+        async function processSharedToken() {
+            const token = $id('shared-token-input').value.trim();
+            if(!token.startsWith('nx_')) return alert("Token inválido. Debe comenzar con 'nx_'");
+            
+            try {
+                const decoded = atob(token.replace('nx_', ''));
+                const shareData = JSON.parse(decoded);
+                // shareData = { vaultId: "id_unico", name: "Fondo Viaje", currency: "USD" }
+                
+                // 1. Registrar la cuenta en estado local con flag isShared
+                const newSharedAcc = { 
+                    id: 'shared_' + shareData.vaultId, 
+                    name: `👥 ${shareData.name}`, 
+                    currency: shareData.currency, 
+                    balance: 0, 
+                    type: 'liquid', 
+                    isShared: true,
+                    remoteId: shareData.vaultId 
+                };
+                
+                const exists = state.accounts.find(a => a.id === newSharedAcc.id);
+                if(exists) return alert("Esta bóveda ya está vinculada en tu dispositivo.");
+                
+                state.accounts.push(newSharedAcc);
+                saveState();
+                
+                // 2. Aquí conectaremos el WebSocket secundario hacia la ruta pública:
+                // fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'public', 'data', `nexus_shared_${shareData.vaultId}`)
+                
+                alert("Bóveda compartida vinculada. El motor de sincronización remota se inicializará en la próxima recarga.");
+                closeLinkSharedModal();
+                updateDashboard();
+                renderAccountsTab();
+                
+            } catch(e) {
+                console.error("[APEX P2P] Error decodificando token:", e);
+                alert("El token está corrupto o mal formado.");
+            }
+        }
+
+        function generateShareTokenForAccount(accId) {
+            const acc = state.accounts.find(a => a.id === accId);
+            if(!acc) return;
+            const payload = { vaultId: acc.id, name: acc.name, currency: acc.currency };
+            const token = 'nx_' + btoa(JSON.stringify(payload));
+            
+            // Hack para copiar al portapapeles en iOS/Web
+            const temp = document.createElement("textarea");
+            temp.value = token;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            document.body.removeChild(temp);
+            
+            alert("Token copiado al portapapeles:\n\n" + token.substring(0, 15) + "...\n\nEnvíalo a tu socio para que lo vincule en su app.");
+        }
+        // --- FIN MOTOR P2P ---
+
         function saveCCPurchase(e) { 
             e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
@@ -1450,14 +1521,30 @@
         function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
+        function populateFormAccounts() {
+            const type = $id('f-type').value;
+            const curS = $id('f-currency');
+            const selectedCurr = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
+            const aS = $id('f-account'); const accCont = $id('account-container');
+            const lbl = $id('f-currency-label'); if(lbl) lbl.innerText = selectedCurr;
+            if(type === 'afterpay') {
+                if(accCont) accCont.classList.add('hidden'); aS.required = false;
+            } else {
+                if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = '';
+                const accs = (state.accounts || []).filter(a => a.currency === selectedCurr);
+                accs.forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
+            }
+            checkTxAccount();
+        }
+
         function openForm(type, txId = null) { 
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
             const mod = $id('tx-modal'); if(!mod) return; mod.classList.remove('hidden'); 
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
             const fT = $id('form-title'); const titlesMap = { 'income': 'Ingreso (+)', 'expense': 'Gasto (-)', 'transfer': 'Transferencia', 'afterpay': 'Afterpay' }; fT.innerText = txId ? `Editar ${titlesMap[type]}` : `Nuevo ${titlesMap[type]}`; 
             const cS = $id('f-cat'); cS.innerHTML = ''; const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []); cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; }); 
-            const aS = $id('f-account'); const accCont = $id('account-container');
-            if(type === 'afterpay') { if(accCont) accCont.classList.add('hidden'); aS.required = false; } else { if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = ''; getActiveAccounts().forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; }); }
+            const curS = $id('f-currency'); if(curS) { curS.innerHTML = ''; CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); curS.value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency; }
+            populateFormAccounts();
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
             const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
             if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
@@ -1468,6 +1555,7 @@
         
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
+            const curS = $id('f-currency'); if(curS) { curS.value = tx.currency || tx.original_currency || state.settings.baseCurrency; populateFormAccounts(); }
             const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; } 
             if($id('f-is-recur')) { $id('f-is-recur').checked = !!tx.isRecurrent; toggleRecurFields(); if(tx.isRecurrent) { $id('f-recur-freq').value = tx.recurFreq || 'monthly'; $id('f-recur-count').value = tx.recurCount || 12; } }
             checkTxAccount();
@@ -1485,9 +1573,10 @@
 
         function saveTransaction(e) { 
             e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; const cat = $id('f-cat').value; const accId = $id('f-account').value; const date = $id('f-date').value; const note = $id('f-note').value; 
+            const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             
             if(!amount || amount <= 0) return alert("Ingresa un monto válido mayor a cero mediante el teclado numérico."); 
-            if(type !== 'afterpay' && (!accId || getActiveAccounts().length === 0)) return alert("Atención: Necesitas crear una cuenta (Bóveda) en esta divisa antes de registrar un movimiento.");
+            if(type !== 'afterpay' && (!accId || $id('f-account').options.length === 0)) return alert("Atención: Necesitas crear una cuenta (Bóveda) en esta divisa antes de registrar un movimiento.");
 
             const acc = state.accounts.find(a => a.id === accId); 
 
@@ -1509,14 +1598,14 @@
                 const oldTx = state.tx.find(t => t.id === id);
                 if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
                 oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(date).toISOString(); oldTx.note = note;
-                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = 'AUD'; }
+                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = 'AUD'; oldTx.original_currency = 'AUD'; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
                 const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
                 if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
                 saveCloudTx(oldTx);
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
-                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? 'AUD' : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency) }; 
+                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? 'AUD' : selectedCurr }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
@@ -2155,7 +2244,15 @@
             const rateInput = $id('tax-rate-input');
             if (rateInput) rateInput.value = state.taxes.rates[curr] || 0;
             
+            const dedInput = $id('tax-deductible-pct-input');
+            if (dedInput) dedInput.value = state.taxes.deductiblePct[curr] !== undefined ? state.taxes.deductiblePct[curr] : 100;
+            
+            const withInput = $id('tax-withheld-input');
+            if (withInput) withInput.value = state.taxes.withheld[curr] || 0;
+            
             const rate = state.taxes.rates[curr] || 0;
+            const dedPct = state.taxes.deductiblePct[curr] !== undefined ? state.taxes.deductiblePct[curr] : 100;
+            const withheld = state.taxes.withheld[curr] || 0;
             const now = new Date();
             
             const aTx = getActiveTx();
@@ -2165,20 +2262,25 @@
             });
             
             const inc = yTx.filter(t => t.type === 'income').reduce((s,t) => s + (t.original_amount || t.amount), 0);
-            const exp = yTx.filter(t => t.type === 'expense').reduce((s,t) => s + (t.original_amount || t.amount), 0);
+            const expTotal = yTx.filter(t => t.type === 'expense').reduce((s,t) => s + (t.original_amount || t.amount), 0);
             
-            const base = Math.max(0, inc - exp);
+            const expDeductible = expTotal * (dedPct / 100);
+            const base = Math.max(0, inc - expDeductible);
             const estTax = base * (rate / 100);
+            const payableTax = Math.max(0, estTax - withheld);
+            const effectiveRate = inc > 0 ? (payableTax / inc) * 100 : 0;
             
             const elInc = $id('tax-income'); if(elInc) elInc.innerText = fmt(inc, curr);
-            const elExp = $id('tax-expense'); if(elExp) elExp.innerText = fmt(exp, curr);
+            const elExp = $id('tax-expense'); if(elExp) elExp.innerText = fmt(expDeductible, curr);
             const elBase = $id('tax-base'); if(elBase) elBase.innerText = fmt(base, curr);
             const elTax = $id('tax-estimated'); if(elTax) elTax.innerText = fmt(estTax, curr);
+            const elPayable = $id('tax-payable'); if(elPayable) elPayable.innerText = fmt(payableTax, curr);
+            const elEffective = $id('tax-effective'); if(elEffective) elEffective.innerText = effectiveRate.toFixed(1) + '%';
             
             const barNet = $id('tax-bar-net'); const barTax = $id('tax-bar-tax');
             if(barNet && barTax) {
-                if (base > 0) {
-                    const pctTax = Math.min(100, Math.max(0, (estTax / base) * 100));
+                if (inc > 0) {
+                    const pctTax = Math.min(100, Math.max(0, (payableTax / inc) * 100));
                     const pctNet = 100 - pctTax;
                     barNet.style.width = `${pctNet}%`;
                     barTax.style.width = `${pctTax}%`;
@@ -2186,17 +2288,25 @@
                     barTax.innerText = pctTax > 5 ? `TAX ${pctTax.toFixed(1)}%` : '';
                 } else {
                     barNet.style.width = `100%`; barTax.style.width = `0%`;
-                    barNet.innerText = 'SIN BASE GRAVABLE'; barTax.innerText = '';
+                    barNet.innerText = 'SIN INGRESOS'; barTax.innerText = '';
                 }
             }
         }
         
-        function saveTaxRate() {
+        function saveTaxSettings() {
             const curSel = $id('tax-currency');
             if(!curSel) return;
             const curr = curSel.value;
-            const rate = parseFloat($id('tax-rate-input').value) || 0;
-            state.taxes.rates[curr] = rate;
+            
+            state.taxes.rates[curr] = parseFloat($id('tax-rate-input').value) || 0;
+            
+            if (!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
+            let dp = parseFloat($id('tax-deductible-pct-input').value);
+            state.taxes.deductiblePct[curr] = isNaN(dp) ? 100 : Math.max(0, Math.min(100, dp));
+            
+            if (!state.taxes.withheld) state.taxes.withheld = {};
+            state.taxes.withheld[curr] = parseFloat($id('tax-withheld-input').value) || 0;
+            
             saveState();
             renderTaxes();
         }
