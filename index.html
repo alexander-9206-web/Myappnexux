@@ -739,49 +739,57 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
 
-        // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS + SOCKETS) ---
-        // Controladores de Paginación
-        window.currentTxCutoff = null; 
-        window.isFetchingOlderTx = false;
-
+        // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS) APEX OPTIMIZED ---
+        // Controladores Globales Estrictos
+        let cloudDb = null, cloudAuth = null, cloudUserId = null, fsLib = null;
+        let unsubMain = null, unsubTx = null;
+        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-v1';
+        
         async function initCloud() {
             try {
-                // Importamos dinámicamente los módulos faltantes sin alterar el bloque base
-                const appLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js");
-                const authLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js");
-                fsLib = await import("https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js");
+                // APEX Fix: Versión estable requerida por el entorno
+                const appLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const authLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                fsLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
 
-                // Capturamos la app inicializada por tu bloque inferior (o la creamos si hubo delay)
                 let app = appLib.getApps().length ? appLib.getApp() : null;
                 if(!app) {
-                    const firebaseConfig = { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
+                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
                     app = appLib.initializeApp(firebaseConfig);
                 }
 
                 cloudAuth = authLib.getAuth(app);
                 cloudDb = fsLib.getFirestore(app);
 
-                // Autenticación obligatoria antes de cualquier query
-                const cred = await authLib.signInAnonymously(cloudAuth);
-                cloudUserId = cred.user.uid;
-                console.log("☁️ Arquitectura de Nube Activa (Tiempo Real). UID:", cloudUserId);
-                const csi = $id('cloud-status-icon'); if(csi) { csi.classList.replace('text-slate-300', 'text-emerald-500'); csi.title = 'Conectado a la Nube SSoT'; }
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-emerald-400'); dcb.classList.replace('bg-white/10', 'bg-emerald-500/20'); dcd.classList.replace('bg-slate-400', 'bg-emerald-400'); dcd.classList.remove('animate-pulse'); }
+                // APEX Fix: Regla 3 - Auth antes que consultas. Soporte para custom tokens.
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    const cred = await authLib.signInWithCustomToken(cloudAuth, __initial_auth_token);
+                    cloudUserId = cred.user.uid;
+                } else {
+                    const cred = await authLib.signInAnonymously(cloudAuth);
+                    cloudUserId = cred.user.uid;
+                }
+                
+                console.log("[APEX SYS] Nube Activa y Encriptada. UID:", cloudUserId);
+                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
+                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-emerald-400'); dcb.classList.replace('bg-white/10', 'bg-emerald-500/20'); dcd.classList.replace('bg-slate-400', 'bg-emerald-400'); dcd.classList.remove('animate-pulse'); }
+                return true;
             } catch(e) { 
-                console.error("Error conectando a la nube:", e); 
-                const csi = $id('cloud-status-icon'); if(csi) { csi.classList.replace('text-slate-300', 'text-red-500'); csi.title = 'Error de Conexión'; } 
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-red-400'); dcb.classList.replace('bg-white/10', 'bg-red-500/20'); dcd.classList.replace('bg-slate-400', 'bg-red-400'); dcd.classList.remove('animate-pulse'); }
+                console.error("[APEX SYS] Fallo crítico de conexión a la nube:", e); 
+                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
+                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-red-400'); dcb.classList.replace('bg-white/10', 'bg-red-500/20'); dcd.classList.replace('bg-slate-400', 'bg-red-400'); dcd.classList.remove('animate-pulse'); }
+                return false;
             }
         }
 
         async function fetchCloudState() {
             if (!cloudDb || !cloudUserId || !currentUser) return;
             try {
-                // Query estructural con rutas seguras
-                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
-                const snap = await fsLib.getDoc(docRef);
+                // APEX Fix: Regla 1 - Rutas estrictas (No anidar más allá del collectionName bajo el userId)
+                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
+                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
                 
-                // 1. Cargar caché local primero para no perder la historia antigua durante la paginación
+                const snap = await fsLib.getDoc(docRef);
                 const localDbStr = localStorage.getItem(`nexus_db_${currentUser}`);
                 const localDb = localDbStr ? JSON.parse(localDbStr) : null;
                 const cachedTx = localDb && localDb.tx ? localDb.tx : [];
@@ -791,153 +799,78 @@
                     let loadedState = data.state ? { ...data.state } : null;
                     
                     if (loadedState) {
-                        // Descargamos la subcolección de transacciones
-                        const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
+                        // APEX Fix: Regla 2 - Cero Queries Complejas (Sin where/limit). Se trae todo y se gestiona en memoria RAM.
+                        const txSnap = await fsLib.getDocs(txCollRef);
                         
-                        // --- PAGINACIÓN / OPTIMIZACIÓN DE LECTURA ---
-                        // Establecer límite de carga inicial: Últimos 90 días
-                        window.currentTxCutoff = new Date();
-                        window.currentTxCutoff.setDate(window.currentTxCutoff.getDate() - 90);
-                        const cutoffIso = window.currentTxCutoff.toISOString();
-                        
-                        // Limitamos la consulta a recientes para ahorrar lecturas y RAM
-                        const recentTxQuery = fsLib.query(txCollRef, fsLib.where('date', '>=', cutoffIso));
-                        const txSnap = await fsLib.getDocs(recentTxQuery);
-                        
-                        let subCollTx = [];
+                        const localTxMap = new Map(cachedTx.map(t => [t.id, t]));
                         const cloudRecentIds = new Set();
+                        
                         txSnap.forEach(doc => {
                             const d = doc.data();
-                            subCollTx.push(d);
+                            localTxMap.set(d.id, d);
                             cloudRecentIds.add(d.id);
                         });
 
-                        // Fusión SSoT local-first (Mantiene transacciones antiguas que ya estaban en caché)
-                        const localTxMap = new Map(cachedTx.map(t => [t.id, t]));
-                        
-                        // Limpiar caché local de transacciones recientes que fueron borradas en la nube (otro dispositivo)
+                        // Sincronización de purgas
                         for (const [id, tx] of localTxMap.entries()) {
-                            if (new Date(tx.date) >= window.currentTxCutoff && !cloudRecentIds.has(id)) {
-                                localTxMap.delete(id);
-                            }
+                            if (!cloudRecentIds.has(id)) localTxMap.delete(id);
                         }
                         
-                        // MIGRACIÓN AUTOMÁTICA MEJORADA (Purgar Bóveda Principal si tiene datos viejos)
+                        // Migración desde el objeto principal si quedó basura pesada en Firebase
                         if (data.state && data.state.tx && data.state.tx.length > 0) {
-                            console.log("🔄 Migrando TX heredadas al modelo de subcolección...");
+                            console.log("[APEX SYS] Optimizando payload de 1MB. Migrando TX a sub-colección de alta velocidad...");
                             const batch = fsLib.writeBatch(cloudDb);
                             data.state.tx.forEach(tx => {
-                                const txRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
+                                const txRef = fsLib.doc(txCollRef, tx.id);
                                 batch.set(txRef, tx);
                                 localTxMap.set(tx.id, tx); 
                             });
                             await batch.commit();
-                            
-                            // Purgar del documento principal para siempre (Liberar 1MB límite)
                             delete loadedState.tx;
                             await fsLib.updateDoc(docRef, { "state.tx": fsLib.deleteField() });
-                            console.log("✅ Migración y purga completadas.");
                         }
 
-                        // Sobrescribe caché con versión fresca de la nube (últimos 90 días)
-                        subCollTx.forEach(t => localTxMap.set(t.id, t));
                         loadedState.tx = Array.from(localTxMap.values());
-                        
                         state = loadedState;
                         localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
                         
-                        if (sessionUnlocked) {
-                            updateDashboard();
-                            if(state.activeTab) switchTab(state.activeTab);
-                        }
+                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
                     }
                     if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
                 }
                 
-                setupCloudListeners(); // Iniciamos sockets
-            } catch(e) { console.error("Error sincronizando bóveda remota:", e); }
+                setupCloudListeners(); 
+            } catch(e) { console.error("[APEX SYS] Error sincronizando bóveda remota:", e); }
         }
 
-        // CARGA DIFERIDA / PAGINACIÓN (Activada por Scroll en DB)
+        // Paginación emulada en memoria (Ya que bajamos todo, evitamos indexaciones complejas en la DB)
         async function loadOlderTransactions() {
-            if (!cloudDb || !cloudUserId || !currentUser || window.isFetchingOlderTx) return;
-            window.isFetchingOlderTx = true;
-            
-            const spinner = $id('db-load-spinner');
-            if(spinner) { spinner.classList.remove('hidden'); spinner.classList.add('flex'); }
-
-            try {
-                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
-                
-                const currentCutoff = window.currentTxCutoff || new Date();
-                const newCutoff = new Date(currentCutoff);
-                newCutoff.setDate(newCutoff.getDate() - 90); // Pedimos otros 90 días hacia atrás
-
-                // Traer bloque anterior (No usamos limit() para evadir índices complejos, usamos rangos de tiempo)
-                const olderQuery = fsLib.query(
-                    txCollRef, 
-                    fsLib.where('date', '<', currentCutoff.toISOString()),
-                    fsLib.where('date', '>=', newCutoff.toISOString())
-                );
-                
-                const snap = await fsLib.getDocs(olderQuery);
-                const localTxMap = new Map((state.tx || []).map(t => [t.id, t]));
-                
-                let countNew = 0;
-                const olderCloudIds = new Set();
-                
-                snap.forEach(doc => {
-                    olderCloudIds.add(doc.id);
-                    if (!localTxMap.has(doc.id)) countNew++;
-                    localTxMap.set(doc.id, doc.data());
-                });
-                
-                // Limpiar registros borrados en este rango específico
-                for (const [id, tx] of localTxMap.entries()) {
-                    const tDate = new Date(tx.date);
-                    if (tDate < currentCutoff && tDate >= newCutoff && !olderCloudIds.has(id)) {
-                        localTxMap.delete(id);
-                    }
-                }
-                
-                state.tx = Array.from(localTxMap.values());
-                window.currentTxCutoff = newCutoff; // Actualizar globalmente
-                localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                
-                renderDatabase(); // Refrescar pantalla
-                
-                if (countNew > 0) { console.log(`📥 Paginación exitosa: ${countNew} TX descargadas.`); }
-            } catch(e) {
-                console.error("Error en paginación de auditoría:", e);
-            } finally {
-                window.isFetchingOlderTx = false;
-                if(spinner) { spinner.classList.add('hidden'); spinner.classList.remove('flex'); }
-            }
+            // Placeholder funcional: Como la app descarga todo por la regla de "No Complex Queries",
+            // la UI simulará que carga, pero los datos ya están en el estado local.
+            // Esto mantiene tu UX intacto sin romper las reglas del servidor.
         }
 
         function setupCloudListeners() {
             if (!cloudDb || !cloudUserId || !currentUser) return;
             
-            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
-            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions');
+            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
+            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
             
             if(unsubMain) unsubMain();
             if(unsubTx) unsubTx();
 
-            // 1. Socket Documento Principal (Cuentas, Config, etc)
             unsubMain = fsLib.onSnapshot(docRef, (snap) => {
                 if (snap.exists()) {
                     const data = snap.data();
                     if (data.state) {
-                        const currentTx = state.tx || []; // Preservamos TX actuales
+                        const currentTx = state.tx || []; 
                         state = { ...data.state, tx: currentTx };
                         localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
                         if (sessionUnlocked) { updateDashboard(); switchTab(state.activeTab); }
                     }
                 }
-            });
+            }, (error) => console.error("[APEX SYS] Main Socket Error:", error)); // APEX Fix: Manejador de errores obligatorio
 
-            // 2. Socket Subcolección (Transacciones en vivo)
             unsubTx = fsLib.onSnapshot(txCollRef, (snapshot) => {
                 let currentTx = state.tx || [];
                 let hasChanges = false;
@@ -964,21 +897,20 @@
                         if(state.activeTab === 'afterpay') renderAfterpay(); 
                     }
                 }
-            });
+            }, (error) => console.error("[APEX SYS] TX Socket Error:", error));
         }
 
-        // Helpers de Escritura para Subcolección
         function saveCloudTx(tx) {
             if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', tx.id);
-                fsLib.setDoc(txDoc, tx).catch(e => console.error("Error guardando TX:", e));
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, tx.id);
+                fsLib.setDoc(txDoc, tx).catch(e => console.error("[APEX SYS] Error escribiendo TX en nube:", e));
             }
         }
         
         function deleteCloudTx(id) {
             if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser, 'transactions', id);
-                fsLib.deleteDoc(txDoc).catch(e => console.error("Error borrando TX:", e));
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, id);
+                fsLib.deleteDoc(txDoc).catch(e => console.error("[APEX SYS] Error borrando TX en nube:", e));
             }
         }
 
@@ -1096,7 +1028,7 @@
                 
                 // Interceptamos la persistencia atómica para escribir en Firestore (Protegiendo el límite de 1MB)
                 if (cloudDb && cloudUserId) {
-                    const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', currentUser);
+                    const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
                     const stateWithoutTx = { ...state };
                     delete stateWithoutTx.tx; // <-- Previene Crash del límite 1MB
                     fsLib.setDoc(docRef, { state: stateWithoutTx, updatedAt: new Date().toISOString() }, {merge: true}).catch(e => console.error("Fallo de sincronización en Nube:", e));
@@ -2169,16 +2101,48 @@
                 const targetHHMM = state.settings.backupTime || '23:59';
                 const lastRun = localStorage.getItem('nexus_last_autobackup');
                 const todayStr = now.toISOString().split('T')[0];
+                
                 if (currentHHMM === targetHHMM && lastRun !== todayStr && sessionUnlocked) {
                     localStorage.setItem('nexus_last_autobackup', todayStr);
-                    const suffix = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
-                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state)); 
-                    const node = document.createElement('a'); 
-                    node.setAttribute("href", dataStr); 
-                    node.setAttribute("download", `nexus_backup_${currentUser}${suffix}_${todayStr}.json`); 
-                    document.body.appendChild(node); node.click(); node.remove();
+                    
+                    const folderName = state.settings.backupFolder || 'Nexus';
+                    const fileName = `nexus_backup_${currentUser}_${todayStr}.json`;
+                    const jsonData = JSON.stringify(state);
+                    
+                    // APEX HACK: Detección de iOS para automatización silenciosa vía Atajos
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    
+                    if (isIOS) {
+                        try {
+                            // 1. Inyectamos JSON pesado al portapapeles (Bypass límite de caracteres en URL)
+                            const tempTextArea = document.createElement("textarea");
+                            tempTextArea.value = jsonData;
+                            document.body.appendChild(tempTextArea);
+                            tempTextArea.select();
+                            document.execCommand("copy");
+                            document.body.removeChild(tempTextArea);
+                            
+                            // 2. Disparamos Atajo nativo pasándole la ruta deseada como Input
+                            const path = `${folderName}/${fileName}`;
+                            const shortcutUrl = `shortcuts://run-shortcut?name=NexusAutoSave&input=${encodeURIComponent(path)}`;
+                            window.location.href = shortcutUrl;
+                        } catch(e) {
+                            fallbackDownload(jsonData, fileName);
+                        }
+                    } else {
+                        // Fallback PWA estándar para Mac/PC (Requiere confirmación del navegador)
+                        fallbackDownload(jsonData, fileName);
+                    }
                 }
             }, 30000); // Check cada 30 segundos
+        }
+
+        function fallbackDownload(data, filename) {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(data); 
+            const node = document.createElement('a'); 
+            node.setAttribute("href", dataStr); 
+            node.setAttribute("download", filename); 
+            document.body.appendChild(node); node.click(); node.remove();
         }
 
         function requestFactoryReset() { const word = prompt("⚠ ALERTA DE SEGURIDAD CRÍTICA: Esta acción destruirá permanentemente toda la bóveda de datos y usuarios. Para confirmar, escriba: RESET"); if (word === 'RESET') { const keysToRemove = []; for(let i=0; i<localStorage.length; i++) { const key = localStorage.key(i); if(key.startsWith('nexus_')) keysToRemove.push(key); } keysToRemove.forEach(k => localStorage.removeItem(k)); alert("Bóveda destruida."); location.reload(); } else if (word !== null) alert("Operación cancelada."); }
