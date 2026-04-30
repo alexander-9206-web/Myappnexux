@@ -683,7 +683,7 @@
                         <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
                     </div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span id="f-currency-label" class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input"></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input" onchange="handleCatChange()"></select></div>
                     <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
                     <div id="ap-freq-container" class="hidden">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
@@ -1687,6 +1687,35 @@
 
         // FORMULARIO MAESTRO DE TRANSACCIONES (SSoT)
         function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
+        
+        function handleCatChange() {
+            const cS = $id('f-cat');
+            if (cS.value === 'ADD_NEW_CAT') {
+                const type = $id('f-type').value;
+                const parent = prompt("Nombre de la Categoría Principal (Ej: Transporte):");
+                if (!parent) { cS.selectedIndex = 0; return; }
+                const sub = prompt(`Subcategoría para [${parent}] (Ej: Gasolina):`);
+                if (!sub) { cS.selectedIndex = 0; return; }
+                const emoji = prompt("Emoji para la categoría (Opcional, ej: 🚗):") || "";
+                const fullCatName = `${emoji} [${parent}] ${sub}`.trim();
+                
+                if(!state.categories[type]) state.categories[type] = [];
+                if(!state.categories[type].includes(fullCatName)) {
+                    state.categories[type].push(fullCatName);
+                    saveState();
+                    if(typeof populateFilters === 'function') populateFilters();
+                    if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
+                    if(typeof renderAdvancedCategories === 'function') renderAdvancedCategories();
+                }
+                
+                cS.innerHTML = '';
+                const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []);
+                cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; });
+                cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
+                cS.value = fullCatName;
+            }
+        }
+
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
         function reconcilePastAfterpay() {
@@ -1734,7 +1763,7 @@
             const mod = $id('tx-modal'); if(!mod) return; mod.classList.remove('hidden'); 
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
             const fT = $id('form-title'); const titlesMap = { 'income': 'Ingreso (+)', 'expense': 'Gasto (-)', 'transfer': 'Transferencia', 'afterpay': 'Afterpay' }; fT.innerText = txId ? `Editar ${titlesMap[type]}` : `Nuevo ${titlesMap[type]}`; 
-            const cS = $id('f-cat'); cS.innerHTML = ''; const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []); cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; }); 
+            const cS = $id('f-cat'); cS.innerHTML = ''; const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []); cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; }); cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
             const curS = $id('f-currency'); if(curS) { curS.innerHTML = ''; CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); curS.value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency; }
             populateFormAccounts();
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
