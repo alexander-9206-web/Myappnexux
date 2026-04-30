@@ -4,19 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Nexus Finance AR Unified</title>
-   <!-- Enlace al Manifiesto -->
-<link rel="manifest" href="manifest.json">
-
-<!-- Configuración para iOS (Safari) -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="MiApp">
-<link rel="apple-touch-icon" href="icono.png">
-
-<!-- Color de la barra de direcciones en Android -->
-<meta name="theme-color" content="#000000">
-
-    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -697,10 +686,11 @@
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input"></select></div>
                     <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
                     <div id="ap-freq-container" class="hidden">
-                        <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Frecuencia y Cuotas Afterpay</label>
+                        <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
                         <div class="flex gap-2 mt-1">
                             <select id="f-ap-freq" class="form-input border-teal-200 bg-teal-50 text-teal-900 flex-1"><option value="weekly">Semanales</option><option value="fortnightly">Quincenales</option><option value="monthly">Mensuales</option></select>
-                            <input type="number" id="f-ap-quotas" value="4" min="1" max="48" class="form-input border-teal-200 bg-teal-50 text-teal-900 w-24 text-center font-black" placeholder="N°">
+                            <input type="number" id="f-ap-quotas" value="4" min="1" max="48" class="form-input border-teal-200 bg-teal-50 text-teal-900 w-20 text-center font-black" placeholder="Totales" title="Cuotas Totales">
+                            <input type="number" id="f-ap-paid" value="0" min="0" max="48" class="form-input border-teal-200 bg-teal-50 text-teal-900 w-20 text-center font-black" placeholder="Pagadas" title="Cuotas Ya Pagadas">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota</label><input type="text" id="f-note" class="form-input text-xs"></div></div>
@@ -1699,6 +1689,24 @@
         function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
+        function reconcilePastAfterpay() {
+            if(!confirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.")) return;
+            let updated = 0; const now = new Date(); now.setHours(0,0,0,0);
+            const payDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+            state.tx.forEach(tx => {
+                if (tx.type === 'afterpay' && (tx.apPaid || 0) < (tx.apQuotas || 4)) {
+                    const quotas = tx.apQuotas || 4; const sD = getNextPayDate(getSafeDate(tx.date), payDay); const stD = tx.apFreq === 'fortnightly' ? 14 : (tx.apFreq === 'monthly' ? 30 : 7);
+                    let pastQuotas = 0;
+                    for(let i = 0; i < quotas; i++) {
+                        const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD)); d.setHours(12, 0, 0, 0);
+                        if (d < now) pastQuotas++;
+                    }
+                    if (pastQuotas > (tx.apPaid || 0)) { tx.apPaid = pastQuotas; saveCloudTx(tx); updated++; }
+                }
+            });
+            if (updated > 0) { saveState(); updateDashboard(); if(state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay(); alert(`✅ Se conciliarion compras pasadas en ${updated} contrato(s).`); } else { alert("No hay cuotas pasadas pendientes de conciliar."); }
+        }
+
         function populateFormAccounts() {
             const type = $id('f-type').value;
             const curS = $id('f-currency');
@@ -1740,7 +1748,7 @@
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
             const curS = $id('f-currency'); if(curS) { curS.value = tx.currency || tx.original_currency || state.settings.baseCurrency; populateFormAccounts(); }
-            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; } 
+            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; if($id('f-ap-paid')) $id('f-ap-paid').value = tx.apPaid || 0; } 
             if($id('f-is-recur')) { $id('f-is-recur').checked = !!tx.isRecurrent; toggleRecurFields(); if(tx.isRecurrent) { $id('f-recur-freq').value = tx.recurFreq || 'monthly'; $id('f-recur-count').value = tx.recurCount || 12; } }
             checkTxAccount();
         }
@@ -1783,7 +1791,7 @@
                 const oldTx = state.tx.find(t => t.id === id);
                 if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
                 oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(date).toISOString(); oldTx.note = note;
-                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
+                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
                 const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
                 if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
@@ -1791,11 +1799,11 @@
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
                 const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr }; 
-                const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = 0; } 
+                const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
             }
-            saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
+            saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase(); if(state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay(); 
         }
 
         // AUDITORÍA
