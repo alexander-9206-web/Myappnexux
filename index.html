@@ -264,7 +264,7 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Flujo: <span id="db-total" class="theme-text">$0</span></p>
                 </div>
             </div>
-            <div id="db-list" class="space-y-3 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0 pb-20"></div>
+            <div id="db-list" class="flex flex-col gap-3 pb-20"></div>
         </section>
 
         <!-- 🟢 TAB ANALÍTICA -->
@@ -406,6 +406,11 @@
                 </div>
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4">Engine Global</h3>
+                    <div class="mb-4 bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
+                        <label class="text-[10px] font-black text-amber-800 ml-1">Webhook Google Sheets (API URL)</label>
+                        <input type="text" id="set-gs-url" class="form-input text-xs mt-1 w-full border-amber-200 bg-white" placeholder="https://script.google.com/macros/s/..." onchange="updateSettings()">
+                        <p class="text-[8px] font-bold text-amber-600/70 mt-2 tracking-widest uppercase">Conecta tu bóveda remota sin servidores.</p>
+                    </div>
                     <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
                     <div class="flex items-center justify-between pt-4 border-t border-slate-100"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo PIN</h4><p class="text-[8px] text-slate-400">Pedir al abrir o inactividad</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div></label></div>
                     <div class="pt-4 border-t border-slate-100">
@@ -506,7 +511,7 @@
                     <button onclick="openAccountModal()" type="button" class="w-10 h-10 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
             </div>
-            <div class="grid grid-cols-3 gap-3 md:gap-6" id="acc-hub-summary"></div><div class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-6 md:space-y-0" id="acc-hub-list"></div>
+            <div class="grid grid-cols-3 gap-3 md:gap-6" id="acc-hub-summary"></div><div class="space-y-6" id="acc-hub-list"></div>
         </section>
 
         <!-- 🟢 TAB DEUDAS -->
@@ -848,202 +853,109 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
 
-        // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS) APEX OPTIMIZED ---
-        // Controladores Globales Estrictos
-        let cloudDb = null, cloudAuth = null, cloudUserId = null, fsLib = null;
-        let unsubMain = null, unsubTx = null;
-        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-v1';
-        
+        // --- MOTOR DE NUBE (GOOGLE SHEETS REST API) APEX OPTIMIZED ---
+        let googleSheetUrl = localStorage.getItem('nexus_gs_url') || '';
+        let syncTimeout = null;
+        let isSyncing = false;
+
         async function initCloud() {
-            try {
-                // APEX Fix: Versión estable requerida por el entorno
-                const appLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const authLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                fsLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-
-                let app = appLib.getApps().length ? appLib.getApp() : null;
-                if(!app) {
-                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
-                    app = appLib.initializeApp(firebaseConfig);
-                }
-
-                cloudAuth = authLib.getAuth(app);
-                cloudDb = fsLib.getFirestore(app);
-
-                // APEX Fix: Regla 3 - Auth antes que consultas. Soporte para custom tokens.
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    const cred = await authLib.signInWithCustomToken(cloudAuth, __initial_auth_token);
-                    cloudUserId = cred.user.uid;
-                } else {
-                    const cred = await authLib.signInAnonymously(cloudAuth);
-                    cloudUserId = cred.user.uid;
-                }
-                
-                console.log("[APEX SYS] Nube Activa y Encriptada. UID:", cloudUserId);
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-emerald-400'); dcb.classList.replace('bg-white/10', 'bg-emerald-500/20'); dcd.classList.replace('bg-slate-400', 'bg-emerald-400'); dcd.classList.remove('animate-pulse'); }
-                return true;
-            } catch(e) { 
-                console.error("[APEX SYS] Fallo crítico de conexión a la nube:", e); 
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-red-400'); dcb.classList.replace('bg-white/10', 'bg-red-500/20'); dcd.classList.replace('bg-slate-400', 'bg-red-400'); dcd.classList.remove('animate-pulse'); }
+            if(!googleSheetUrl) {
+                console.warn("[APEX SYS] Nube inactiva. Configura el Webhook en Settings.");
+                updateCloudBadge(false);
                 return false;
+            }
+            updateCloudBadge(true, true);
+            return true;
+        }
+
+        function updateCloudBadge(active, syncing = false) {
+            const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
+            if(!dcb || !dcd) return;
+            if(active) {
+                dcb.classList.replace('text-slate-300', 'text-blue-400'); dcb.classList.replace('bg-white/10', 'bg-blue-500/20');
+                dcb.classList.replace('text-red-400', 'text-blue-400'); dcb.classList.replace('bg-red-500/20', 'bg-blue-500/20');
+                dcb.classList.replace('text-emerald-400', 'text-blue-400'); dcb.classList.replace('bg-emerald-500/20', 'bg-blue-500/20');
+                dcd.classList.replace('bg-slate-400', 'bg-blue-400'); dcd.classList.replace('bg-red-400', 'bg-blue-400'); dcd.classList.replace('bg-emerald-400', 'bg-blue-400');
+                if(syncing) dcd.classList.add('animate-pulse'); else dcd.classList.remove('animate-pulse');
+            } else {
+                dcb.className = "bg-white/10 text-slate-300 text-[7px] md:text-[8px] font-black uppercase px-2 py-0.5 rounded-full border border-white/5 flex items-center gap-1 transition-colors";
+                dcd.className = "w-1.5 h-1.5 rounded-full bg-slate-400 transition-colors";
             }
         }
 
         async function fetchCloudState() {
-            if (!cloudDb || !cloudUserId || !currentUser) return;
+            if (!googleSheetUrl || !currentUser) return;
             try {
-                // APEX Fix: Regla 1 - Rutas estrictas (No anidar más allá del collectionName bajo el userId)
-                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
-                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                updateCloudBadge(true, true);
+                const url = `${googleSheetUrl}?action=load&email=${encodeURIComponent(currentUser)}`;
+                const res = await fetch(url);
+                const data = await res.json();
                 
-                const snap = await fsLib.getDoc(docRef);
-                const localDbStr = localStorage.getItem(`nexus_db_${currentUser}`);
-                const localDb = localDbStr ? JSON.parse(localDbStr) : null;
-                const cachedTx = localDb && localDb.tx ? localDb.tx : [];
-                
-                if (snap.exists()) {
-                    const data = snap.data();
-                    let loadedState = data.state ? { ...data.state } : null;
-                    
-                    if (loadedState) {
-                        // APEX Fix: Regla 2 - Cero Queries Complejas (Sin where/limit). Se trae todo y se gestiona en memoria RAM.
-                        const txSnap = await fsLib.getDocs(txCollRef);
-                        
-                        const localTxMap = new Map(cachedTx.map(t => [t.id, t]));
-                        const cloudRecentIds = new Set();
-                        
-                        txSnap.forEach(doc => {
-                            const d = doc.data();
-                            localTxMap.set(d.id, d);
-                            cloudRecentIds.add(d.id);
-                        });
-
-                        // Sincronización de purgas
-                        for (const [id, tx] of localTxMap.entries()) {
-                            if (!cloudRecentIds.has(id)) localTxMap.delete(id);
-                        }
-                        
-                        // Migración desde el objeto principal si quedó basura pesada en Firebase
-                        if (data.state && data.state.tx && data.state.tx.length > 0) {
-                            console.log("[APEX SYS] Optimizando payload de 1MB. Migrando TX a sub-colección de alta velocidad...");
-                            const batch = fsLib.writeBatch(cloudDb);
-                            data.state.tx.forEach(tx => {
-                                const txRef = fsLib.doc(txCollRef, tx.id);
-                                batch.set(txRef, tx);
-                                localTxMap.set(tx.id, tx); 
-                            });
-                            await batch.commit();
-                            delete loadedState.tx;
-                            await fsLib.updateDoc(docRef, { "state.tx": fsLib.deleteField() });
-                        }
-
-                        loadedState.tx = Array.from(localTxMap.values());
-                        state = loadedState;
-                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                        
-                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                    }
-                    if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
-                }
-                
-                setupCloudListeners(); 
-            } catch(e) { console.error("[APEX SYS] Error sincronizando bóveda remota:", e); }
-        }
-
-        // Paginación emulada en memoria (Ya que bajamos todo, evitamos indexaciones complejas en la DB)
-        async function loadOlderTransactions() {
-            // Placeholder funcional: Como la app descarga todo por la regla de "No Complex Queries",
-            // la UI simulará que carga, pero los datos ya están en el estado local.
-            // Esto mantiene tu UX intacto sin romper las reglas del servidor.
-        }
-
-        function setupCloudListeners() {
-            if (!cloudDb || !cloudUserId || !currentUser) return;
-            
-            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
-            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
-            
-            if(unsubMain) unsubMain();
-            if(unsubTx) unsubTx();
-
-            unsubMain = fsLib.onSnapshot(docRef, (snap) => {
-                if (snap.exists()) {
-                    const data = snap.data();
-                    if (data.state) {
-                        const currentTx = state.tx || []; 
-                        state = { ...data.state, tx: currentTx };
-                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                        if (sessionUnlocked) { updateDashboard(); switchTab(state.activeTab); }
-                    }
-                }
-            }, (error) => console.error("[APEX SYS] Main Socket Error:", error)); // APEX Fix: Manejador de errores obligatorio
-
-            unsubTx = fsLib.onSnapshot(txCollRef, (snapshot) => {
-                let currentTx = state.tx || [];
-                let hasChanges = false;
-                
-                snapshot.docChanges().forEach((change) => {
-                    hasChanges = true;
-                    const txData = change.doc.data();
-                    if (change.type === "added" || change.type === "modified") {
-                        const idx = currentTx.findIndex(t => t.id === txData.id);
-                        if (idx >= 0) currentTx[idx] = txData; else currentTx.push(txData);
-                    }
-                    if (change.type === "removed") {
-                        currentTx = currentTx.filter(t => t.id !== change.doc.id);
-                    }
-                });
-
-                if (hasChanges) {
-                    state.tx = currentTx;
+                if(data && data.success && data.data) {
+                    state = JSON.parse(data.data);
                     localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                    if (sessionUnlocked) { 
-                        updateDashboard(); 
-                        if(state.activeTab === 'database') renderDatabase(); 
-                        if(state.activeTab === 'accounts') renderAccountsTab(); 
-                        if(state.activeTab === 'afterpay') renderAfterpay(); 
-                    }
+                    if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
+                    console.log("[APEX SYS] Bóveda remota cargada desde Sheets.");
                 }
-            }, (error) => console.error("[APEX SYS] TX Socket Error:", error));
+                updateCloudBadge(true, false);
+            } catch(e) {
+                console.error("[APEX SYS] Error descargando de Google Sheets:", e);
+                updateCloudBadge(false);
+            }
         }
 
-        function saveCloudTx(tx) {
-            if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, tx.id);
-                fsLib.setDoc(txDoc, tx).catch(e => console.error("[APEX SYS] Error escribiendo TX en nube:", e));
-            }
+        function triggerCloudSync() {
+            if(!googleSheetUrl || !currentUser || !sessionUnlocked) return;
+            clearTimeout(syncTimeout);
+            // Sincronización diferida (Debouncer: Espera 4 seg de inactividad antes de golpear la API)
+            syncTimeout = setTimeout(async () => {
+                if(isSyncing) return triggerCloudSync(); 
+                isSyncing = true;
+                updateCloudBadge(true, true);
+                try {
+                    const payload = { action: "save", email: currentUser, data: JSON.stringify(state) };
+                    await fetch(googleSheetUrl, {
+                        method: 'POST',
+                        mode: 'no-cors', // Fundamental para enviar POST hacia Apps Script desde un origen local
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    console.log("[APEX SYS] Transacción sincronizada a Google Sheets.");
+                } catch (e) {
+                    console.error("[APEX SYS] Fricción en subida a Sheets:", e);
+                } finally {
+                    isSyncing = false;
+                    updateCloudBadge(true, false);
+                }
+            }, 4000); 
         }
-        
-        function deleteCloudTx(id) {
-            if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, id);
-                fsLib.deleteDoc(txDoc).catch(e => console.error("[APEX SYS] Error borrando TX en nube:", e));
-            }
-        }
+
+        function saveCloudTx(tx) { /* Gestionado por triggerCloudSync() en lote (Bulk) */ }
+        function deleteCloudTx(id) { /* Gestionado por triggerCloudSync() en lote (Bulk) */ }
 
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
                 if (state.activeTab === 'database') {
                     if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 100) {
-                        loadOlderTransactions();
+                        if (typeof loadOlderTransactions === 'function') {
+                            loadOlderTransactions();
+                        }
                     }
                 }
             });
 
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
-                initCloud(); // Inicializa nube en fondo para el login
+                initCloud(); // Inicializa nube visualmente
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 const le = $id('login-email');
                 if(le) le.addEventListener('input', (e) => { const em = e.target.value.trim().toLowerCase(); const rf = $id('register-fields'); if(rf) { if(em && !localStorage.getItem(`nexus_profile_${em}`)) rf.classList.remove('hidden'); else rf.classList.add('hidden'); } });
             } else {
-                // ARRANQUE LOCAL-FIRST: Carga la app al instante con datos locales
+                // ARRANQUE LOCAL-FIRST
                 bootApp(); 
                 
-                // SINCRONIZACIÓN EN SEGUNDO PLANO
+                // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
                 initCloud().then(() => {
                     fetchCloudState();
                 });
@@ -1058,11 +970,9 @@
                 const name = $id('login-name').value.trim(), pin = $id('login-pin').value.trim();
                 if (!name || pin.length !== 4) return alert("Nombre y PIN numérico de 4 dígitos.");
                 userProfile = { name, email, pin }; localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
-                if (cloudDb && cloudUserId) fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'bovedas', email), { profile: userProfile }, {merge: true}).catch(e=>console.log(e));
             }
             localStorage.setItem('nexus_current_user', email); currentUser = email; sessionUnlocked = true; 
             
-            // ARRANQUE LOCAL INSTANTÁNEO TRAS LOGIN
             const loginScreen = $id('login-screen');
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
@@ -1136,14 +1046,7 @@
         function saveState() { 
             if(currentUser && sessionUnlocked && state) {
                 localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); 
-                
-                // Interceptamos la persistencia atómica para escribir en Firestore (Protegiendo el límite de 1MB)
-                if (cloudDb && cloudUserId) {
-                    const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
-                    const stateWithoutTx = { ...state };
-                    delete stateWithoutTx.tx; // <-- Previene Crash del límite 1MB
-                    fsLib.setDoc(docRef, { state: stateWithoutTx, updatedAt: new Date().toISOString() }, {merge: true}).catch(e => console.error("Fallo de sincronización en Nube:", e));
-                }
+                triggerCloudSync(); // Empuje asíncrono debounced hacia Google Sheets
             } 
         }
         
@@ -1170,17 +1073,12 @@
         }
 
         function getEnrichedTx() {
-            let rawTx = [...getActiveTx()]; const now = new Date(); now.setHours(0,0,0,0);
+            // APEX FIX: Purga absoluta de Lump Sums (Mother TXs). Solo las amortizaciones pasarán al SSoT/Auditoría para proteger el Cashflow.
+            let rawTx = [...getActiveTx()].filter(t => t.type !== 'afterpay' && !t.isCCPurchase); 
+            const now = new Date(); now.setHours(0,0,0,0);
             const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
-            
-            // 0. INYECTAR COMPRAS MADRE AFTERPAY AL SSoT SI FUERON EXCLUIDAS POR EL FILTRO GLOBAL
-            state.tx.filter(t => t.type === 'afterpay').forEach(tx => {
-                if (!rawTx.some(rt => rt.id === tx.id)) {
-                    rawTx.push({ ...tx, original_amount: tx.original_amount || tx.amount, original_currency: tx.original_currency || tx.currency, amount: convertCurrency(tx.original_amount || tx.amount, tx.original_currency || tx.currency, cDisplay), currency: cDisplay, isVirtual: true });
-                }
-            });
 
-            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx) para evadir el filtro estricto de divisa activa
+            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx)
             const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4)); 
             const payDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
             
@@ -1194,6 +1092,7 @@
                 
                 for(let i = (tx.apPaid || 0); i < quotas; i++) { 
                     const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD)); 
+                    d.setHours(12, 0, 0, 0); // APEX FIX: Fija a mediodía para evitar que el timezone brinque la fecha cronológica hacia atrás
                     const clearCat = tx.note || tx.cat.substring(2).trim(); 
                     const pId = 'proj_ap_'+tx.id+'_'+i;
                     if (!rawTx.some(rt => rt.id === pId)) {
@@ -1491,19 +1390,48 @@
         // TABS
         function renderAccountsTab() {
             const sumContainer = $id('acc-hub-summary'); const listContainer = $id('acc-hub-list'); if(!sumContainer || !listContainer) return;
-            let totalAssets = 0, totalLiabilities = 0; const activeAccs = getActiveAccounts();
-            activeAccs.forEach(a => { if(a.type === 'credit') totalLiabilities += a.balance; else totalAssets += a.balance; });
-            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(0)}</p></div>`; 
-            let html = activeAccs.length === 0 ? '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas.</p>' : '';
-            activeAccs.forEach(a => {
-                const curr = a.currency; const typeIcon = a.type === 'liquid' ? 'fa-wallet text-blue-500' : (a.type === 'credit' ? 'fa-credit-card text-red-500' : 'fa-chart-line text-emerald-500');
-                if (a.type === 'credit') {
-                    const av = (a.limit || 0) - a.balance;
-                    html += `<div onclick="toggleAccountTx('${a.id}')" class="theme-card p-6 rounded-[2rem] border shadow-sm group relative overflow-hidden space-y-4 border-slate-100 h-full flex flex-col cursor-pointer hover:border-blue-200 transition-colors"><div class="flex justify-between items-start flex-1"><div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">Corte: ${a.cutoffDay||'N/A'} | Pago Máx: ${a.payDay||'N/A'} | Tasa: ${a.rate||0}% E.M.</p></div><div class="text-right pr-6"><p class="text-[9px] font-bold text-slate-400 uppercase">Saldo Endeudado</p><p class="text-lg font-black theme-val-exp">-${fmt(a.balance, curr)}</p></div></div><div class="flex justify-between items-center pt-3 border-t border-slate-50/50"><div><p class="text-[9px] font-bold text-slate-400 uppercase">Cupo Disponible</p><p class="text-sm font-black theme-val-inc">${fmt(Math.max(0,av), curr)}</p></div><div class="flex gap-2"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button></div></div><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="absolute top-4 right-4 text-slate-300 hover:text-indigo-500"><i class="fa-solid fa-clock-rotate-left"></i></button><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-2 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
-                } else {
-                    html += `<div onclick="toggleAccountTx('${a.id}')" class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100 h-full cursor-pointer hover:border-blue-200 transition-colors"><div class="flex justify-between items-center w-full"><div><h4 class="text-xs font-black uppercase tracking-tight theme-text">${a.name}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">ID: ${a.id}</p></div><div class="flex items-center gap-4 pr-6"><p class="text-lg font-black ${a.type==='investment'?'theme-val-inc':'theme-text'}">${fmt(a.balance, curr)}</p><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="bg-slate-100 text-slate-500 w-8 h-8 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[10px]"></i></button></div></div><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="absolute top-4 right-4 text-slate-300 hover:text-indigo-500"><i class="fa-solid fa-clock-rotate-left"></i></button><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-4 mt-4 border-t border-slate-50/50 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar w-full"></div></div>`;
-                }
+            
+            let totalAssets = 0, totalLiabilities = 0; 
+            const bC = state.settings.baseCurrency || 'COP';
+            
+            (state.accounts || []).forEach(a => { 
+                const balInBase = convertCurrency(a.balance, a.currency, bC);
+                if(a.type === 'credit') totalLiabilities += balInBase; 
+                else totalAssets += balInBase; 
             });
+            
+            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(0, bC)}</p></div>`; 
+            
+            if(!state.accounts || state.accounts.length === 0) {
+                listContainer.innerHTML = '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas configuradas.</p>';
+                return;
+            }
+
+            const groups = {};
+            state.accounts.forEach(a => {
+                if(!groups[a.currency]) groups[a.currency] = [];
+                groups[a.currency].push(a);
+            });
+
+            let html = '';
+            for(let curr in groups) {
+                const accs = groups[curr];
+                let subTotal = 0;
+                accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
+                
+                html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100"><div class="flex justify-between items-center border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div class="space-y-3">`;
+                
+                accs.forEach(a => {
+                    const icon = a.type === 'liquid' ? 'fa-wallet text-blue-500' : (a.type === 'credit' ? 'fa-credit-card text-red-500' : 'fa-chart-line text-emerald-500');
+                    const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                    const sign = a.type === 'credit' ? '-' : '';
+                    const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
+                    
+                    html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-200"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                });
+                
+                html += `</div></div>`;
+            }
             listContainer.innerHTML = html;
         }
 
@@ -1705,7 +1633,8 @@
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
             const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
             card.balance += amount; 
-            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency };
+            // APEX FIX: Se añade flag isCCPurchase para excluir el total del cashflow general
+            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
             state.tx.push(newTx); saveCloudTx(newTx);
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
             saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
@@ -1851,7 +1780,7 @@
                 if(d < st || d > en) return false; 
                 
                 if(tp !== 'all') {
-                    if (tp === 'afterpay' && t.type !== 'afterpay' && !t.cat.includes('Afterpay')) return false;
+                    if (tp === 'afterpay' && !t.cat.includes('Afterpay')) return false;
                     if (tp !== 'afterpay' && t.type !== tp) return false;
                 }
                 if(ct !== 'all' && t.cat !== ct) return false; 
@@ -1906,7 +1835,7 @@
                 const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300'; 
                 const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
 
-                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-5 rounded-[1.5rem] flex justify-between items-center shadow-sm border border-slate-100/50 transition-all h-full"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text truncate max-w-[120px] flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-1 flex items-center">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-4 shrink-0"><p class="font-black text-sm ${cT}">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-white rounded-full shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(new Event('click'), id); }
@@ -1915,10 +1844,10 @@
         function setStatsType(type) { state.statsType = type; renderAnalysis(); }
         function renderAnalysis() {
             const now = new Date();
-            // Motor unificado: Filtra automáticamente el mes en curso descartando dependencias de pestañas superiores y futuros.
+            // Motor unificado: Filtra automáticamente el mes en curso y excluye totales financiados
             const currentMonthTx = getActiveTx().filter(t => {
                 const d = new Date(t.date);
-                return t.type !== 'afterpay' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && d <= now;
+                return t.type !== 'afterpay' && !t.isCCPurchase && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && d <= now;
             });
             const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = 'Mes Actual (Unificado)';
             const inc = currentMonthTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); 
@@ -2017,7 +1946,13 @@
             activeAccs.forEach(a => { if (a.type === 'liquid') liquidAssets += a.balance; else if (a.type === 'investment') investmentAssets += a.balance; else if (a.type === 'credit') totalLiabilities += a.balance; });
             let nonCurrentLiabilities = 0;
             getActiveLoans().forEach(l => { if (!l.isBNPL) { let P = l.total; const r = l.rate / 100; const n = l.term; const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1); let balance = P; const paid = l.paidQuotas || 0; for(let j=0; j<paid; j++) balance -= (A - (balance * r)); nonCurrentLiabilities += Math.max(0, balance); } });
-            const shortTermLiabilities = totalLiabilities + enrichedTx.filter(t => t.type === 'afterpay' && !t.isProjected && new Date(t.date).getMonth() === now.getMonth()).reduce((sum, t) => sum + t.amount, 0); 
+            
+            // APEX FIX: Recalcula pasivos a corto plazo usando la fuente pura (state.tx) para Afterpay
+            const shortTermLiabilities = totalLiabilities + state.tx.filter(t => t.type === 'afterpay').reduce((sum, t) => {
+                const quotas = t.apQuotas || 4; const pending = (t.amount / quotas) * (quotas - (t.apPaid || 0));
+                return sum + convertCurrency(pending, t.currency, bC);
+            }, 0); 
+            
             const totalAssets = liquidAssets + investmentAssets; const allLiabilities = shortTermLiabilities + nonCurrentLiabilities; const netWorth = totalAssets - allLiabilities;
             const past90d = new Date(now.getTime() - (90 * 86400000)); const tx90d = enrichedTx.filter(t => new Date(t.date) >= past90d && new Date(t.date) <= now && !t.isProjected);
             const inc90d = tx90d.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); const exp90d = tx90d.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
@@ -2361,6 +2296,7 @@
 
         // CONFIGURACIÓN
         function renderSettingsTab() {
+            const gsEl = $id('set-gs-url'); if(gsEl) gsEl.value = localStorage.getItem('nexus_gs_url') || '';
             $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
             const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) apCurrEl.value = state.settings.apCurrency || 'AUD';
@@ -2385,6 +2321,7 @@
             updateLocalUsersList(); updateCatManageView(); 
         }
         function updateSettings() {
+            const gsEl = $id('set-gs-url'); if(gsEl) { localStorage.setItem('nexus_gs_url', gsEl.value.trim()); googleSheetUrl = gsEl.value.trim(); initCloud(); }
             state.settings.baseCurrency = $id('set-base-currency').value;
             const apLimEl = $id('set-ap-limit'); state.settings.apLimit = parseFloat(apLimEl.dataset.raw || 5000000);
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) state.settings.apCurrency = apCurrEl.value;
@@ -2786,6 +2723,138 @@
             $id('scanner-results').classList.add('hidden');
             switchTab('database');
         }
+
+        // ============================================================================
+        // --- MOTOR DE NUBE ALTERNATIVO (FIREBASE) MOVIDO AL FINAL SEGÚN SOLICITUD ---
+        // ============================================================================
+        /* // Descomenta este bloque si decides volver a Firebase en el futuro.
+        // Asegúrate de cambiar las llamadas de la app a initFirebaseCloud(), fetchFirebaseState(), etc.
+        
+        let cloudDb = null, cloudAuth = null, cloudUserId = null, fsLib = null;
+        let unsubMain = null, unsubTx = null;
+        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-v1';
+        
+        async function initFirebaseCloud() {
+            try {
+                const appLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const authLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                fsLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+                let app = appLib.getApps().length ? appLib.getApp() : null;
+                if(!app) {
+                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
+                    app = appLib.initializeApp(firebaseConfig);
+                }
+
+                cloudAuth = authLib.getAuth(app);
+                cloudDb = fsLib.getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    const cred = await authLib.signInWithCustomToken(cloudAuth, __initial_auth_token);
+                    cloudUserId = cred.user.uid;
+                } else {
+                    const cred = await authLib.signInAnonymously(cloudAuth);
+                    cloudUserId = cred.user.uid;
+                }
+                
+                console.log("[APEX SYS] Firebase Engine Listo. UID:", cloudUserId);
+                return true;
+            } catch(e) { 
+                console.error("[APEX SYS] Fallo Firebase:", e); 
+                return false;
+            }
+        }
+
+        async function fetchFirebaseState() {
+            if (!cloudDb || !cloudUserId || !currentUser) return;
+            try {
+                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
+                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                
+                const snap = await fsLib.getDoc(docRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    let loadedState = data.state ? { ...data.state } : null;
+                    
+                    if (loadedState) {
+                        const txSnap = await fsLib.getDocs(txCollRef);
+                        const localTxMap = new Map((state.tx || []).map(t => [t.id, t]));
+                        
+                        txSnap.forEach(doc => {
+                            const d = doc.data();
+                            localTxMap.set(d.id, d);
+                        });
+
+                        loadedState.tx = Array.from(localTxMap.values());
+                        state = loadedState;
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        
+                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
+                    }
+                }
+                setupFirebaseListeners(); 
+            } catch(e) { console.error("[APEX SYS] Error sincronizando Firebase:", e); }
+        }
+
+        function setupFirebaseListeners() {
+            if (!cloudDb || !cloudUserId || !currentUser) return;
+            
+            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
+            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
+            
+            if(unsubMain) unsubMain();
+            if(unsubTx) unsubTx();
+
+            unsubMain = fsLib.onSnapshot(docRef, (snap) => {
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data.state) {
+                        const currentTx = state.tx || []; 
+                        state = { ...data.state, tx: currentTx };
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        if (sessionUnlocked) { updateDashboard(); switchTab(state.activeTab); }
+                    }
+                }
+            });
+
+            unsubTx = fsLib.onSnapshot(txCollRef, (snapshot) => {
+                let currentTx = state.tx || [];
+                let hasChanges = false;
+                
+                snapshot.docChanges().forEach((change) => {
+                    hasChanges = true;
+                    const txData = change.doc.data();
+                    if (change.type === "added" || change.type === "modified") {
+                        const idx = currentTx.findIndex(t => t.id === txData.id);
+                        if (idx >= 0) currentTx[idx] = txData; else currentTx.push(txData);
+                    }
+                    if (change.type === "removed") {
+                        currentTx = currentTx.filter(t => t.id !== change.doc.id);
+                    }
+                });
+
+                if (hasChanges) {
+                    state.tx = currentTx;
+                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                    if (sessionUnlocked) { updateDashboard(); if(state.activeTab === 'database') renderDatabase(); }
+                }
+            });
+        }
+
+        function saveFirebaseTx(tx) {
+            if (cloudDb && cloudUserId && currentUser) {
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, tx.id);
+                fsLib.setDoc(txDoc, tx).catch(e => console.error(e));
+            }
+        }
+        
+        function deleteFirebaseTx(id) {
+            if (cloudDb && cloudUserId && currentUser) {
+                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, id);
+                fsLib.deleteDoc(txDoc).catch(e => console.error(e));
+            }
+        }
+        */
     </script>
 </body>
 </html>
