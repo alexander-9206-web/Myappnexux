@@ -668,7 +668,22 @@
                         <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
                     </div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span id="f-currency-label" class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input" onchange="handleCatChange()"></select></div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label>
+                        <select id="f-cat" required class="form-input" onchange="handleCatChange()"></select>
+                        <div id="inline-cat-creator" class="hidden mt-2 p-3 bg-purple-50 border border-purple-100 rounded-xl space-y-3 animate-slideUp">
+                            <p class="text-[9px] font-black uppercase text-purple-600 tracking-widest">Crear Categoría</p>
+                            <div class="space-y-2">
+                                <input type="text" id="inline-cat-parent" list="inline-parent-list" placeholder="Categoría (Ej: Transporte)" class="form-input text-xs w-full bg-white py-2">
+                                <datalist id="inline-parent-list"></datalist>
+                                <input type="text" id="inline-cat-sub" placeholder="Subcategoría (Ej: Gasolina)" class="form-input text-xs w-full bg-white py-2">
+                            </div>
+                            <div class="flex gap-2 pt-1 border-t border-purple-100/50">
+                                <button type="button" onclick="confirmInlineCategory()" class="flex-1 bg-purple-600 text-white text-[10px] font-black py-2.5 rounded-xl active:scale-95 transition-transform shadow-sm">Crear</button>
+                                <button type="button" onclick="cancelInlineCategory()" class="flex-1 bg-slate-200 text-slate-600 text-[10px] font-black py-2.5 rounded-xl active:scale-95 transition-transform">Cancelar</button>
+                            </div>
+                        </div>
+                    </div>
                     <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
                     <div id="ap-freq-container" class="hidden">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
@@ -692,7 +707,7 @@
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Registro</button>
+                <button type="submit" id="btn-save-tx" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Registro</button>
             </form>
         </div>
     </div>
@@ -832,7 +847,7 @@
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
         const CURRENCIES = ['COP', 'USD', 'EUR', 'AUD', 'JPY', 'GBP', 'MXN', 'BRL', 'CAD', 'CHF'];
         const EXCHANGE_RATES = { USD: 1, COP: 3900, EUR: 0.92, AUD: 1.53, JPY: 150, GBP: 0.79, MXN: 17, BRL: 4.95, CAD: 1.35, CHF: 0.88 };
-        const CAT_PARENTS = { income: ['Salario', 'Inversión', 'Otros Ingresos'], expense: ['Fijos', 'Variables', 'Deuda/Financiero', 'Ocio', 'Otros Gastos'], transfer: ['Movimiento Interno'] };
+        const CAT_PARENTS = { income: ['Laboral', 'Inversiones', 'Extra'], expense: ['Vivienda', 'Transporte', 'Alimentación', 'Ocio', 'Salud', 'Educación'], transfer: ['Movimientos'] };
 
         let currentUser = null, userProfile = {}, state = {}, charts = {};
         let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency';
@@ -1676,29 +1691,63 @@
         function handleCatChange() {
             const cS = $id('f-cat');
             if (cS.value === 'ADD_NEW_CAT') {
-                const type = $id('f-type').value;
-                const parent = prompt("Nombre de la Categoría Principal (Ej: Transporte):");
-                if (!parent) { cS.selectedIndex = 0; return; }
-                const sub = prompt(`Subcategoría para [${parent}] (Ej: Gasolina):`);
-                if (!sub) { cS.selectedIndex = 0; return; }
-                const emoji = prompt("Emoji para la categoría (Opcional, ej: 🚗):") || "";
-                const fullCatName = `${emoji} [${parent}] ${sub}`.trim();
+                $id('inline-cat-creator').classList.remove('hidden');
+                $id('inline-cat-parent').value = '';
+                $id('inline-cat-sub').value = '';
                 
-                if(!state.categories[type]) state.categories[type] = [];
-                if(!state.categories[type].includes(fullCatName)) {
-                    state.categories[type].push(fullCatName);
-                    saveState();
-                    if(typeof populateFilters === 'function') populateFilters();
-                    if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
-                    if(typeof renderAdvancedCategories === 'function') renderAdvancedCategories();
+                const type = $id('f-type').value;
+                const dList = $id('inline-parent-list');
+                if (dList) {
+                    dList.innerHTML = '';
+                    let parents = new Set();
+                    if(state.catParents && state.catParents[type]) state.catParents[type].forEach(p => parents.add(p));
+                    (state.categories[type] || []).forEach(c => { const m = c.match(/\[(.*?)\]/); if(m) parents.add(m[1]); });
+                    Array.from(parents).forEach(p => { dList.innerHTML += `<option value="${p}">`; });
                 }
                 
-                cS.innerHTML = '';
-                const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []);
-                cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; });
-                cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
-                cS.value = fullCatName;
+                const btnSave = $id('btn-save-tx'); if(btnSave) btnSave.disabled = true;
+            } else {
+                const inlineC = $id('inline-cat-creator'); if(inlineC) inlineC.classList.add('hidden');
+                const btnSave = $id('btn-save-tx'); if(btnSave) btnSave.disabled = false;
             }
+        }
+
+        function confirmInlineCategory() {
+            const type = $id('f-type').value;
+            let parent = $id('inline-cat-parent').value.trim();
+            const sub = $id('inline-cat-sub').value.trim();
+
+            if (!parent || !sub) return alert("Debes indicar Categoría (Ej: Transporte) y Subcategoría (Ej: Gasolina).");
+
+            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+            if(!state.catParents[type]) state.catParents[type] = [];
+            if(!state.catParents[type].includes(parent)) { state.catParents[type].push(parent); }
+
+            const fullCatName = `[${parent}] ${sub}`;
+            if(!state.categories[type]) state.categories[type] = [];
+            if(!state.categories[type].includes(fullCatName)) {
+                state.categories[type].push(fullCatName);
+                saveState();
+                if(typeof populateFilters === 'function') populateFilters();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
+                if(typeof updateCatManageView === 'function') updateCatManageView();
+            }
+
+            cancelInlineCategory();
+            
+            const cS = $id('f-cat');
+            cS.innerHTML = '';
+            const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []);
+            cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; });
+            cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
+            cS.value = fullCatName;
+        }
+
+        function cancelInlineCategory() {
+            const inlineC = $id('inline-cat-creator'); if(inlineC) inlineC.classList.add('hidden');
+            const btnSave = $id('btn-save-tx'); if(btnSave) btnSave.disabled = false;
+            const cS = $id('f-cat');
+            if(cS && cS.value === 'ADD_NEW_CAT') cS.selectedIndex = 0;
         }
 
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
@@ -1753,6 +1802,10 @@
             populateFormAccounts();
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
             const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
+            
+            // APEX FIX: Restaurar UI Inline en caso de haber quedado abierto
+            cancelInlineCategory();
+
             if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
             checkTxAccount();
         }
@@ -2439,7 +2492,16 @@
                 if(email === currentUser) { alert("Has eliminado tu propia bóveda activa."); logout(); } else { closeUserEdit(); updateLocalUsersList(); }
             }
         }
-        function updateCatManageView() { const tpSel = $id('cat-manage-type'); if(!tpSel) return; const type = tpSel.value; const parentSelect = $id('cat-manage-parent'); parentSelect.innerHTML = ''; if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS)); (state.catParents[type] || []).forEach(p => { parentSelect.innerHTML += `<option value="${p}">${p}</option>`; }); renderAdvancedCategories(); }
+        function updateCatManageView() { 
+            const tpSel = $id('cat-manage-type'); if(!tpSel) return; 
+            const type = tpSel.value; const parentSelect = $id('cat-manage-parent'); parentSelect.innerHTML = ''; 
+            let parents = new Set();
+            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS)); 
+            (state.catParents[type] || []).forEach(p => parents.add(p));
+            (state.categories[type] || []).forEach(c => { const m = c.match(/\[(.*?)\]/); if(m) parents.add(m[1]); });
+            Array.from(parents).forEach(p => { parentSelect.innerHTML += `<option value="${p}">${p}</option>`; }); 
+            renderAdvancedCategories(); 
+        }
         function renderAdvancedCategories() {
             const type = $id('cat-manage-type').value; const list = $id('cat-manage-list'); const cats = state.categories[type] || [];
             list.innerHTML = cats.map(c => `<div onclick="openCategoryEdit('${c}')" class="flex justify-between items-center p-4 hover:bg-purple-50 bg-white rounded-[1.5rem] cursor-pointer border border-slate-100 hover:border-purple-200 transition-colors group"><div class="flex items-center gap-3"><div class="w-2.5 h-2.5 rounded-full ${type==='income'?'bg-emerald-400':type==='expense'?'bg-red-400':'bg-indigo-400'} shadow-sm"></div><span class="text-[10px] font-black uppercase text-slate-700">${c}</span></div><div class="flex items-center gap-4"><span class="text-[8px] font-bold text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity bg-purple-100 px-2 py-0.5 rounded">EDITAR</span><button onclick="event.stopPropagation(); removeAdvancedCategory('${c}')" type="button" class="text-slate-300 hover:text-red-500 bg-slate-50 w-8 h-8 rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`).join('');
