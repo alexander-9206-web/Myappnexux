@@ -408,7 +408,21 @@
                     <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
                     <div class="flex items-center justify-between pt-4 border-t border-slate-100"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo PIN</h4><p class="text-[8px] text-slate-400">Pedir al abrir o inactividad</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div></label></div>
                     <div class="pt-4 border-t border-slate-100">
-                        <label class="text-[10px] font-black text-slate-400 ml-2">Límite Afterpay (AUD)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="set-ap-limit" class="form-input text-center text-teal-700 bg-teal-50 mt-1" onchange="updateSettings()">
+                        <div class="grid grid-cols-2 gap-2 mt-1">
+                            <div>
+                                <label class="text-[10px] font-black text-slate-400 ml-2">Límite Afterpay</label>
+                                <input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="set-ap-limit" class="form-input text-center text-teal-700 bg-teal-50 mt-1" onchange="updateSettings()">
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-black text-slate-400 ml-2">Divisa (Nativa)</label>
+                                <select id="set-ap-currency" class="form-input text-center text-teal-700 bg-teal-50 mt-1" onchange="updateSettings()">
+                                    <option value="AUD">AUD</option>
+                                    <option value="COP">COP</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                </select>
+                            </div>
+                        </div>
                         <label class="text-[10px] font-black text-slate-400 ml-2 block mt-2">Día Pago Afterpay</label><select id="set-ap-day" class="form-input text-center mt-1" onchange="updateSettings()"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option></select>
                     </div>
                     <div class="pt-4 border-t border-slate-100">
@@ -571,8 +585,8 @@
             </div>
             <div class="grid grid-cols-2 gap-4 md:gap-6"><div class="bg-teal-50 p-6 md:p-8 rounded-[2rem] text-center border border-teal-100 shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase text-teal-800">Pendiente Total</p><h3 id="ap-total-pending" class="text-2xl md:text-4xl font-black text-teal-600 mt-2 tabular-nums">$0</h3></div><div class="theme-card p-6 md:p-8 rounded-[2rem] text-center border shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase theme-text">Disponible</p><h3 id="ap-available" class="text-xl md:text-3xl font-black theme-text mt-2 tabular-nums">$0</h3></div></div>
             <div class="grid grid-cols-2 gap-4 md:gap-6">
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Esta Sem. / Vencidas</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3></div>
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Días 8 a 14</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p id="ap-this-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Corte Actual</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p id="ap-next-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Próximo Corte</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><div class="border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-[10px] font-black uppercase theme-text">Calendario Pagos</h3></div><div id="ap-schedule-list" class="space-y-3 max-h-[300px] overflow-y-auto hide-scrollbar pb-2"></div></div>
@@ -1149,21 +1163,46 @@
 
         function getEnrichedTx() {
             let rawTx = [...getActiveTx()]; const now = new Date(); now.setHours(0,0,0,0);
-            const apTx = rawTx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4)); const payDay = state.settings.apPayDay || 5;
+            const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
+            
+            // 0. INYECTAR COMPRAS MADRE AFTERPAY AL SSoT SI FUERON EXCLUIDAS POR EL FILTRO GLOBAL
+            state.tx.filter(t => t.type === 'afterpay').forEach(tx => {
+                if (!rawTx.some(rt => rt.id === tx.id)) {
+                    rawTx.push({ ...tx, original_amount: tx.original_amount || tx.amount, original_currency: tx.original_currency || tx.currency, amount: convertCurrency(tx.original_amount || tx.amount, tx.original_currency || tx.currency, cDisplay), currency: cDisplay, isVirtual: true });
+                }
+            });
+
+            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx) para evadir el filtro estricto de divisa activa
+            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4)); 
+            const payDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+            
             apTx.forEach(tx => { 
-                const quotas = tx.apQuotas || 4; const sD = getNextPayDate(new Date(tx.date), payDay); const stD = tx.apFreq === 'fortnightly' ? 14 : (tx.apFreq === 'monthly' ? 30 : 7); 
-                const iA = tx.amount / quotas; const origIA = (tx.original_amount || tx.amount) / quotas;
+                const quotas = tx.apQuotas || 4; 
+                const sD = getNextPayDate(new Date(tx.date), payDay); 
+                const stD = tx.apFreq === 'fortnightly' ? 14 : (tx.apFreq === 'monthly' ? 30 : 7); 
+                
+                const origIA = (tx.original_amount || tx.amount) / quotas;
+                const iA = convertCurrency(origIA, tx.original_currency || tx.currency, cDisplay);
+                
                 for(let i = (tx.apPaid || 0); i < quotas; i++) { 
-                    const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD)); const clearCat = tx.note || tx.cat.substring(2).trim(); 
-                    rawTx.push({ id: 'proj_ap_'+tx.id+'_'+i, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: '🛍️ Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: tx.currency }); 
+                    const d = new Date(sD.getTime()); d.setDate(d.getDate() + (i * stD)); 
+                    const clearCat = tx.note || tx.cat.substring(2).trim(); 
+                    const pId = 'proj_ap_'+tx.id+'_'+i;
+                    if (!rawTx.some(rt => rt.id === pId)) {
+                        rawTx.push({ id: pId, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: '🛍️ Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: cDisplay }); 
+                    }
                 } 
             });
-            getActiveLoans().forEach(l => {
-                const P = l.total; const r = l.rate / 100; const n = l.term; const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                const P_orig = l.original_total || l.total; const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                let balance = P; let bal_orig = P_orig;
+            
+            // 2. LOANS: Se extrae del SSoT puro (state.loans)
+            state.loans.forEach(l => {
+                const P_orig = l.original_total || l.total;
+                const r = l.rate / 100; const n = l.term; 
+                const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                let bal_orig = P_orig;
                 const paid = l.paidQuotas || 0; 
-                for(let j=0; j<paid; j++) { balance -= (A - (balance * r)); bal_orig -= (A_orig - (bal_orig * r)); }
+                for(let j=0; j<paid; j++) { bal_orig -= (A_orig - (bal_orig * r)); }
+                
                 for(let i=paid; i<n; i++) { 
                     let pD;
                     if(l.isCC && l.cardId) {
@@ -1172,13 +1211,32 @@
                             const pDate = new Date(l.date); const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
                             pD = new Date(pDate.getFullYear(), pDate.getMonth() + addM + i, card.payDay, 12, 0, 0);
                         } else { pD = new Date(l.date); pD.setMonth(pD.getMonth() + i + 1); }
-                    } else { pD = new Date(l.date); pD.setMonth(pD.getMonth() + i + 1); }
-                    const interest = balance * r; const principal = A - interest; balance -= principal; if(balance < 0.01) balance = 0; 
-                    const int_orig = bal_orig * r; const prin_orig = A_orig - int_orig; bal_orig -= prin_orig; if(bal_orig < 0.01) bal_orig = 0;
-                    rawTx.push({ id: 'proj_loan_'+l.id+'_'+i, type: 'expense', amount: A, original_amount: A_orig, original_currency: l.original_currency || l.currency, cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda', accId: null, date: pD.toISOString(), note: `[Cuota ${i+1}/${n}] ${l.name} (Cap:${fmt(prin_orig, l.original_currency||l.currency)} | Int:${fmt(int_orig, l.original_currency||l.currency)})`, isProjected: true, currency: l.currency, priority: l.priority }); 
+                    } else if (l.id.startsWith('pend_')) {
+                        pD = new Date(l.date);
+                    } else { 
+                        pD = new Date(l.date); pD.setMonth(pD.getMonth() + i + 1); 
+                    }
+                    
+                    if (l.id.startsWith('pend_')) {
+                        if (i === 0) {
+                            const amtOrig = l.original_balance || l.balance || l.total;
+                            const pId = 'proj_pend_'+l.id;
+                            if (!rawTx.some(rt => rt.id === pId)) {
+                                rawTx.push({ id: pId, type: 'expense', amount: convertCurrency(amtOrig, l.original_currency || l.currency, cDisplay), original_amount: amtOrig, original_currency: l.original_currency || l.currency, cat: '⚡ Pendiente Único', accId: null, date: pD.toISOString(), note: l.name, isProjected: true, currency: cDisplay, priority: l.priority || 'medium' });
+                            }
+                        }
+                    } else {
+                        const int_orig = bal_orig * r; const prin_orig = A_orig - int_orig; bal_orig -= prin_orig; if(bal_orig < 0.01) bal_orig = 0; 
+                        const pId = 'proj_loan_'+l.id+'_'+i;
+                        if (!rawTx.some(rt => rt.id === pId)) {
+                            rawTx.push({ id: pId, type: 'expense', amount: convertCurrency(A_orig, l.original_currency || l.currency, cDisplay), original_amount: A_orig, original_currency: l.original_currency || l.currency, cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda', accId: null, date: pD.toISOString(), note: `[Cuota ${i+1}/${n}] ${l.name} (Cap:${fmt(prin_orig, l.original_currency||l.currency)} | Int:${fmt(int_orig, l.original_currency||l.currency)})`, isProjected: true, currency: cDisplay, priority: l.priority }); 
+                        }
+                    }
                 }
             });
-            rawTx.filter(t => t.isRecurrent).forEach(tx => {
+            
+            // 3. RECURRENTES
+            rawTx.filter(t => t.isRecurrent && !t.isProjected).forEach(tx => {
                 const count = tx.recurCount || 12; const freq = tx.recurFreq || 'monthly'; const origDate = new Date(tx.date);
                 for(let i=1; i<count; i++) {
                     const d = new Date(origDate.getTime());
@@ -1187,14 +1245,17 @@
                     else if (freq === 'monthly') d.setMonth(d.getMonth() + i);
                     else if (freq === 'yearly') d.setFullYear(d.getFullYear() + i);
                     const clearCat = tx.note || tx.cat.substring(2).trim();
-                    rawTx.push({ id: 'proj_recur_'+tx.id+'_'+i, type: tx.type, amount: tx.amount, original_amount: tx.original_amount || tx.amount, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Recurrente] ${clearCat} (${i+1}/${count})`, isProjected: true, currency: tx.currency });
+                    const pId = 'proj_recur_'+tx.id+'_'+i;
+                    if (!rawTx.some(rt => rt.id === pId)) {
+                        rawTx.push({ id: pId, type: tx.type, amount: tx.amount, original_amount: tx.original_amount || tx.amount, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Recurrente] ${clearCat} (${i+1}/${count})`, isProjected: true, currency: tx.currency });
+                    }
                 }
             });
             return rawTx;
         }
 
         function getContextTx(baseTx) { const now = new Date(); return baseTx.filter(t => { const d = new Date(t.date); if(state.context === 'day') return d.toDateString() === now.toDateString(); if(state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); return d.getFullYear() === now.getFullYear(); }); }
-        function getNextPayDate(b, t) { let d = new Date(b); let c = d.getDay(); let x = t - c; if(x<=0) x+=7; d.setDate(d.getDate()+x); return d; }
+        function getNextPayDate(b, t) { let d = new Date(b); d.setHours(0,0,0,0); let c = d.getDay(); let x = t - c; if(x < 0) x += 7; d.setDate(d.getDate() + x); return d; }
 
         function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); }
         
@@ -1658,13 +1719,19 @@
         function populateFormAccounts() {
             const type = $id('f-type').value;
             const curS = $id('f-currency');
-            const selectedCurr = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
             const aS = $id('f-account'); const accCont = $id('account-container');
-            const lbl = $id('f-currency-label'); if(lbl) lbl.innerText = selectedCurr;
+            const lbl = $id('f-currency-label'); 
+            
             if(type === 'afterpay') {
                 if(accCont) accCont.classList.add('hidden'); aS.required = false;
+                const apCurr = state.settings.apCurrency || 'AUD';
+                if(curS) { curS.value = apCurr; curS.disabled = true; }
+                if(lbl) lbl.innerText = apCurr;
             } else {
                 if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = '';
+                if(curS) curS.disabled = false;
+                const selectedCurr = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
+                if(lbl) lbl.innerText = selectedCurr;
                 const accs = (state.accounts || []).filter(a => a.currency === selectedCurr);
                 accs.forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
             }
@@ -1708,6 +1775,7 @@
         function saveTransaction(e) { 
             e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; const cat = $id('f-cat').value; const accId = $id('f-account').value; const date = $id('f-date').value; const note = $id('f-note').value; 
             const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
+            const apCurr = state.settings.apCurrency || 'AUD';
             
             if(!amount || amount <= 0) return alert("Ingresa un monto válido mayor a cero mediante el teclado numérico."); 
             if(type !== 'afterpay' && (!accId || $id('f-account').options.length === 0)) return alert("Atención: Necesitas crear una cuenta (Bóveda) en esta divisa antes de registrar un movimiento.");
@@ -1732,14 +1800,14 @@
                 const oldTx = state.tx.find(t => t.id === id);
                 if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
                 oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(date).toISOString(); oldTx.note = note;
-                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = 'AUD'; oldTx.original_currency = 'AUD'; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
+                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
                 const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
                 if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
                 saveCloudTx(oldTx);
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
-                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? 'AUD' : selectedCurr }; 
+                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
@@ -2061,43 +2129,61 @@
         function renderAfterpay() {
             const totalPendingEl = $id('ap-total-pending'); const availableEl = $id('ap-available'); const scheduleList = $id('ap-schedule-list'); const activeList = $id('ap-active-list');
             if (!totalPendingEl || !availableEl || !scheduleList || !activeList) return;
+            
+            const apCurr = state.settings.apCurrency || 'AUD';
+            
             let totalPending = 0; const apTx = state.tx.filter(t => t.type === 'afterpay'); const activeAp = apTx.filter(t => (t.apPaid || 0) < (t.apQuotas || 4));
             let activeHtml = '';
-            
-            const dispCurr = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
 
             activeAp.forEach(t => {
                 const quotas = t.apQuotas || 4;
                 const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
-                totalPending += convertCurrency(pendingForThis, t.currency, dispCurr); 
+                totalPending += pendingForThis; 
                 const pct = ((t.apPaid || 0) / quotas) * 100;
-                activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO')} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, t.currency)}</p></div></div>`;
+                activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO')} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, apCurr)}</p></div></div>`;
             });
             if (activeAp.length === 0) activeHtml = `<div class="text-center p-6 border border-dashed border-teal-200 rounded-[1.5rem] bg-teal-50/30"><p class="text-[10px] font-bold text-teal-600/70 uppercase">Sin compras vigentes</p></div>`;
             activeList.innerHTML = activeHtml;
             
-            const limit = convertCurrency((state.settings.apLimit || 5000000), 'AUD', dispCurr); 
-            totalPendingEl.innerText = fmt(totalPending, dispCurr); 
-            availableEl.innerText = fmt(limit - totalPending, dispCurr);
+            const limit = state.settings.apLimit || 5000000; 
+            totalPendingEl.innerText = fmt(totalPending, apCurr); 
+            availableEl.innerText = fmt(limit - totalPending, apCurr);
             
             const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => new Date(a.date) - new Date(b.date));
             
             const now = new Date(); now.setHours(0,0,0,0);
-            const in7Days = new Date(now); in7Days.setDate(now.getDate() + 7);
-            const in15Days = new Date(now); in15Days.setDate(now.getDate() + 15);
+            let currentDay = now.getDay();
+            let payDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+            let diffToPayDay = payDay - currentDay;
+            if (diffToPayDay < 0) diffToPayDay += 7;
+            
+            const cutoff1 = new Date(now);
+            cutoff1.setDate(cutoff1.getDate() + diffToPayDay);
+            cutoff1.setHours(23, 59, 59, 999);
+            
+            const cutoff2 = new Date(cutoff1);
+            cutoff2.setDate(cutoff2.getDate() + 7);
+            
             let thisWeekTotal = 0; let nextWeekTotal = 0;
             
             projAp.forEach(t => { 
                 const d = new Date(t.date); 
-                d.setHours(0,0,0,0);
-                if (d < in7Days) thisWeekTotal += convertCurrency(t.amount, t.currency, dispCurr); 
-                else if (d >= in7Days && d < in15Days) nextWeekTotal += convertCurrency(t.amount, t.currency, dispCurr); 
+                const nativeAmt = t.original_amount || t.amount; // EXTRACCIÓN PURA NATIVA PARA KPIS
+                if (d <= cutoff1) {
+                    thisWeekTotal += nativeAmt; 
+                } else if (d > cutoff1 && d <= cutoff2) {
+                    nextWeekTotal += nativeAmt; 
+                }
             });
-            const thisWeekEl = $id('ap-this-week'); if(thisWeekEl) thisWeekEl.innerText = fmt(thisWeekTotal, dispCurr);
-            const nextWeekEl = $id('ap-next-week'); if(nextWeekEl) nextWeekEl.innerText = fmt(nextWeekTotal, dispCurr);
+
+            const thisWeekEl = $id('ap-this-week'); if(thisWeekEl) thisWeekEl.innerText = fmt(thisWeekTotal, apCurr);
+            const nextWeekEl = $id('ap-next-week'); if(nextWeekEl) nextWeekEl.innerText = fmt(nextWeekTotal, apCurr);
+            
+            const twTitle = $id('ap-this-week-title'); if(twTitle) twTitle.innerText = 'Corte: ' + cutoff1.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+            const nwTitle = $id('ap-next-week-title'); if(nwTitle) nwTitle.innerText = 'Corte: ' + cutoff2.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
 
             if (projAp.length === 0) scheduleList.innerHTML = `<p class="text-center text-[10px] text-slate-400 font-bold p-4 uppercase tracking-widest">Libre de Deuda</p>`;
-            else scheduleList.innerHTML = projAp.slice(0, 10).map(t => { const isPast = new Date(t.date) <= new Date(); return `<div class="flex justify-between items-center p-3 rounded-xl border ${isPast ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100/50'}"><div><p class="text-[10px] font-black uppercase ${isPast ? 'text-red-600' : 'text-slate-600'}">${t.note}</p><p class="text-[8px] font-bold ${isPast ? 'text-red-400' : 'text-slate-400'} uppercase mt-0.5">${new Date(t.date).toLocaleDateString('es-CO')}</p></div><p class="text-xs font-black ${isPast ? 'text-red-600' : 'theme-text'}">${fmt(t.amount, t.currency)}</p></div>`; }).join('');
+            else scheduleList.innerHTML = projAp.slice(0, 10).map(t => { const isPast = new Date(t.date) <= new Date(); return `<div class="flex justify-between items-center p-3 rounded-xl border ${isPast ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100/50'}"><div><p class="text-[10px] font-black uppercase ${isPast ? 'text-red-600' : 'text-slate-600'}">${t.note}</p><p class="text-[8px] font-bold ${isPast ? 'text-red-400' : 'text-slate-400'} uppercase mt-0.5">${new Date(t.date).toLocaleDateString('es-CO')}</p></div><p class="text-xs font-black ${isPast ? 'text-red-600' : 'theme-text'}">${fmt(t.original_amount || t.amount, apCurr)}</p></div>`; }).join('');
         }
 
         function payAfterpayQuota(id) {
@@ -2135,9 +2221,10 @@
             if (evCurr !== 'ALL') aFE = aFE.filter(ev => ev.origCurrency === evCurr);
 
             let fE = []; let fE_global = []; 
-            const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()) % 7); const sD = new Date(now.getTime() + (60 * 86400000));
+            const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()) % 7); eow.setHours(23,59,59,999);
+            const sD = new Date(now.getTime() + (60 * 86400000)); sD.setHours(23,59,59,999);
             const startOfViewMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
-            const endOfViewMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
+            const endOfViewMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0); endOfViewMonth.setHours(23,59,59,999);
             
             let customSt = new Date(0); let customEn = new Date(2100, 0, 1); let customDays = 30;
             if (state.calendarFilter === 'custom') {
@@ -2258,7 +2345,8 @@
         // CONFIGURACIÓN
         function renderSettingsTab() {
             $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
-            const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000); }
+            const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
+            const apCurrEl = $id('set-ap-currency'); if(apCurrEl) apCurrEl.value = state.settings.apCurrency || 'AUD';
             $id('set-ap-day').value = state.settings.apPayDay || 5; 
             const tpEl = $id('set-theme-preset'); if(tpEl) tpEl.value = state.settings.themePreset || 'default';
             const fsEl = $id('set-font-style'); if(fsEl) fsEl.value = state.settings.fontStyle || 'system';
@@ -2282,6 +2370,7 @@
         function updateSettings() {
             state.settings.baseCurrency = $id('set-base-currency').value;
             const apLimEl = $id('set-ap-limit'); state.settings.apLimit = parseFloat(apLimEl.dataset.raw || 5000000);
+            const apCurrEl = $id('set-ap-currency'); if(apCurrEl) state.settings.apCurrency = apCurrEl.value;
             state.settings.apPayDay = parseInt($id('set-ap-day').value) || 5;
             state.settings.requirePin = $id('set-require-pin').checked;
             const tpEl = $id('set-theme-preset'); if(tpEl) state.settings.themePreset = tpEl.value;
