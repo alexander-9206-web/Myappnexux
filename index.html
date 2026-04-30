@@ -1161,6 +1161,13 @@
         const getActiveTx = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.tx || []).map(t => ({ ...t, original_amount: t.amount, original_currency: t.currency, amount: convertCurrency(t.amount, t.currency, base), currency: base, isVirtual: true })); } return (state.tx || []).filter(t => t.currency === state.activeCurrency); };
         const getActiveLoans = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.loans || []).map(l => ({ ...l, original_total: l.total, original_balance: l.balance, original_currency: l.currency, total: convertCurrency(l.total, l.currency, base), balance: convertCurrency(l.balance, l.currency, base), currency: base, isVirtual: true })); } return (state.loans || []).filter(l => l.currency === state.activeCurrency); };
 
+        function getSafeDate(dStr) {
+            if(!dStr) return new Date();
+            const p = dStr.split('T')[0].split('-');
+            if(p.length === 3) return new Date(p[0], p[1]-1, p[2], 12, 0, 0);
+            return new Date(dStr);
+        }
+
         function getEnrichedTx() {
             let rawTx = [...getActiveTx()]; const now = new Date(); now.setHours(0,0,0,0);
             const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
@@ -1178,7 +1185,7 @@
             
             apTx.forEach(tx => { 
                 const quotas = tx.apQuotas || 4; 
-                const sD = getNextPayDate(new Date(tx.date), payDay); 
+                const sD = getNextPayDate(getSafeDate(tx.date), payDay); 
                 const stD = tx.apFreq === 'fortnightly' ? 14 : (tx.apFreq === 'monthly' ? 30 : 7); 
                 
                 const origIA = (tx.original_amount || tx.amount) / quotas;
@@ -1205,16 +1212,18 @@
                 
                 for(let i=paid; i<n; i++) { 
                     let pD;
+                    const baseDate = getSafeDate(l.date);
+
                     if(l.isCC && l.cardId) {
                         const card = state.accounts.find(a => a.id === l.cardId);
                         if(card && card.cutoffDay && card.payDay) {
-                            const pDate = new Date(l.date); const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
+                            const pDate = new Date(baseDate); const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
                             pD = new Date(pDate.getFullYear(), pDate.getMonth() + addM + i, card.payDay, 12, 0, 0);
-                        } else { pD = new Date(l.date); pD.setMonth(pD.getMonth() + i + 1); }
+                        } else { pD = new Date(baseDate); pD.setMonth(pD.getMonth() + i + 1); }
                     } else if (l.id.startsWith('pend_')) {
-                        pD = new Date(l.date);
+                        pD = new Date(baseDate);
                     } else { 
-                        pD = new Date(l.date); pD.setMonth(pD.getMonth() + i + 1); 
+                        pD = new Date(baseDate); pD.setMonth(pD.getMonth() + i + 1); 
                     }
                     
                     if (l.id.startsWith('pend_')) {
@@ -1237,7 +1246,8 @@
             
             // 3. RECURRENTES
             rawTx.filter(t => t.isRecurrent && !t.isProjected).forEach(tx => {
-                const count = tx.recurCount || 12; const freq = tx.recurFreq || 'monthly'; const origDate = new Date(tx.date);
+                const count = tx.recurCount || 12; const freq = tx.recurFreq || 'monthly'; 
+                const origDate = getSafeDate(tx.date);
                 for(let i=1; i<count; i++) {
                     const d = new Date(origDate.getTime());
                     if (freq === 'weekly') d.setDate(d.getDate() + (i*7));
