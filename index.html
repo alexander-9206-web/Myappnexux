@@ -4,8 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Nexus Finance AR Unified</title>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Enlace al Manifiesto -->
+<link rel="manifest" href="manifest.json">
+
+<!-- Configuración para iOS (Safari) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="MiApp">
+<link rel="apple-touch-icon" href="icono.png">
+
+<!-- Color de la barra de direcciones en Android -->
+<meta name="theme-color" content="#000000">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -858,10 +868,14 @@
         // ============================================================================
         let cloudDb = null, cloudUserId = null, fsLib = null, cloudAppId = 'nexus'; // APEX: Compatibilidad Legacy (Evita errores)
 
-        const defaultGsUrl = "https://script.google.com/macros/s/AKfycbwwJ9d8fTl1K9w4JQfSNmrniYxp0O68S0bNYXtrQQOnUjE_KwiHKYAUX_DJjt8jdU3e/exec";
+        const defaultGsUrl = "";
         let googleSheetUrl = localStorage.getItem('nexus_gs_url') || defaultGsUrl;
         let syncTimeout = null;
         let isSyncing = false;
+
+        // APEX HACK: Codificación segura UTF-8 a Base64 para proteger Emojis y Acentos en Sheets
+        const encodeState = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+        const decodeState = (b64) => JSON.parse(decodeURIComponent(escape(atob(b64))));
 
         async function initCloud() {
             if(!googleSheetUrl) {
@@ -892,17 +906,27 @@
                 updateCloudBadge(true, true);
                 const url = `${googleSheetUrl}?action=load&email=${encodeURIComponent(currentUser)}`;
                 const res = await fetch(url);
-                const data = await res.json();
+                const responseData = await res.json();
                 
-                if(data && data.success && data.data) {
-                    state = JSON.parse(data.data);
-                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                    if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                    console.log("[APEX SYS] Bóveda remota cargada desde Sheets.");
+                if(responseData && responseData.success) {
+                    // APEX: Soporte para ensamblado de fragmentos (Data Chunking) y modo legacy
+                    let base64Data = "";
+                    if (responseData.chunks && responseData.chunks.length > 0) {
+                        base64Data = responseData.chunks.join('');
+                    } else if (responseData.data) {
+                        base64Data = responseData.data;
+                    }
+                    
+                    if (base64Data) {
+                        state = decodeState(base64Data);
+                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
+                        console.log(`[APEX SYS] Bóveda remota cargada. Fragmentos ensamblados: ${responseData.chunks ? responseData.chunks.length : 1}.`);
+                    }
                 }
                 updateCloudBadge(true, false);
             } catch(e) {
-                console.error("[APEX SYS] Error descargando de Google Sheets:", e);
+                console.warn("[APEX SYS] Nube no disponible o Webhook incorrecto. Trabajando en modo Local-First.", e);
                 updateCloudBadge(false);
             }
         }
@@ -915,16 +939,28 @@
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
-                    const payload = { action: "save", email: currentUser, data: JSON.stringify(state) };
+                    // APEX: Cifrado en B64 para evitar errores de parseo por caracteres especiales
+                    const safeData = encodeState(state);
+                    
+                    // APEX HACK: Data Chunking. Dividimos la bóveda en bloques de 45,000 chars 
+                    // para evadir el límite físico de 50,000 chars por celda en Google Sheets.
+                    const chunkSize = 45000;
+                    const chunks = [];
+                    for (let i = 0; i < safeData.length; i += chunkSize) {
+                        chunks.push(safeData.substring(i, i + chunkSize));
+                    }
+
+                    const payload = { action: "save", email: currentUser, chunks: chunks };
+                    
                     await fetch(googleSheetUrl, {
                         method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
+                        // APEX HACK: 'text/plain' evita el bloqueo CORS (Preflight OPTIONS)
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(payload)
                     });
-                    console.log("[APEX SYS] Transacción sincronizada a Google Sheets.");
+                    console.log(`[APEX SYS] Sincronización exitosa. Base de datos enviada en ${chunks.length} bloque(s).`);
                 } catch (e) {
-                    console.error("[APEX SYS] Fricción en subida a Sheets:", e);
+                    console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
