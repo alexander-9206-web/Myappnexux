@@ -4,8 +4,33 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Nexus Finance AR Unified</title>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+   <!-- 1. El enlace a tu manifest estándar (importante para Android y navegadores de escritorio) -->
+<link rel="manifest" href="/manifest.json">
+
+<!-- ========================================== -->
+<!-- 2. ETIQUETAS ESPECÍFICAS PARA iOS (IPHONE) -->
+<!-- ========================================== -->
+
+<!-- Habilita el modo "App" a pantalla completa (oculta la barra de navegación de Safari) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+<!-- Define el título de la App que aparecerá debajo del ícono en la pantalla de inicio -->
+<meta name="apple-mobile-web-app-title" content="NEXUS AR FINANCE">
+
+<!-- Cambia el estilo de la barra de estado superior (batería, hora, etc.) -->
+<!-- Opciones: "default" (blanco/negro según el tema), "black", o "black-translucent" -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+<!-- 3. ÍCONOS PARA LA PANTALLA DE INICIO EN iOS -->
+<!-- iOS no lee siempre los íconos del manifest, necesitas declararlos aquí -->
+<link rel="apple-touch-icon" href="/assets/icon-180x180.png">
+
+<!-- (Opcional pero recomendado) Especificar diferentes tamaños para distintos dispositivos Apple -->
+<link rel="apple-touch-icon" sizes="152x152" href="/assets/icon-152x152.png"> <!-- iPad -->
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/icon-180x180.png"> <!-- iPhone moderno -->
+<link rel="apple-touch-icon" sizes="167x167" href="/assets/icon-167x167.png"> <!-- iPad Pro -->
+
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -926,7 +951,7 @@
             if(!googleSheetUrl || !currentUser || !sessionUnlocked) return;
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(async () => {
-                if(isSyncing) return triggerCloudSync(); 
+                if(isSyncing) { setTimeout(triggerCloudSync, 1000); return; } 
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
@@ -941,22 +966,27 @@
                         chunks.push(safeData.substring(i, i + chunkSize));
                     }
 
-                    const payload = { action: "save", email: currentUser, chunks: chunks };
+                    // APEX FIX: Añadimos 'data' plano por retrocompatibilidad con scripts clásicos
+                    const payload = { action: "save", email: currentUser, chunks: chunks, data: chunks.join('') };
                     
-                    await fetch(googleSheetUrl, {
+                    // APEX FIX: Añadimos los parámetros a la URL por si el script usa e.parameter
+                    const syncUrl = `${googleSheetUrl}?action=save&email=${encodeURIComponent(currentUser)}`;
+                    
+                    await fetch(syncUrl, {
                         method: 'POST',
+                        mode: 'no-cors', // 🔥 CRÍTICO: Omite el error CORS que Google Apps Script lanza al redirigir (302)
                         // APEX HACK: 'text/plain' evita el bloqueo CORS (Preflight OPTIONS)
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(payload)
                     });
-                    console.log(`[APEX SYS] Sincronización exitosa. Base de datos enviada en ${chunks.length} bloque(s).`);
+                    console.log(`[APEX SYS] Sincronización exitosa (No-CORS Mode). Base de datos enviada en ${chunks.length} bloque(s).`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
                 }
-            }, 3000); 
+            }, 1500); // APEX FIX: Latencia reducida para guardado más reactivo
         }
 
         function saveCloudTx(tx) { /* Se procesa en masa con triggerCloudSync() */ }
