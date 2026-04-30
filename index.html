@@ -856,6 +856,8 @@
         // ============================================================================
         // --- MOTOR DE NUBE (GOOGLE SHEETS REST API) APEX OPTIMIZED ---
         // ============================================================================
+        let cloudDb = null, cloudUserId = null, fsLib = null, cloudAppId = 'nexus'; // APEX: Compatibilidad Legacy (Evita errores)
+
         const defaultGsUrl = "https://script.google.com/macros/s/AKfycbwwJ9d8fTl1K9w4JQfSNmrniYxp0O68S0bNYXtrQQOnUjE_KwiHKYAUX_DJjt8jdU3e/exec";
         let googleSheetUrl = localStorage.getItem('nexus_gs_url') || defaultGsUrl;
         let syncTimeout = null;
@@ -2728,181 +2730,14 @@
             switchTab('database');
         }
 
+        /* // ============================================================================
+        // --- APEX FIREWALL: RESOLUCIÓN DE FRICCIÓN DE MOTORES ---
         // ============================================================================
-        // --- MOTOR DE NUBE (FIREBASE SINC + SUBCONSULTAS) APEX OPTIMIZED ---
-        // ============================================================================
-        let cloudDb = null, cloudAuth = null, cloudUserId = null, fsLib = null;
-        let unsubMain = null, unsubTx = null;
-        const cloudAppId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-finance-v1';
-        
-        async function initCloud() {
-            try {
-                // APEX Fix: Versión estable requerida por el entorno
-                const appLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const authLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                fsLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-
-                let app = appLib.getApps().length ? appLib.getApp() : null;
-                if(!app) {
-                    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764", authDomain: "nexus-jr.firebaseapp.com", projectId: "nexus-jr", storageBucket: "nexus-jr.firebasestorage.app", messagingSenderId: "273022472068", appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1" };
-                    app = appLib.initializeApp(firebaseConfig);
-                }
-
-                cloudAuth = authLib.getAuth(app);
-                cloudDb = fsLib.getFirestore(app);
-
-                // APEX Fix: Regla 3 - Auth antes que consultas. Soporte para custom tokens.
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    const cred = await authLib.signInWithCustomToken(cloudAuth, __initial_auth_token);
-                    cloudUserId = cred.user.uid;
-                } else {
-                    const cred = await authLib.signInAnonymously(cloudAuth);
-                    cloudUserId = cred.user.uid;
-                }
-                
-                console.log("[APEX SYS] Nube Activa y Encriptada. UID:", cloudUserId);
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-emerald-400'); dcb.classList.replace('bg-white/10', 'bg-emerald-500/20'); dcd.classList.replace('bg-slate-400', 'bg-emerald-400'); dcd.classList.remove('animate-pulse'); }
-                return true;
-            } catch(e) { 
-                console.error("[APEX SYS] Fallo crítico de conexión a la nube:", e); 
-                const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-                if(dcb && dcd) { dcb.classList.replace('text-slate-300', 'text-red-400'); dcb.classList.replace('bg-white/10', 'bg-red-500/20'); dcd.classList.replace('bg-slate-400', 'bg-red-400'); dcd.classList.remove('animate-pulse'); }
-                return false;
-            }
-        }
-
-        async function fetchCloudState() {
-            if (!cloudDb || !cloudUserId || !currentUser) return;
-            try {
-                // APEX Fix: Regla 1 - Rutas estrictas (No anidar más allá del collectionName bajo el userId)
-                const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
-                const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
-                
-                const snap = await fsLib.getDoc(docRef);
-                const localDbStr = localStorage.getItem(`nexus_db_${currentUser}`);
-                const localDb = localDbStr ? JSON.parse(localDbStr) : null;
-                const cachedTx = localDb && localDb.tx ? localDb.tx : [];
-                
-                if (snap.exists()) {
-                    const data = snap.data();
-                    let loadedState = data.state ? { ...data.state } : null;
-                    
-                    if (loadedState) {
-                        // APEX Fix: Regla 2 - Cero Queries Complejas (Sin where/limit). Se trae todo y se gestiona en memoria RAM.
-                        const txSnap = await fsLib.getDocs(txCollRef);
-                        
-                        const localTxMap = new Map(cachedTx.map(t => [t.id, t]));
-                        const cloudRecentIds = new Set();
-                        
-                        txSnap.forEach(doc => {
-                            const d = doc.data();
-                            localTxMap.set(d.id, d);
-                            cloudRecentIds.add(d.id);
-                        });
-
-                        // Sincronización de purgas
-                        for (const [id, tx] of localTxMap.entries()) {
-                            if (!cloudRecentIds.has(id)) localTxMap.delete(id);
-                        }
-                        
-                        // Migración desde el objeto principal si quedó basura pesada en Firebase
-                        if (data.state && data.state.tx && data.state.tx.length > 0) {
-                            console.log("[APEX SYS] Optimizando payload de 1MB. Migrando TX a sub-colección de alta velocidad...");
-                            const batch = fsLib.writeBatch(cloudDb);
-                            data.state.tx.forEach(tx => {
-                                const txRef = fsLib.doc(txCollRef, tx.id);
-                                batch.set(txRef, tx);
-                                localTxMap.set(tx.id, tx); 
-                            });
-                            await batch.commit();
-                            delete loadedState.tx;
-                            await fsLib.updateDoc(docRef, { "state.tx": fsLib.deleteField() });
-                        }
-
-                        loadedState.tx = Array.from(localTxMap.values());
-                        state = loadedState;
-                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                        
-                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                    }
-                    if(data.profile) localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(data.profile));
-                }
-                
-                setupCloudListeners(); 
-            } catch(e) { console.error("[APEX SYS] Error sincronizando bóveda remota:", e); }
-        }
-
-        // Paginación emulada en memoria (Ya que bajamos todo, evitamos indexaciones complejas en la DB)
-        async function loadOlderTransactions() {
-            // Placeholder funcional: Como la app descarga todo por la regla de "No Complex Queries",
-            // la UI simulará que carga, pero los datos ya están en el estado local.
-            // Esto mantiene tu UX intacto sin romper las reglas del servidor.
-        }
-
-        function setupCloudListeners() {
-            if (!cloudDb || !cloudUserId || !currentUser) return;
-            
-            const docRef = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, 'nexus_state', currentUser);
-            const txCollRef = fsLib.collection(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`);
-            
-            if(unsubMain) unsubMain();
-            if(unsubTx) unsubTx();
-
-            unsubMain = fsLib.onSnapshot(docRef, (snap) => {
-                if (snap.exists()) {
-                    const data = snap.data();
-                    if (data.state) {
-                        const currentTx = state.tx || []; 
-                        state = { ...data.state, tx: currentTx };
-                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                        if (sessionUnlocked) { updateDashboard(); switchTab(state.activeTab); }
-                    }
-                }
-            }, (error) => console.error("[APEX SYS] Main Socket Error:", error)); // APEX Fix: Manejador de errores obligatorio
-
-            unsubTx = fsLib.onSnapshot(txCollRef, (snapshot) => {
-                let currentTx = state.tx || [];
-                let hasChanges = false;
-                
-                snapshot.docChanges().forEach((change) => {
-                    hasChanges = true;
-                    const txData = change.doc.data();
-                    if (change.type === "added" || change.type === "modified") {
-                        const idx = currentTx.findIndex(t => t.id === txData.id);
-                        if (idx >= 0) currentTx[idx] = txData; else currentTx.push(txData);
-                    }
-                    if (change.type === "removed") {
-                        currentTx = currentTx.filter(t => t.id !== change.doc.id);
-                    }
-                });
-
-                if (hasChanges) {
-                    state.tx = currentTx;
-                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                    if (sessionUnlocked) { 
-                        updateDashboard(); 
-                        if(state.activeTab === 'database') renderDatabase(); 
-                        if(state.activeTab === 'accounts') renderAccountsTab(); 
-                        if(state.activeTab === 'afterpay') renderAfterpay(); 
-                    }
-                }
-            }, (error) => console.error("[APEX SYS] TX Socket Error:", error));
-        }
-
-        function saveCloudTx(tx) {
-            if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, tx.id);
-                fsLib.setDoc(txDoc, tx).catch(e => console.error("[APEX SYS] Error escribiendo TX en nube:", e));
-            }
-        }
-        
-        function deleteCloudTx(id) {
-            if (cloudDb && cloudUserId && currentUser) {
-                const txDoc = fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'users', cloudUserId, `nexus_tx_${currentUser.replace(/[^a-zA-Z0-9]/g, '_')}`, id);
-                fsLib.deleteDoc(txDoc).catch(e => console.error("[APEX SYS] Error borrando TX en nube:", e));
-            }
-        }
+        // He purgado por completo el bloque del motor Firebase y el código duplicado 
+        // residual de la mitad inferior que estaba colisionando con el Webhook de Google Sheets.
+        // Al eliminar las funciones redundantes, aseguramos el SSoT.
+        // Todo el ecosistema ahora fluye exclusivamente a tu hoja de Google.
+        */
     </script>
 </body>
 </html>
