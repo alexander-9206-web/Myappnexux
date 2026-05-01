@@ -1005,19 +1005,50 @@
                 const responseData = await res.json();
                 
                 if(responseData && responseData.success) {
-                    // APEX: Soporte para ensamblado de fragmentos (Data Chunking) y modo legacy
-                    let base64Data = "";
+                    let isLoaded = false;
+                    
                     if (responseData.chunks && responseData.chunks.length > 0) {
-                        base64Data = responseData.chunks.join('');
+                        try {
+                            const firstChunk = JSON.parse(responseData.chunks[0]);
+                            if (firstChunk.part) {
+                                // APEX: Reconstrucción de bloques legibles (Nuevo Formato)
+                                let newState = { tx: [], accounts: [], loans: [], categories: {}, catParents: {}, settings: {}, theme: {}, taxes: {}, goals: [] };
+                                responseData.chunks.forEach(chunkStr => {
+                                    if(!chunkStr) return;
+                                    const parsed = JSON.parse(chunkStr);
+                                    if (parsed.part === "CONFIG") {
+                                        newState.theme = parsed.theme; newState.settings = parsed.settings;
+                                        newState.categories = parsed.categories; newState.catParents = parsed.catParents;
+                                        newState.taxes = parsed.taxes; newState.goals = parsed.goals;
+                                    } else if (parsed.part === "ACCOUNTS_LOANS") {
+                                        newState.accounts = parsed.accounts || []; newState.loans = parsed.loans || [];
+                                    } else if (parsed.part && parsed.part.startsWith("TX_BLOCK_")) {
+                                        newState.tx = newState.tx.concat(parsed.tx || []);
+                                    }
+                                });
+                                // Preservar estado local efímero
+                                newState.activeCurrency = state.activeCurrency || 'COP';
+                                newState.activeTab = state.activeTab || 'home';
+                                newState.context = state.context || 'day';
+                                state = newState;
+                                isLoaded = true;
+                            }
+                        } catch(err) {
+                            // Fallback Legacy (Bloques Base64 truncados)
+                            const base64Data = responseData.chunks.join('');
+                            state = decodeState(base64Data);
+                            isLoaded = true;
+                        }
                     } else if (responseData.data) {
-                        base64Data = responseData.data;
+                        // Fallback Legacy (Data string único)
+                        state = decodeState(responseData.data);
+                        isLoaded = true;
                     }
                     
-                    if (base64Data) {
-                        state = decodeState(base64Data);
+                    if (isLoaded) {
                         localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
                         if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                        console.log(`[APEX SYS] Bóveda remota cargada. Fragmentos ensamblados: ${responseData.chunks ? responseData.chunks.length : 1}.`);
+                        console.log(`[APEX SYS] Bóveda remota cargada y ensamblada.`);
                     }
                 }
                 updateCloudBadge(true, false);
@@ -1035,34 +1066,50 @@
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
-                    // APEX: Cifrado en B64 para evitar errores de parseo por caracteres especiales
-                    const safeData = encodeState(state);
-                    
-                    // APEX HACK: Data Chunking. Dividimos la bóveda en bloques de 45,000 chars 
-                    // para evadir el límite físico de 50,000 chars por celda en Google Sheets.
-                    const chunkSize = 45000;
+                    // APEX FIX: Información dividida lógicamente en JSON puro para evitar
+                    // saturar la celda y asegurar que la información sea visible en Google Sheets.
                     const chunks = [];
-                    for (let i = 0; i < safeData.length; i += chunkSize) {
-                        chunks.push(safeData.substring(i, i + chunkSize));
+                    
+                    // 1. Configuración y Metadatos
+                    chunks.push(JSON.stringify({
+                        part: "CONFIG",
+                        theme: state.theme || {}, settings: state.settings || {},
+                        categories: state.categories || {}, catParents: state.catParents || {},
+                        taxes: state.taxes || {}, goals: state.goals || []
+                    }));
+                    
+                    // 2. Cuentas y Préstamos
+                    chunks.push(JSON.stringify({
+                        part: "ACCOUNTS_LOANS",
+                        accounts: state.accounts || [], loans: state.loans || []
+                    }));
+                    
+                    // 3. Transacciones (Fragmentadas de 250 en 250 para no superar límite de caracteres)
+                    const txArray = state.tx || [];
+                    const txChunkSize = 250;
+                    for (let i = 0; i < txArray.length; i += txChunkSize) {
+                        chunks.push(JSON.stringify({
+                            part: `TX_BLOCK_${Math.floor(i / txChunkSize) + 1}`,
+                            tx: txArray.slice(i, i + txChunkSize)
+                        }));
                     }
 
                     const payload = { action: "save", email: currentUser, chunks: chunks };
                     
-                    // APEX FIX: Añadido mode 'no-cors' para evadir el bloqueo 302 de Google Apps Script
                     await fetch(googleSheetUrl, {
                         method: 'POST',
                         mode: 'no-cors',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify(payload)
                     });
-                    console.log(`[APEX SYS] Sincronización exitosa. Base de datos enviada en ${chunks.length} bloque(s).`);
+                    console.log(`[APEX SYS] Sincronización exitosa. Base de datos legible enviada en ${chunks.length} bloque(s).`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
                 }
-            }, 1500); // APEX FIX: Tiempo optimizado a 1.5s
+            }, 1500);
         }
 
         function saveCloudTx(tx) { /* Se procesa en masa con triggerCloudSync() */ }
