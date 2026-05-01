@@ -670,7 +670,7 @@
                             <input type="number" id="f-ap-paid" value="0" min="0" max="48" class="form-input border-teal-200 bg-teal-50 text-teal-900 w-20 text-center font-black" placeholder="Pagadas" title="Cuotas Ya Pagadas">
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-4"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota</label><input type="text" id="f-note" class="form-input text-xs"></div></div>
+                    <div class="grid grid-cols-3 gap-3"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora</label><input type="time" id="f-time" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota</label><input type="text" id="f-note" class="form-input text-xs px-2"></div></div>
                     
                     <div id="recur-container" class="hidden animate-slideUp border-t border-slate-100 pt-4">
                         <label class="relative inline-flex items-center cursor-pointer ml-2">
@@ -1745,7 +1745,7 @@
             populateFormAccounts();
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
             const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
-            if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
+            if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0'); const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
             checkTxAccount();
         }
         
@@ -1754,7 +1754,7 @@
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
             const curS = $id('f-currency'); if(curS) { curS.value = tx.currency || tx.original_currency || state.settings.baseCurrency; populateFormAccounts(); }
-            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; if($id('f-ap-paid')) $id('f-ap-paid').value = tx.apPaid || 0; } 
+            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; const tD = new Date(tx.date); if($id('f-time')) $id('f-time').value = String(tD.getHours()).padStart(2, '0') + ':' + String(tD.getMinutes()).padStart(2, '0'); $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; if($id('f-ap-paid')) $id('f-ap-paid').value = tx.apPaid || 0; } 
             if($id('f-is-recur')) { $id('f-is-recur').checked = !!tx.isRecurrent; toggleRecurFields(); if(tx.isRecurrent) { $id('f-recur-freq').value = tx.recurFreq || 'monthly'; $id('f-recur-count').value = tx.recurCount || 12; } }
             checkTxAccount();
         }
@@ -1770,7 +1770,7 @@
         }
 
         function saveTransaction(e) { 
-            e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; const cat = $id('f-cat').value; const accId = $id('f-account').value; const date = $id('f-date').value; const note = $id('f-note').value; 
+            e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; const cat = $id('f-cat').value; const accId = $id('f-account').value; const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
             const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             const apCurr = state.settings.apCurrency || 'AUD';
             
@@ -1785,10 +1785,10 @@
                     const available = (acc.limit || 0) - acc.balance; 
                     if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`)) return; } 
                     acc.balance += amount; 
-                    const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(date).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency });
+                    const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency });
                     ccTx.isCCPurchase = true;
                     state.tx.push(ccTx); saveCloudTx(ccTx);
-                    state.loans.push({ id: 'CC_' + Date.now(), name: `${note||cat.substring(2)} (${acc.name})`, total: amount, balance: amount, rate: acc.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: acc.id, date: new Date(date).toISOString(), currency: acc.currency }); 
+                    state.loans.push({ id: 'CC_' + Date.now(), name: `${note||cat.substring(2)} (${acc.name})`, total: amount, balance: amount, rate: acc.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: acc.id, date: new Date(`${date}T${time}`).toISOString(), currency: acc.currency }); 
                     saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); return; 
                 }
             }
@@ -1796,7 +1796,7 @@
             if(id) {
                 const oldTx = state.tx.find(t => t.id === id);
                 if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
-                oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(date).toISOString(); oldTx.note = note;
+                oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(`${date}T${time}`).toISOString(); oldTx.note = note;
                 if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
                 const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
                 const newAcc = state.accounts.find(a => a.id === oldTx.accId);
@@ -1804,7 +1804,7 @@
                 saveCloudTx(oldTx);
             } else {
                 if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
-                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(date).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr }; 
+                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(`${date}T${time}`).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
@@ -1897,7 +1897,8 @@
                 const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300'; 
                 const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
 
-                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                const dDate = new Date(t.date);
+                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(new Event('click'), id); }
@@ -2154,7 +2155,9 @@
                 const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
                 totalPending += pendingForThis; 
                 const pct = ((t.apPaid || 0) / quotas) * 100;
-                activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${new Date(t.date).toLocaleDateString('es-CO')} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, apCurr)}</p></div></div>`;
+                const dDate = new Date(t.date);
+                const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
+                activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${dDate.toLocaleDateString('es-CO')} ${timeStr} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, apCurr)}</p></div></div>`;
             });
             if (activeAp.length === 0) activeHtml = `<div class="text-center p-6 border border-dashed border-teal-200 rounded-[1.5rem] bg-teal-50/30"><p class="text-[10px] font-bold text-teal-600/70 uppercase">Sin compras vigentes</p></div>`;
             activeList.innerHTML = activeHtml;
