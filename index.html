@@ -13,6 +13,21 @@
     <link rel="apple-touch-icon" href="icono.png">
     
     <!-- Manifest incrustado directamente (Fricción Cero de lectura) -->
+    <link rel="manifest" h<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>NEXUS AR FINANCE</title>
+    
+    <!-- Meta etiquetas nativas para iOS (PWA Fullscreen) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="NEXUS AR">
+    <meta name="theme-color" content="#000000">
+    <link rel="apple-touch-icon" href="icono.png">
+    
+    <!-- Manifest incrustado directamente (Fricción Cero de lectura) -->
     <link rel="manifest" href='data:application/manifest+json;charset=utf-8,%7B%22short_name%22%3A%22NEXUS%20AR%22%2C%22name%22%3A%22NEXUS%20AR%20FINANCE%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%2C%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%2C%22start_url%22%3A%22.%2Findex.html%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%23000000%22%2C%22background_color%22%3A%22%23ffffff%22%7D'>
     
     <script src="https://cdn.tailwindcss.com"></script>
@@ -443,6 +458,12 @@
                     <div class="pt-4 border-t border-slate-100">
                         <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Auto-Backup Local</h4><p class="text-[8px] text-slate-400">Exportar JSON programado</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
                         <div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-[8px] font-black text-slate-400 ml-2">Hora (HH:MM)</label><input type="time" id="set-backup-time" class="form-input text-xs mt-1" onchange="updateSettings()"></div><div><label class="text-[8px] font-black text-slate-400 ml-2">Sufijo Archivo</label><input type="text" id="set-backup-folder" placeholder="Ej: iCloud" class="form-input text-xs mt-1" onchange="updateSettings()"></div></div>
+                        
+                        <!-- NUEVO MÓDULO: RESTAURAR COPIA DE SEGURIDAD -->
+                        <div class="mt-4 pt-4 border-t border-slate-100/50">
+                            <input type="file" id="restore-backup-file" accept=".json" class="hidden" onchange="importBackup(event)">
+                            <button type="button" onclick="document.getElementById('restore-backup-file').click()" class="w-full bg-slate-100 text-slate-600 p-3 rounded-xl font-black uppercase text-[10px] border border-slate-200 shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"><i class="fa-solid fa-file-import"></i> Restaurar Copia de Seguridad (JSON)</button>
+                        </div>
                     </div>
                 </div>
 
@@ -1107,10 +1128,11 @@
 
                     const payload = { action: "save", email: currentUser, chunks: chunks };
                     
+                    // APEX FIX: Cabecera text/plain pura para evasión de Preflight CORS en WebKit/Safari
                     await fetch(googleSheetUrl, {
                         method: 'POST',
                         mode: 'no-cors',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        headers: { 'Content-Type': 'text/plain' },
                         body: JSON.stringify(payload)
                     });
                     console.log(`[APEX SYS] Sincronización exitosa. Base de datos legible enviada en ${chunks.length} bloque(s).`);
@@ -3036,6 +3058,31 @@
             node.setAttribute("href", dataStr); 
             node.setAttribute("download", filename); 
             document.body.appendChild(node); node.click(); node.remove();
+        }
+
+        function importBackup(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const importedState = JSON.parse(evt.target.result);
+                    if (importedState && (importedState.tx || importedState.accounts)) {
+                        if(confirm("⚠ ATENCIÓN CRÍTICA: Al restaurar esta copia se sobrescribirá toda tu base de datos actual. ¿Deseas continuar?")) {
+                            state = importedState;
+                            saveState(); // Forza la actualización de variables y sincronización a Sheets
+                            alert("✅ Copia de seguridad restaurada con éxito. El sistema se reiniciará.");
+                            location.reload(); 
+                        }
+                    } else {
+                        alert("El archivo no es una copia de seguridad válida de NEXUS.");
+                    }
+                } catch(err) {
+                    alert("Error leyendo el archivo JSON. Verifica que no esté corrupto.");
+                }
+                e.target.value = ''; 
+            };
+            reader.readAsText(file);
         }
 
         function requestFactoryReset() { const word = prompt("⚠ ALERTA DE SEGURIDAD CRÍTICA: Esta acción destruirá permanentemente toda la bóveda de datos y usuarios. Para confirmar, escriba: RESET"); if (word === 'RESET') { const keysToRemove = []; for(let i=0; i<localStorage.length; i++) { const key = localStorage.key(i); if(key.startsWith('nexus_')) keysToRemove.push(key); } keysToRemove.forEach(k => localStorage.removeItem(k)); alert("Bóveda destruida."); location.reload(); } else if (word !== null) alert("Operación cancelada."); }
