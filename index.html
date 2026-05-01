@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Nexus Finance AR Unified</title>
-   <!-- 1. El enlace a tu manifest estándar (importante para Android y navegadores de escritorio) -->
+
+
+    <!-- 1. El enlace a tu manifest estándar (importante para Android y navegadores de escritorio) -->
 <link rel="manifest" href="/manifest.json">
 
 <!-- ========================================== -->
@@ -15,7 +17,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 
 <!-- Define el título de la App que aparecerá debajo del ícono en la pantalla de inicio -->
-<meta name="apple-mobile-web-app-title" content="NEXUS AR FINANCE">
+<meta name="apple-mobile-web-app-title" content="NombreDeTuApp">
 
 <!-- Cambia el estilo de la barra de estado superior (batería, hora, etc.) -->
 <!-- Opciones: "default" (blanco/negro según el tema), "black", o "black-translucent" -->
@@ -697,8 +699,12 @@
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label>
                         <select id="f-cat" required class="form-input" onchange="handleCatChange()"></select>
                         <div id="inline-cat-creator" class="hidden mt-2 p-3 bg-purple-50 border border-purple-100 rounded-xl space-y-3 animate-slideUp">
-                            <p class="text-[9px] font-black uppercase text-purple-600 tracking-widest">Crear Categoría</p>
+                            <p class="text-[9px] font-black uppercase text-purple-600 tracking-widest">Estructura de Categoría</p>
                             <div class="space-y-2">
+                                <select id="inline-cat-class" class="form-input text-xs w-full bg-white py-2 font-black text-purple-700">
+                                    <option value="Fijo">📌 Naturaleza: Fijo</option>
+                                    <option value="Variable">🌊 Naturaleza: Variable</option>
+                                </select>
                                 <input type="text" id="inline-cat-parent" list="inline-parent-list" placeholder="Categoría (Ej: Transporte)" class="form-input text-xs w-full bg-white py-2">
                                 <datalist id="inline-parent-list"></datalist>
                                 <input type="text" id="inline-cat-sub" placeholder="Subcategoría (Ej: Gasolina)" class="form-input text-xs w-full bg-white py-2">
@@ -1722,6 +1728,7 @@
             const cS = $id('f-cat');
             if (cS.value === 'ADD_NEW_CAT') {
                 $id('inline-cat-creator').classList.remove('hidden');
+                if($id('inline-cat-class')) $id('inline-cat-class').selectedIndex = 0;
                 $id('inline-cat-parent').value = '';
                 $id('inline-cat-sub').value = '';
                 
@@ -1731,7 +1738,14 @@
                     dList.innerHTML = '';
                     let parents = new Set();
                     if(state.catParents && state.catParents[type]) state.catParents[type].forEach(p => parents.add(p));
-                    (state.categories[type] || []).forEach(c => { const m = c.match(/\[(.*?)\]/); if(m) parents.add(m[1]); });
+                    // Retrocompatibilidad: Extrae el padre correctamente tanto de "[Padre]" como de "[Fijo] [Padre]"
+                    (state.categories[type] || []).forEach(c => { 
+                        const m = c.match(/\[(.*?)\]/g); 
+                        if(m) { 
+                            const parent = m.length > 1 ? m[1].replace(/[\[\]]/g,'') : m[0].replace(/[\[\]]/g,''); 
+                            parents.add(parent); 
+                        } 
+                    });
                     Array.from(parents).forEach(p => { dList.innerHTML += `<option value="${p}">`; });
                 }
                 
@@ -1744,6 +1758,7 @@
 
         function confirmInlineCategory() {
             const type = $id('f-type').value;
+            const clasif = $id('inline-cat-class') ? $id('inline-cat-class').value : 'Fijo';
             let parent = $id('inline-cat-parent').value.trim();
             const sub = $id('inline-cat-sub').value.trim();
 
@@ -1753,7 +1768,8 @@
             if(!state.catParents[type]) state.catParents[type] = [];
             if(!state.catParents[type].includes(parent)) { state.catParents[type].push(parent); }
 
-            const fullCatName = `[${parent}] ${sub}`;
+            // Arquitectura de guardado: [Fijo/Variable] [Categoría] Subcategoría
+            const fullCatName = `[${clasif}] [${parent}] ${sub}`;
             if(!state.categories[type]) state.categories[type] = [];
             if(!state.categories[type].includes(fullCatName)) {
                 state.categories[type].push(fullCatName);
