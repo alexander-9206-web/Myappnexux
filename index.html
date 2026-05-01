@@ -660,7 +660,48 @@
                         <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
                     </div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span id="f-currency-label" class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría</label><select id="f-cat" required class="form-input" onchange="handleCatChange()"></select></div>
+                    
+                    <!-- ========================================== -->
+                    <!-- Módulo de Categorías (Organizado y Explícito) -->
+                    <!-- ========================================== -->
+                    <div class="bg-white p-5 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
+                        <div class="space-y-3">
+                            <select id="f-cat-parent-select" class="form-input text-xs py-3 w-full bg-slate-50 font-bold text-slate-700" onchange="handleParentCategoryChange()">
+                                <option value="">-- Seleccionar Categoría --</option>
+                            </select>
+                            
+                            <div id="new-cat-parent-container" class="hidden flex gap-2 items-center animate-slideUp">
+                                <input type="text" id="f-cat-parent" class="form-input text-xs py-3 border-indigo-200 bg-indigo-50 flex-1 font-bold text-indigo-900" placeholder="Nombre de Categoría">
+                                <button type="button" onclick="confirmNewParentCategory()" class="w-12 h-12 bg-indigo-500 text-white rounded-xl flex items-center justify-center font-black shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                            
+                            <div id="sub-cat-container" class="hidden animate-slideUp">
+                                <select id="f-cat-sub-select" class="form-input text-xs py-3 w-full bg-slate-50 font-bold text-slate-700" onchange="handleSubCategoryChange()">
+                                    <option value="">-- Seleccionar Subcategoría --</option>
+                                </select>
+                                
+                                <div id="new-cat-sub-container" class="hidden flex gap-2 items-center mt-3 animate-slideUp">
+                                    <input type="text" id="f-cat-sub" class="form-input text-xs py-3 border-indigo-200 bg-indigo-50 flex-1 font-bold text-indigo-900" placeholder="Nombre de Subcategoría">
+                                    <button type="button" onclick="confirmNewSubCategory()" class="w-12 h-12 bg-indigo-500 text-white rounded-xl flex items-center justify-center font-black shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ========================================== -->
+                    <!-- Módulo de Clasificación (Aislado en Selector) -->
+                    <!-- ========================================== -->
+                    <div id="cost-type-module" class="bg-slate-50 p-5 rounded-3xl border border-slate-200">
+                        <label class="text-[10px] font-black uppercase text-slate-500 mb-2 block"><i class="fa-solid fa-tags mr-1"></i>Clasificación (Gasto / Ingreso)</label>
+                        <select id="f-cost-type" class="form-input text-xs bg-white font-bold text-slate-700 w-full">
+                            <option value="variable">Variable</option>
+                            <option value="fixed">Fijo</option>
+                            <option value="direct">Directo</option>
+                            <option value="indirect">Indirecto</option>
+                        </select>
+                    </div>
+                    <!-- ========================================== -->
+
                     <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
                     <div id="ap-freq-container" class="hidden">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
@@ -1389,7 +1430,9 @@
                     const bCls = isPast ? (t.cat.includes('Afterpay') ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-100 text-blue-600 border-blue-200') : 'bg-amber-100 text-amber-600 border-amber-200';
                     projBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`;
                 }
-                return `<div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 h-full"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}"><i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text flex items-center">${t.cat.substring(2)} ${projBadge}</p><p class="text-[9px] font-bold opacity-40 theme-text">${new Date(t.date).toLocaleDateString()}</p></div></div><p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</p></div>`;
+                const dDate = new Date(t.date);
+                const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
+                return `<div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 h-full"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}"><i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text flex items-center">${t.cat.substring(2)} ${projBadge}</p><p class="text-[9px] font-bold opacity-40 theme-text">${dDate.toLocaleDateString()} ${timeStr}</p></div></div><p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</p></div>`;
             }).join(''); 
             const sI = fTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); const sE = fTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0); 
             const piEl = $id('period-sub-inc'); const peEl = $id('period-sub-exp'); const psEl = $id('period-subtotal');
@@ -1452,7 +1495,11 @@
                 el.classList.remove('hidden'); el.classList.add('flex');
                 const txs = state.tx.filter(t => t.accId === id).sort((a,b) => new Date(b.date) - new Date(a.date));
                 if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
-                el.innerHTML = txs.slice(0, 15).map(t => `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase">${new Date(t.date).toLocaleDateString()}</span></div><span class="text-[10px] font-black ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'theme-text'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</span></div>`).join('');
+                el.innerHTML = txs.slice(0, 15).map(t => {
+                    const dDate = new Date(t.date);
+                    const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
+                    return `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase">${dDate.toLocaleDateString()} ${timeStr}</span></div><span class="text-[10px] font-black ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'theme-text'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</span></div>`;
+                }).join('');
             } else {
                 el.classList.add('hidden'); el.classList.remove('flex');
             }
@@ -1649,20 +1696,140 @@
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
             saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
         }
-
-        function openAccountHistory(id) { currentHistAccId = id; const mod = $id('account-history-modal'); if(!mod) return; mod.classList.remove('hidden'); setHistFilter('all'); }
-        function closeAccountHistory() { const modal = $id('account-history-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
-        function setHistFilter(f) { 
-            currentHistPeriod = f; const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return;
-            const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
-            $id('hist-acc-name').innerText = acc.name; $id('hist-acc-balance').innerText = fmt(acc.balance, acc.currency);
-            $qAll('#account-history-modal .filter-chip').forEach(b => b.classList.remove('active')); const btn = $id('hf-' + f); if(btn) btn.classList.add('active');
-            const now = new Date(); const txs = state.tx.filter(t => t.accId === acc.id && (f === 'all' || (f === '30d' && new Date(t.date) >= new Date(now.getTime() - 30 * 86400000)) || (f === 'month' && new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()) || (f === 'year' && new Date(t.date).getFullYear() === now.getFullYear()))).sort((a,b) => new Date(b.date) - new Date(a.date));
-            if(txs.length === 0) { list.innerHTML = `<p class="text-xs text-center text-slate-400 p-4">Sin movimientos en este periodo.</p>`; return; }
-            list.innerHTML = txs.map(t => { const iI = t.type === 'income'; return `<div class="theme-card p-4 rounded-2xl border flex justify-between items-center shadow-sm"><div><p class="text-[10px] font-black uppercase text-slate-600">${t.cat}</p><p class="text-[8px] text-slate-400 mt-1">${new Date(t.date).toLocaleDateString()}</p></div><p class="text-xs font-black ${iI?'theme-val-inc':'theme-val-exp'}">${iI?'+':'-'}${fmt(t.amount, t.currency)}</p></div>`; }).join('');
+        
+        function handleParentCategoryChange() {
+            const sel = $id('f-cat-parent-select');
+            const parentCont = $id('new-cat-parent-container');
+            const subContainer = $id('sub-cat-container');
+            const subSel = $id('f-cat-sub-select');
+            const newSubCont = $id('new-cat-sub-container');
+            
+            if (!sel || !parentCont || !subContainer || !subSel || !newSubCont) return;
+            
+            if (sel.value === 'ADD_NEW_CAT') {
+                parentCont.classList.remove('hidden');
+                $id('f-cat-parent').focus();
+                $id('f-cat-parent').value = ''; 
+                
+                subContainer.classList.add('hidden');
+                newSubCont.classList.add('hidden');
+            } else if (sel.value !== '') {
+                parentCont.classList.add('hidden');
+                
+                const type = $id('f-type').value;
+                const cats = state.categories[type] || [];
+                const parent = sel.value;
+                const subs = new Set();
+                
+                cats.forEach(c => {
+                    const m = c.match(/\[(.*?)\]\s*(.*)/);
+                    if (m && m[1] === parent && m[2]) subs.add(m[2]);
+                });
+                
+                subContainer.classList.remove('hidden');
+                subSel.classList.remove('hidden');
+                newSubCont.classList.add('hidden');
+                $id('f-cat-sub').value = '';
+                
+                subSel.innerHTML = '<option value="">-- Seleccionar Subcategoría --</option>';
+                if (subs.size > 0) {
+                    subs.forEach(s => { subSel.innerHTML += `<option value="${s}">${s}</option>`; });
+                } else {
+                    subSel.innerHTML += `<option value="" disabled>-- Sin Subcategorías --</option>`;
+                }
+                subSel.innerHTML += `<option value="ADD_NEW_SUB" class="font-bold text-indigo-600">➕ Agregar subcategoría...</option>`;
+                subSel.innerHTML += `<option value="EDIT_PARENT" class="font-bold text-amber-600">✏️ Edición de enlace de categoría padre</option>`;
+            } else {
+                parentCont.classList.add('hidden');
+                subContainer.classList.add('hidden');
+            }
         }
 
-        // FORMULARIO MAESTRO DE TRANSACCIONES (SSoT)
+        function handleSubCategoryChange() {
+            const sel = $id('f-cat-sub-select');
+            const newSubCont = $id('new-cat-sub-container');
+            const inp = $id('f-cat-sub');
+            if (!sel || !newSubCont || !inp) return;
+
+            if (sel.value === 'ADD_NEW_SUB') {
+                newSubCont.classList.remove('hidden');
+                inp.focus();
+                inp.value = '';
+            } else if (sel.value === 'EDIT_PARENT') {
+                newSubCont.classList.add('hidden');
+                const parentSel = $id('f-cat-parent-select');
+                const currentParent = parentSel ? parentSel.value : '';
+                if(!currentParent || currentParent === 'ADD_NEW_CAT') return;
+                const newName = prompt(`Editar enlace/nombre de la Categoría Padre:`, currentParent);
+                if(newName && newName.trim() !== '' && newName !== currentParent) {
+                    const type = $id('f-type').value;
+                    const idx = state.catParents[type].indexOf(currentParent);
+                    if(idx > -1) state.catParents[type][idx] = newName.trim();
+                    state.categories[type] = state.categories[type].map(c => {
+                       const m = c.match(/\[(.*?)\]\s*(.*)/);
+                       if (m && m[1] === currentParent) return `[${newName.trim()}] ${m[2]||''}`.trim();
+                       if (c === currentParent) return newName.trim();
+                       return c;
+                    });
+                    state.tx.forEach(t => {
+                       const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
+                       if (m && m[1] === currentParent) t.cat = `[${newName.trim()}] ${m[2]||''}`.trim();
+                       else if (t.cat === currentParent) t.cat = newName.trim();
+                    });
+                    saveState(); updateDashboard(); openForm(type, $id('f-id').value);
+                } else {
+                    sel.value = ''; inp.value = '';
+                }
+            } else {
+                newSubCont.classList.add('hidden');
+            }
+        }
+
+        function confirmNewParentCategory() {
+            const inp = $id('f-cat-parent');
+            const val = inp.value.trim();
+            if (!val) return alert("Escribe un nombre para la categoría.");
+            
+            const type = $id('f-type').value;
+            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+            if(!state.catParents[type]) state.catParents[type] = [];
+            
+            if(!state.catParents[type].includes(val)) {
+                state.catParents[type].push(val);
+                saveState();
+            }
+            
+            const selP = $id('f-cat-parent-select'); 
+            selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
+            state.catParents[type].forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
+            selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
+            
+            selP.value = val;
+            handleParentCategoryChange();
+        }
+
+        function confirmNewSubCategory() {
+            const inp = $id('f-cat-sub');
+            const subVal = inp.value.trim();
+            const parentVal = $id('f-cat-parent-select').value;
+            
+            if (!subVal) return alert("Escribe un nombre para la subcategoría.");
+            if (!parentVal || parentVal === 'ADD_NEW_CAT') return;
+            
+            const type = $id('f-type').value;
+            const fullCatName = `[${parentVal}] ${subVal}`;
+            
+            if(!state.categories[type]) state.categories[type] = [];
+            if(!state.categories[type].includes(fullCatName)) {
+                state.categories[type].push(fullCatName);
+                saveState();
+            }
+            
+            handleParentCategoryChange();
+            $id('f-cat-sub-select').value = subVal;
+            handleSubCategoryChange();
+        }
+
         function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
         
         function handleCatChange() {
@@ -1740,12 +1907,35 @@
             const mod = $id('tx-modal'); if(!mod) return; mod.classList.remove('hidden'); 
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
             const fT = $id('form-title'); const titlesMap = { 'income': 'Ingreso (+)', 'expense': 'Gasto (-)', 'transfer': 'Transferencia', 'afterpay': 'Afterpay' }; fT.innerText = txId ? `Editar ${titlesMap[type]}` : `Nuevo ${titlesMap[type]}`; 
-            const cS = $id('f-cat'); cS.innerHTML = ''; const cats = type === 'afterpay' ? ['🛍️ Compra General', '📱 Tecnología'] : (state.categories[type] || []); cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; }); cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
+            
+            // Lógica Selector Padre Explícito y Jerárquico
+            const selP = $id('f-cat-parent-select'); 
+            if (selP) { 
+                selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
+                const parents = state.catParents ? (state.catParents[type] || []) : []; 
+                parents.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
+                selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
+                selP.classList.remove('hidden'); 
+            }
+            if($id('new-cat-parent-container')) $id('new-cat-parent-container').classList.add('hidden');
+            const subContainer = $id('sub-cat-container'); if(subContainer) subContainer.classList.add('hidden');
+            const newSubCont = $id('new-cat-sub-container'); if(newSubCont) newSubCont.classList.add('hidden');
+            
+            // Lógica Módulo Clasificación
+            const costMod = $id('cost-type-module'); 
+            if(costMod) { if(type === 'expense' || type === 'income') costMod.classList.remove('hidden'); else costMod.classList.add('hidden'); }
+
             const curS = $id('f-currency'); if(curS) { curS.innerHTML = ''; CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); curS.value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency; }
             populateFormAccounts();
             const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
             const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
-            if(!txId) { const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0'); const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } }
+            if(!txId) { 
+                const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0');
+                if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : ''; $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
+                if($id('f-cat-sub')) $id('f-cat-sub').value = '';
+                if($id('f-cost-type')) $id('f-cost-type').value = 'variable';
+                const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
+            }
             checkTxAccount();
         }
         
@@ -1754,7 +1944,51 @@
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
             const curS = $id('f-currency'); if(curS) { curS.value = tx.currency || tx.original_currency || state.settings.baseCurrency; populateFormAccounts(); }
-            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; $id('f-cat').value = tx.cat; if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; const tD = new Date(tx.date); if($id('f-time')) $id('f-time').value = String(tD.getHours()).padStart(2, '0') + ':' + String(tD.getMinutes()).padStart(2, '0'); $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; if($id('f-ap-paid')) $id('f-ap-paid').value = tx.apPaid || 0; } 
+            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; 
+            
+            // Parseo y Sincronización Inversa
+            const parts = tx.cat ? tx.cat.match(/\[(.*?)\]\s*(.*)/) : null;
+            let pVal = parts ? parts[1] : tx.cat;
+            let sVal = parts ? (parts[2] || '') : '';
+            
+            const selP = $id('f-cat-parent-select');
+            if(selP) {
+                const opts = Array.from(selP.options).map(o => o.value);
+                if(opts.includes(pVal)) {
+                    selP.value = pVal; 
+                    if($id('new-cat-parent-container')) $id('new-cat-parent-container').classList.add('hidden');
+                    handleParentCategoryChange();
+                    
+                    const selSub = $id('f-cat-sub-select');
+                    if (selSub) {
+                        const subOpts = Array.from(selSub.options).map(o => o.value);
+                        if (subOpts.includes(sVal) && sVal !== '') {
+                            selSub.value = sVal;
+                            if($id('new-cat-sub-container')) $id('new-cat-sub-container').classList.add('hidden');
+                        } else if (sVal !== '') {
+                            selSub.innerHTML += `<option value="${sVal}">${sVal}</option>`;
+                            selSub.value = sVal;
+                        } else {
+                            selSub.value = '';
+                        }
+                    }
+                } else {
+                    selP.innerHTML += `<option value="${pVal}">${pVal}</option>`;
+                    selP.value = pVal;
+                    if($id('new-cat-parent-container')) $id('new-cat-parent-container').classList.add('hidden');
+                    handleParentCategoryChange();
+                    if(sVal) {
+                        const selSub = $id('f-cat-sub-select');
+                        if (selSub) {
+                            selSub.innerHTML += `<option value="${sVal}">${sVal}</option>`;
+                            selSub.value = sVal;
+                        }
+                    }
+                }
+            }
+
+            if($id('f-cost-type')) $id('f-cost-type').value = tx.costType || 'variable';
+            if(tx.accId) $id('f-account').value = tx.accId; $id('f-date').value = tx.date.split('T')[0]; const tD = new Date(tx.date); if($id('f-time')) $id('f-time').value = String(tD.getHours()).padStart(2, '0') + ':' + String(tD.getMinutes()).padStart(2, '0'); $id('f-note').value = tx.note || ''; if(tx.type === 'afterpay') { $id('f-ap-freq').value = tx.apFreq || 'weekly'; if($id('f-ap-quotas')) $id('f-ap-quotas').value = tx.apQuotas || 4; if($id('f-ap-paid')) $id('f-ap-paid').value = tx.apPaid || 0; } 
             if($id('f-is-recur')) { $id('f-is-recur').checked = !!tx.isRecurrent; toggleRecurFields(); if(tx.isRecurrent) { $id('f-recur-freq').value = tx.recurFreq || 'monthly'; $id('f-recur-count').value = tx.recurCount || 12; } }
             checkTxAccount();
         }
@@ -1770,7 +2004,19 @@
         }
 
         function saveTransaction(e) { 
-            e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; const cat = $id('f-cat').value; const accId = $id('f-account').value; const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
+            e.preventDefault(); const id = $id('f-id').value; const type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
+            
+            const parentSel = $id('f-cat-parent-select') ? $id('f-cat-parent-select').value : '';
+            const parent = (parentSel === 'ADD_NEW_CAT') ? $id('f-cat-parent').value.trim() : parentSel;
+            
+            const subSel = $id('f-cat-sub-select') ? $id('f-cat-sub-select').value : '';
+            const sub = (subSel === 'ADD_NEW_SUB') ? $id('f-cat-sub').value.trim() : (subSel === 'EDIT_PARENT' ? '' : subSel);
+            
+            const costType = $id('f-cost-type') ? $id('f-cost-type').value : 'variable';
+            
+            let cat = sub ? `[${parent}] ${sub}` : parent;
+            if(type === 'afterpay' && !parent) cat = '🛍️ Afterpay';
+            const accId = $id('f-account').value; const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
             const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             const apCurr = state.settings.apCurrency || 'AUD';
             
