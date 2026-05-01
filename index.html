@@ -566,7 +566,13 @@
                 <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p id="ap-next-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Próximo Corte</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4"><div class="border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-[10px] font-black uppercase theme-text">Calendario Pagos</h3></div><div id="ap-schedule-list" class="space-y-3 max-h-[300px] overflow-y-auto hide-scrollbar pb-2"></div></div>
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
+                    <div class="flex justify-between items-center border-b border-slate-100/50 pb-3 mb-3">
+                        <h3 class="text-[10px] font-black uppercase theme-text">Calendario Pagos</h3>
+                        <button onclick="reconcilePastAfterpay()" type="button" class="text-[8px] font-black bg-teal-50 text-teal-600 px-2 py-1 rounded-lg border border-teal-100 hover:bg-teal-100 transition-colors active:scale-95 shadow-sm"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Auto-Conciliar</button>
+                    </div>
+                    <div id="ap-schedule-list" class="space-y-3 max-h-[300px] overflow-y-auto hide-scrollbar pb-2"></div>
+                </div>
                 <div class="space-y-4"><h3 class="text-[10px] font-black uppercase text-slate-400 ml-2">Compras Vigentes</h3><div id="ap-active-list" class="space-y-3 pb-12"></div></div>
             </div>
         </section>
@@ -1861,9 +1867,14 @@
                 const origCur = t.original_currency || t.currency;
                 const origAmt = t.original_amount || t.amount;
                 
-                const iI = t.type === 'income'; const iE = t.type === 'expense' || t.type === 'afterpay'; 
-                const cT = iI ? 'theme-val-inc' : iE ? 'theme-val-exp' : 'theme-text'; 
-                const iB = iI ? 'bg-emerald-50 text-emerald-600' : iE ? 'bg-slate-100 text-slate-600' : 'bg-indigo-50 text-indigo-600'; 
+                let cT = '', iB = '', iClass = '';
+                if (t.type === 'income') { cT = 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
+                else if (t.type === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
+                else if (t.type === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
+                else if (t.type === 'expense') { cT = 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
+                else { cT = 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
+                
+                const iE = t.type === 'expense' || t.type === 'afterpay'; 
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 let pBadge = ''; 
@@ -1886,7 +1897,7 @@
                 const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300'; 
                 const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
 
-                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iI?'fa-arrow-up':iE?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${new Date(t.date).toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(new Event('click'), id); }
@@ -2186,7 +2197,22 @@
             const nwTitle = $id('ap-next-week-title'); if(nwTitle) nwTitle.innerText = 'Corte: ' + cutoff2.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
 
             if (projAp.length === 0) scheduleList.innerHTML = `<p class="text-center text-[10px] text-slate-400 font-bold p-4 uppercase tracking-widest">Libre de Deuda</p>`;
-            else scheduleList.innerHTML = projAp.slice(0, 10).map(t => { const isPast = new Date(t.date) <= new Date(); return `<div class="flex justify-between items-center p-3 rounded-xl border ${isPast ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100/50'}"><div><p class="text-[10px] font-black uppercase ${isPast ? 'text-red-600' : 'text-slate-600'}">${t.note}</p><p class="text-[8px] font-bold ${isPast ? 'text-red-400' : 'text-slate-400'} uppercase mt-0.5">${new Date(t.date).toLocaleDateString('es-CO')}</p></div><p class="text-xs font-black ${isPast ? 'text-red-600' : 'theme-text'}">${fmt(t.original_amount || t.amount, apCurr)}</p></div>`; }).join('');
+            else scheduleList.innerHTML = projAp.slice(0, 10).map(t => { 
+                const isPast = new Date(t.date) <= new Date(); 
+                const origIdMatch = t.id.match(/^proj_ap_(.+)_(\d+)$/);
+                const origId = origIdMatch ? origIdMatch[1] : '';
+                return `<div class="flex justify-between items-center p-3 rounded-xl border ${isPast ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100/50'}">
+                    <div class="flex-1 min-w-0 pr-2">
+                        <p class="text-[10px] font-black uppercase ${isPast ? 'text-red-600' : 'text-slate-600'} truncate">${t.note}</p>
+                        <p class="text-[8px] font-bold ${isPast ? 'text-red-400' : 'text-slate-400'} uppercase mt-0.5">${new Date(t.date).toLocaleDateString('es-CO')}</p>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <p class="text-xs font-black mr-1 ${isPast ? 'text-red-600' : 'theme-text'}">${fmt(t.original_amount || t.amount, apCurr)}</p>
+                        <button type="button" onclick="editTransaction('${origId}')" title="Editar Contrato" class="w-7 h-7 bg-white border border-slate-200 text-slate-400 rounded-full flex items-center justify-center hover:text-blue-500 active:scale-90 transition-all shadow-sm"><i class="fa-solid fa-pen text-[9px]"></i></button>
+                        <button type="button" onclick="payAfterpayQuota('${origId}')" title="Conciliar Cuota" class="w-7 h-7 ${isPast ? 'bg-red-100 text-red-600 border-red-200 hover:bg-red-200' : 'bg-teal-100 text-teal-600 border-teal-200 hover:bg-teal-200'} border rounded-full flex items-center justify-center active:scale-90 transition-all shadow-sm"><i class="fa-solid fa-check text-[9px]"></i></button>
+                    </div>
+                </div>`; 
+            }).join('');
         }
 
         function payAfterpayQuota(id) {
