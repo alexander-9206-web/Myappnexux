@@ -3038,7 +3038,34 @@
             if(!newName || oldName === newName) return closeCategoryEdit(); const idx = state.categories[type].indexOf(oldName);
             if(idx > -1) { state.categories[type][idx] = newName; state.tx.forEach(t => { if(t.cat === oldName) t.cat = newName; }); saveState(); updateDashboard(); renderAdvancedCategories(); populateFilters(); closeCategoryEdit(); }
         }
-        function exportBackup() { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state)); const node = document.createElement('a'); node.setAttribute("href", dataStr); node.setAttribute("download", `nexus_backup_${currentUser}_${new Date().toISOString().split('T')[0]}.json`); document.body.appendChild(node); node.click(); node.remove(); }
+        
+        // Función universal para guardar el backup de tu base de datos o estado actual
+        function exportarDatosAlIphone(datosJSON) {
+            // Convierte tu objeto de datos a un string JSON formateado
+            const jsonString = JSON.stringify(datosJSON, null, 2);
+            
+            // Detección de entorno: Verifica si el puente WKWebView existe (iOS App)
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.saveBackupHandler) {
+                // Enviar el string de datos al puente Swift
+                window.webkit.messageHandlers.saveBackupHandler.postMessage(jsonString);
+                console.log("Comando enviado al motor nativo de iOS.");
+            } else {
+                // Fallback: Si abres la web desde Safari normal o PC, descarga el archivo
+                console.log("Motor nativo no detectado. Ejecutando descarga de navegador...");
+                const blob = new Blob([jsonString], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `nexus_backup_${currentUser}_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        }
+
+        function exportBackup() { 
+            exportarDatosAlIphone(state); 
+        }
         
         function setupAutoBackup() {
             if(autoBackupInterval) clearInterval(autoBackupInterval);
