@@ -279,6 +279,7 @@
             <div class="flex justify-between items-center px-2 border-b border-slate-200 pb-2">
                 <div class="flex items-center gap-2">
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Reg: <span id="db-count" class="theme-text">0</span></p>
+                    <button onclick="toggleDbDuplicates()" id="db-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
                     <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
                 </div>
                 <div class="flex items-center gap-2">
@@ -2416,7 +2417,22 @@
 
         // AUDITORÍA
         let dbSortOrder = 'desc';
+        let dbShowDuplicates = false;
+
         function toggleDbSort() { dbSortOrder = dbSortOrder === 'desc' ? 'asc' : 'desc'; const btn = $id('db-sort-btn'); if (btn) { btn.innerHTML = dbSortOrder === 'desc' ? '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC' : '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC'; } renderDatabase(); }
+        
+        function toggleDbDuplicates() {
+            dbShowDuplicates = !dbShowDuplicates;
+            const btn = $id('db-dup-btn');
+            if (btn) {
+                if (dbShowDuplicates) {
+                    btn.className = "bg-rose-100 text-rose-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95";
+                } else {
+                    btn.className = "bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95";
+                }
+            }
+            renderDatabase();
+        }
         
         function initDatabaseTab() { setDbQuickFilter('mes'); }
         function setDbQuickFilter(range) {
@@ -2450,10 +2466,6 @@
                 return true; 
             }); 
             
-            fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
-            
-            const dcEl = $id('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
-            
             const curSel = $id('db-currency'); const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
             
             const tV = fTx.reduce((s,t) => {
@@ -2463,7 +2475,32 @@
             
             const tE = $id('db-total'); if(tE) { tE.innerText = fmt(tV, targetCurr); tE.className = tV >= 0 ? "theme-val-inc" : "theme-val-exp"; }
             
-            const lC = $id('db-list'); if(!lC) return; if(fTx.length === 0) { lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`; return; } 
+            // APEX FIX: Motor de Escaneo Forense de Duplicados
+            if (dbShowDuplicates) {
+                fTx = fTx.filter((t, idx, arr) => {
+                    return arr.some((other, oIdx) => 
+                        idx !== oIdx && 
+                        (t.note || '') === (other.note || '') && 
+                        (t.cat || '') === (other.cat || '') && 
+                        (t.original_amount || t.amount) === (other.original_amount || other.amount) && 
+                        (t.date && other.date && t.date.split('T')[0] === other.date.split('T')[0])
+                    );
+                });
+            }
+
+            fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
+            
+            const dcEl = $id('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
+            
+            const lC = $id('db-list'); if(!lC) return; 
+            if(fTx.length === 0) { 
+                if (dbShowDuplicates) {
+                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border border-rose-100 shadow-sm bg-rose-50/30"><p class="text-[10px] font-black uppercase tracking-widest text-rose-400">No hay duplicados exactos</p></div>`; 
+                } else {
+                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`; 
+                }
+                return; 
+            } 
             
             lC.innerHTML = fTx.map(t => { 
                 const origCur = t.original_currency || t.currency;
