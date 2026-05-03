@@ -2356,7 +2356,7 @@
                 const acc = state.accounts.find(a => a.id === tx.accId); 
                 if(acc && tx.type !== 'afterpay' && tx.type !== 'transfer') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } } 
                 state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
-                saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); 
+                saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
             } 
         }
 
@@ -2836,6 +2836,8 @@
 
             activeAp.sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             let activeHtml = '';
+            
+            const dupTracker = {}; // APEX FIX: Tracker para transacciones pares
 
             activeAp.forEach(t => {
                 const quotas = t.apQuotas || 4;
@@ -2843,7 +2845,21 @@
                 const pct = ((t.apPaid || 0) / quotas) * 100;
                 const dDate = new Date(t.date);
                 const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${dDate.toLocaleDateString('es-CO')} ${timeStr} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, apCurr)}</p></div></div>`;
+                
+                // APEX FIX: Coloración de transacciones pares en modo duplicados
+                let isPar = false;
+                if (apShowDuplicates) {
+                    const sig = `${t.note}|${t.cat}|${t.amount}|${t.date.split('T')[0]}`;
+                    dupTracker[sig] = (dupTracker[sig] || 0) + 1;
+                    if (dupTracker[sig] % 2 === 0) isPar = true;
+                }
+                
+                const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50';
+                const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
+                const textAmtClass = isPar ? 'text-red-600' : 'theme-text';
+                const textSubClass = isPar ? 'text-red-400' : 'text-slate-400';
+
+                activeHtml += `<div class="${cardBgClass} p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3 transition-colors"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase ${textTitleClass}">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold ${textSubClass} uppercase mt-1">${dDate.toLocaleDateString('es-CO')} ${timeStr} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button type="button" onclick="deleteDatabaseRecord('${t.id}')" title="Borrar Transacción" class="w-7 h-7 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-trash text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black ${textSubClass} uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black ${textAmtClass}">${fmt(pendingForThis, apCurr)}</p></div></div>`;
             });
             if (activeAp.length === 0) {
                 if (apShowDuplicates) {
