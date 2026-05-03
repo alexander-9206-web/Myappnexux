@@ -2354,7 +2354,7 @@
             e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
             if(confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
                 const acc = state.accounts.find(a => a.id === tx.accId); 
-                if(acc && tx.type !== 'afterpay' && tx.type !== 'transfer') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } } 
+                if(acc && tx.type !== 'afterpay' && tx.type !== 'transfer') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
                 state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
                 saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
             } 
@@ -2475,20 +2475,32 @@
             
             const tE = $id('db-total'); if(tE) { tE.innerText = fmt(tV, targetCurr); tE.className = tV >= 0 ? "theme-val-inc" : "theme-val-exp"; }
             
-            // APEX FIX: Motor de Escaneo Forense de Duplicados
+            // APEX FIX: Motor de Escaneo Forense de Duplicados y Agrupación
             if (dbShowDuplicates) {
-                fTx = fTx.filter((t, idx, arr) => {
-                    return arr.some((other, oIdx) => 
-                        idx !== oIdx && 
-                        (t.note || '') === (other.note || '') && 
-                        (t.cat || '') === (other.cat || '') && 
-                        (t.original_amount || t.amount) === (other.original_amount || other.amount) && 
-                        (t.date && other.date && t.date.split('T')[0] === other.date.split('T')[0])
-                    );
+                let duplicateGroups = {};
+                fTx.forEach(t => {
+                    const sig = `${t.note || ''}|${t.cat || ''}|${t.original_amount || t.amount}|${t.date ? t.date.split('T')[0] : ''}`;
+                    if(!duplicateGroups[sig]) duplicateGroups[sig] = [];
+                    duplicateGroups[sig].push(t);
                 });
+                
+                fTx = [];
+                for(let sig in duplicateGroups) {
+                    if(duplicateGroups[sig].length > 1) {
+                        fTx = fTx.concat(duplicateGroups[sig]);
+                    }
+                }
+                // Si estamos en modo duplicados, ordenamos por firma (para agruparlos visualmente) y luego por fecha
+                fTx.sort((a,b) => {
+                   const sigA = `${a.note || ''}|${a.cat || ''}|${a.original_amount || a.amount}|${a.date ? a.date.split('T')[0] : ''}`;
+                   const sigB = `${b.note || ''}|${b.cat || ''}|${b.original_amount || b.amount}|${b.date ? b.date.split('T')[0] : ''}`;
+                   if(sigA < sigB) return -1;
+                   if(sigA > sigB) return 1;
+                   return new Date(b.date) - new Date(a.date);
+                });
+            } else {
+                fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
             }
-
-            fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
             
             const dcEl = $id('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
             
@@ -2836,20 +2848,34 @@
                 totalPending += (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
             });
 
-            // APEX FIX: Motor de Escaneo de Duplicados Exactos
+            // APEX FIX: Motor de Escaneo de Duplicados Exactos y Agrupación
             if (apShowDuplicates) {
-                activeAp = activeAp.filter((t, idx, arr) => {
-                    return arr.some((other, oIdx) => 
-                        idx !== oIdx && 
-                        t.note === other.note && 
-                        t.cat === other.cat && 
-                        t.amount === other.amount && 
-                        (t.date && other.date && t.date.split('T')[0] === other.date.split('T')[0])
-                    );
+                let duplicateGroups = {};
+                activeAp.forEach(t => {
+                    const sig = `${t.note}|${t.cat}|${t.amount}|${t.date.split('T')[0]}`;
+                    if(!duplicateGroups[sig]) duplicateGroups[sig] = [];
+                    duplicateGroups[sig].push(t);
                 });
+                
+                activeAp = [];
+                for(let sig in duplicateGroups) {
+                    if(duplicateGroups[sig].length > 1) {
+                        activeAp = activeAp.concat(duplicateGroups[sig]);
+                    }
+                }
+                
+                // Agrupamos visualmente
+                activeAp.sort((a,b) => {
+                   const sigA = `${a.note}|${a.cat}|${a.amount}|${a.date.split('T')[0]}`;
+                   const sigB = `${b.note}|${b.cat}|${b.amount}|${b.date.split('T')[0]}`;
+                   if(sigA < sigB) return -1;
+                   if(sigA > sigB) return 1;
+                   return new Date(b.date) - new Date(a.date);
+                });
+            } else {
+                activeAp.sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             }
 
-            activeAp.sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             let activeHtml = '';
             
             const dupTracker = {}; // APEX FIX: Tracker para transacciones pares
