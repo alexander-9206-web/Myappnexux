@@ -2249,8 +2249,8 @@
 
             const catMod = $id('category-module');
             if (catMod) {
-                if (type === 'afterpay') catMod.classList.add('hidden');
-                else catMod.classList.remove('hidden');
+                // APEX FIX: Nunca ocultar el módulo de categoría (Habilitado para Afterpay)
+                catMod.classList.remove('hidden');
             }
 
             // APEX FIX: Reordenamiento y control monetario condicional Afterpay
@@ -2260,15 +2260,16 @@
             if (type === 'afterpay') {
                 $id('note-container').style.order = '1';
                 $id('amount-container').style.order = '2';
-                $id('ap-freq-container').style.order = '3';
-                $id('datetime-container').style.order = '4';
+                if(catMod) catMod.style.order = '3';
+                $id('ap-freq-container').style.order = '4';
+                $id('datetime-container').style.order = '5';
                 if(amtEl) amtEl.dataset.type = 'number';
                 if(lblWrap) lblWrap.classList.add('hidden');
                 if(caCont) caCont.classList.add('hidden');
             } else {
                 if(caCont) { caCont.classList.remove('hidden'); caCont.style.order = '1'; }
                 $id('amount-container').style.order = '2';
-                $id('category-module').style.order = '3';
+                if(catMod) catMod.style.order = '3';
                 $id('cost-type-module').style.order = '4';
                 $id('cc-term-container').style.order = '5';
                 $id('ap-freq-container').style.order = '6';
@@ -2323,42 +2324,21 @@
             
             // Parseo y Sincronización Inversa
             const parts = tx.cat ? tx.cat.match(/\[(.*?)\]\s*(.*)/) : null;
-            let pVal = parts ? parts[1] : tx.cat;
-            let sVal = parts ? (parts[2] || '') : '';
-            
-            const selP = $id('f-cat-parent-select');
-            if(selP) {
-                const opts = Array.from(selP.options).map(o => o.value);
-                if(opts.includes(pVal)) {
-                    selP.value = pVal; 
-                    if($id('new-cat-parent-container')) $id('new-cat-parent-container').classList.add('hidden');
+            const selP = $id('f-cat-parent-select'); 
+            if (selP) { 
+                if (parts && parts[1]) {
+                    selP.value = parts[1];
                     handleParentCategoryChange();
-                    
-                    const selSub = $id('f-cat-sub-select');
-                    if (selSub) {
-                        const subOpts = Array.from(selSub.options).map(o => o.value);
-                        if (subOpts.includes(sVal) && sVal !== '') {
-                            selSub.value = sVal;
-                            if($id('new-cat-sub-container')) $id('new-cat-sub-container').classList.add('hidden');
-                        } else if (sVal !== '') {
-                            selSub.innerHTML += `<option value="${sVal}">${sVal}</option>`;
-                            selSub.value = sVal;
-                        } else {
-                            selSub.value = '';
-                        }
-                    }
-                } else {
-                    selP.innerHTML += `<option value="${pVal}">${pVal}</option>`;
-                    selP.value = pVal;
-                    if($id('new-cat-parent-container')) $id('new-cat-parent-container').classList.add('hidden');
-                    handleParentCategoryChange();
-                    if(sVal) {
+                    if (parts[2]) {
                         const selSub = $id('f-cat-sub-select');
                         if (selSub) {
-                            selSub.innerHTML += `<option value="${sVal}">${sVal}</option>`;
+                            let sVal = parts[2].trim();
                             selSub.value = sVal;
                         }
                     }
+                } else if (tx.cat) {
+                    selP.value = tx.cat;
+                    handleParentCategoryChange();
                 }
             }
 
