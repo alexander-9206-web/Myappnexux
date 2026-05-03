@@ -2502,16 +2502,26 @@
                 return; 
             } 
             
+            const dupTracker = {}; // APEX FIX: Tracker para transacciones pares en Auditoría
+
             lC.innerHTML = fTx.map(t => { 
                 const origCur = t.original_currency || t.currency;
                 const origAmt = t.original_amount || t.amount;
                 
+                // APEX FIX: Coloración de transacciones pares en modo duplicados
+                let isPar = false;
+                if (dbShowDuplicates) {
+                    const sig = `${t.note || ''}|${t.cat || ''}|${origAmt}|${t.date ? t.date.split('T')[0] : ''}`;
+                    dupTracker[sig] = (dupTracker[sig] || 0) + 1;
+                    if (dupTracker[sig] % 2 === 0) isPar = true;
+                }
+
                 let cT = '', iB = '', iClass = '';
-                if (t.type === 'income') { cT = 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
-                else if (t.type === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
-                else if (t.type === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
-                else if (t.type === 'expense') { cT = 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
-                else { cT = 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
+                if (t.type === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
+                else if (t.type === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
+                else if (t.type === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
+                else if (t.type === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
+                else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
                 const iE = t.type === 'expense' || t.type === 'afterpay'; 
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
@@ -2541,11 +2551,16 @@
                 }
                 
                 const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`; 
-                const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer hover:border-blue-300'; 
+                
+                const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50 hover:border-blue-300';
+                const cursorClass = t.isProjected ? 'cursor-default' : 'cursor-pointer'; 
+                const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
+                const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
+                
                 const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-100/50 transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase theme-text truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(new Event('click'), id); }
