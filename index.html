@@ -560,7 +560,16 @@
 
             <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto">
                 <h3 class="text-red-600 font-black text-sm uppercase mb-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Zona de Peligro</h3>
-                <button onclick="requestFactoryReset()" class="w-full bg-red-600 text-white py-4 rounded-xl font-black text-xs uppercase">Formatear App a Cero</button>
+                <div id="reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
+                    <p class="text-[10px] text-red-600 font-bold uppercase">Acción irreversible. Escriba <b>RESET</b> para confirmar:</p>
+                    <input type="text" id="reset-keyword" class="form-input text-center text-red-600 font-black uppercase w-full bg-white border-red-200" placeholder="Escriba RESET">
+                    <div class="flex gap-2">
+                        <button onclick="executeFactoryReset()" class="flex-1 bg-red-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Confirmar</button>
+                        <button onclick="cancelFactoryReset()" class="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Cancelar</button>
+                    </div>
+                    <p id="reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">Palabra de seguridad incorrecta.</p>
+                </div>
+                <button id="btn-init-reset" onclick="initFactoryReset()" class="w-full bg-red-600 text-white py-4 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-transform">Formatear App a Cero</button>
             </div>
         </section>
 
@@ -650,14 +659,14 @@
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase text-teal-600 tracking-tighter">Afterpay Hub</h2></div>
                 <div class="flex items-center gap-2">
-                    <button onclick="toggleApSort()" id="ap-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-up-wide-short"></i> ASC</button>
+                    <button onclick="toggleApSort()" id="ap-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
                     <button onclick="openForm('afterpay')" type="button" class="w-10 h-10 bg-teal-500 text-white rounded-full shadow-lg shadow-teal-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4 md:gap-6"><div class="bg-teal-50 p-6 md:p-8 rounded-[2rem] text-center border border-teal-100 shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase text-teal-800">Pendiente Total</p><h3 id="ap-total-pending" class="text-2xl md:text-4xl font-black text-teal-600 mt-2 tabular-nums">$0</h3></div><div class="theme-card p-6 md:p-8 rounded-[2rem] text-center border shadow-sm"><p class="text-[9px] md:text-xs font-black opacity-40 uppercase theme-text">Disponible</p><h3 id="ap-available" class="text-xl md:text-3xl font-black theme-text mt-2 tabular-nums">$0</h3></div></div>
             <div class="grid grid-cols-2 gap-4 md:gap-6">
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p id="ap-this-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Corte Actual</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3></div>
-                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p id="ap-next-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Próximo Corte</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-amber-50/30"><p id="ap-this-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-amber-700">Corte Actual</p><h3 id="ap-this-week" class="text-lg md:text-2xl font-black text-amber-600 mt-1 tabular-nums">$0</h3><p id="ap-this-week-count" class="text-[8px] font-bold text-amber-700/60 mt-1 uppercase tracking-widest">0 Pagos</p></div>
+                <div class="theme-card p-4 rounded-[1.5rem] text-center border shadow-sm bg-blue-50/30"><p id="ap-next-week-title" class="text-[8px] md:text-[10px] font-black opacity-60 uppercase text-blue-700">Próximo Corte</p><h3 id="ap-next-week" class="text-lg md:text-2xl font-black text-blue-600 mt-1 tabular-nums">$0</h3><p id="ap-next-week-count" class="text-[8px] font-bold text-blue-700/60 mt-1 uppercase tracking-widest">0 Pagos</p></div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
@@ -748,17 +757,17 @@
             <div class="flex justify-between items-center mb-2"><h3 id="form-title" class="text-2xl font-black uppercase tracking-tighter theme-text">Registro</h3><button type="button" onclick="closeForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
             <form id="data-form" onsubmit="saveTransaction(event)">
                 <input type="hidden" id="f-id"><input type="hidden" id="f-type">
-                <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
+                <div id="form-fields-wrapper" class="flex flex-col gap-4">
+                    <div id="currency-account-container" class="grid grid-cols-2 gap-4" style="order: 1;">
                         <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="f-currency" class="form-input text-sm text-center" onchange="populateFormAccounts()"></select></div>
                         <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
                     </div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto (<span id="f-currency-label" class="currency-label">COP</span>)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
+                    <div id="amount-container" style="order: 2;"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto <span id="f-currency-label-wrapper">(<span id="f-currency-label" class="currency-label">COP</span>)</span></label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-amount" required class="form-input text-3xl font-black text-center text-black cursor-pointer"></div>
                     
                     <!-- ========================================== -->
                     <!-- Módulo de Categorías (Organizado y Explícito) -->
                     <!-- ========================================== -->
-                    <div class="bg-white p-5 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
+                    <div id="category-module" class="bg-white p-5 rounded-3xl border border-slate-200 space-y-4 shadow-sm" style="order: 3;">
                         <div class="space-y-3">
                             <select id="f-cat-parent-select" class="form-input text-xs py-3 w-full bg-slate-50 font-bold text-slate-700" onchange="handleParentCategoryChange()">
                                 <option value="">-- Seleccionar Categoría --</option>
@@ -785,7 +794,7 @@
                     <!-- ========================================== -->
                     <!-- Módulo de Clasificación (Aislado en Selector) -->
                     <!-- ========================================== -->
-                    <div id="cost-type-module" class="bg-slate-50 p-5 rounded-3xl border border-slate-200">
+                    <div id="cost-type-module" class="bg-slate-50 p-5 rounded-3xl border border-slate-200" style="order: 4;">
                         <label class="text-[10px] font-black uppercase text-slate-500 mb-2 block"><i class="fa-solid fa-tags mr-1"></i>Clasificación (Gasto / Ingreso)</label>
                         <select id="f-cost-type" class="form-input text-xs bg-white font-bold text-slate-700 w-full">
                             <option value="variable">Variable</option>
@@ -796,8 +805,8 @@
                     </div>
                     <!-- ========================================== -->
 
-                    <div id="cc-term-container" class="hidden animate-slideUp"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
-                    <div id="ap-freq-container" class="hidden">
+                    <div id="cc-term-container" class="hidden animate-slideUp" style="order: 5;"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
+                    <div id="ap-freq-container" class="hidden" style="order: 6;">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
                         <div class="flex gap-2 mt-1">
                             <select id="f-ap-freq" class="form-input border-teal-200 bg-teal-50 text-teal-900 flex-1"><option value="weekly">Semanales</option><option value="fortnightly">Quincenales</option><option value="monthly">Mensuales</option></select>
@@ -805,9 +814,11 @@
                             <input type="number" id="f-ap-paid" value="0" min="0" max="48" class="form-input border-teal-200 bg-teal-50 text-teal-900 w-20 text-center font-black" placeholder="Pagadas" title="Cuotas Ya Pagadas">
                         </div>
                     </div>
-                    <div class="grid grid-cols-3 gap-3"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora</label><input type="time" id="f-time" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota</label><input type="text" id="f-note" class="form-input text-xs px-2"></div></div>
                     
-                    <div id="recur-container" class="hidden animate-slideUp border-t border-slate-100 pt-4">
+                    <div id="note-container" style="order: 7;"><label id="f-note-label" class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota / Descripción</label><input type="text" id="f-note" class="form-input text-sm px-4 py-3 w-full" placeholder="Detalles de la transacción"></div>
+                    <div id="datetime-container" class="grid grid-cols-2 gap-4" style="order: 8;"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora</label><input type="time" id="f-time" required class="form-input text-xs px-2"></div></div>
+                    
+                    <div id="recur-container" class="hidden animate-slideUp border-t border-slate-100 pt-4" style="order: 9;">
                         <label class="relative inline-flex items-center cursor-pointer ml-2">
                             <input type="checkbox" id="f-is-recur" class="sr-only peer" onchange="toggleRecurFields()">
                             <div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
@@ -2172,6 +2183,41 @@
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
             const fT = $id('form-title'); const titlesMap = { 'income': 'Ingreso (+)', 'expense': 'Gasto (-)', 'transfer': 'Transferencia', 'afterpay': 'Afterpay' }; fT.innerText = txId ? `Editar ${titlesMap[type]}` : `Nuevo ${titlesMap[type]}`; 
             
+            const fNoteLbl = $id('f-note-label');
+            if (fNoteLbl) fNoteLbl.innerText = type === 'afterpay' ? 'Descripción de la Transacción' : 'Nota / Descripción';
+
+            const catMod = $id('category-module');
+            if (catMod) {
+                if (type === 'afterpay') catMod.classList.add('hidden');
+                else catMod.classList.remove('hidden');
+            }
+
+            // APEX FIX: Reordenamiento y control monetario condicional Afterpay
+            const amtEl = $id('f-amount');
+            const lblWrap = $id('f-currency-label-wrapper');
+            const caCont = $id('currency-account-container');
+            if (type === 'afterpay') {
+                $id('note-container').style.order = '1';
+                $id('amount-container').style.order = '2';
+                $id('ap-freq-container').style.order = '3';
+                $id('datetime-container').style.order = '4';
+                if(amtEl) amtEl.dataset.type = 'number';
+                if(lblWrap) lblWrap.classList.add('hidden');
+                if(caCont) caCont.classList.add('hidden');
+            } else {
+                if(caCont) { caCont.classList.remove('hidden'); caCont.style.order = '1'; }
+                $id('amount-container').style.order = '2';
+                $id('category-module').style.order = '3';
+                $id('cost-type-module').style.order = '4';
+                $id('cc-term-container').style.order = '5';
+                $id('ap-freq-container').style.order = '6';
+                $id('note-container').style.order = '7';
+                $id('datetime-container').style.order = '8';
+                $id('recur-container').style.order = '9';
+                if(amtEl) amtEl.dataset.type = 'currency';
+                if(lblWrap) lblWrap.classList.remove('hidden');
+            }
+            
             // Lógica Selector Padre Explícito y Jerárquico
             const selP = $id('f-cat-parent-select'); 
             if (selP) { 
@@ -2208,7 +2254,11 @@
         function editTransaction(id) {
             const tx = state.tx.find(t => t.id === id); if(!tx) return; openForm(tx.type, tx.id);
             const curS = $id('f-currency'); if(curS) { curS.value = tx.currency || tx.original_currency || state.settings.baseCurrency; populateFormAccounts(); }
-            const amtEl = $id('f-amount'); amtEl.value = fmt(tx.amount); amtEl.dataset.raw = tx.amount; 
+            
+            const amtEl = $id('f-amount'); 
+            if(tx.type === 'afterpay') { amtEl.value = new Intl.NumberFormat('es-CO').format(tx.amount); } 
+            else { amtEl.value = fmt(tx.amount); }
+            amtEl.dataset.raw = tx.amount; 
             
             // Parseo y Sincronización Inversa
             const parts = tx.cat ? tx.cat.match(/\[(.*?)\]\s*(.*)/) : null;
@@ -2659,8 +2709,8 @@
         }
 
         // AFTERPAY
-        let apSortOrder = 'asc';
-        function toggleApSort() { apSortOrder = apSortOrder === 'asc' ? 'desc' : 'asc'; const btn = $id('ap-sort-btn'); if (btn) { btn.innerHTML = apSortOrder === 'asc' ? '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC' : '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC'; } renderAfterpay(); }
+        let apSortOrder = 'desc';
+        function toggleApSort() { apSortOrder = apSortOrder === 'desc' ? 'asc' : 'desc'; const btn = $id('ap-sort-btn'); if (btn) { btn.innerHTML = apSortOrder === 'asc' ? '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC' : '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC'; } renderAfterpay(); }
 
         function renderAfterpay() {
             const totalPendingEl = $id('ap-total-pending'); const availableEl = $id('ap-available'); const scheduleList = $id('ap-schedule-list'); const activeList = $id('ap-active-list');
@@ -2669,7 +2719,7 @@
             const apCurr = state.settings.apCurrency || 'AUD';
             
             let totalPending = 0; const apTx = state.tx.filter(t => t.type === 'afterpay'); const activeAp = apTx.filter(t => (t.apPaid || 0) < (t.apQuotas || 4));
-            activeAp.sort((a,b) => apSortOrder === 'asc' ? new Date(a.date) - new Date(b.date) : new Date(b.date) - new Date(a.date));
+            activeAp.sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             let activeHtml = '';
 
             activeAp.forEach(t => {
@@ -2688,7 +2738,7 @@
             totalPendingEl.innerText = fmt(totalPending, apCurr); 
             availableEl.innerText = fmt(limit - totalPending, apCurr);
             
-            const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => apSortOrder === 'asc' ? new Date(a.date) - new Date(b.date) : new Date(b.date) - new Date(a.date));
+            const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             
             const now = new Date(); now.setHours(0,0,0,0);
             let currentDay = now.getDay();
@@ -2704,19 +2754,25 @@
             cutoff2.setDate(cutoff2.getDate() + 7);
             
             let thisWeekTotal = 0; let nextWeekTotal = 0;
+            let thisWeekCount = 0; let nextWeekCount = 0;
             
             projAp.forEach(t => { 
                 const d = new Date(t.date); 
                 const nativeAmt = t.original_amount || t.amount; // EXTRACCIÓN PURA NATIVA PARA KPIS
                 if (d <= cutoff1) {
                     thisWeekTotal += nativeAmt; 
+                    thisWeekCount++;
                 } else if (d > cutoff1 && d <= cutoff2) {
                     nextWeekTotal += nativeAmt; 
+                    nextWeekCount++;
                 }
             });
 
             const thisWeekEl = $id('ap-this-week'); if(thisWeekEl) thisWeekEl.innerText = fmt(thisWeekTotal, apCurr);
             const nextWeekEl = $id('ap-next-week'); if(nextWeekEl) nextWeekEl.innerText = fmt(nextWeekTotal, apCurr);
+            
+            const thisWeekCountEl = $id('ap-this-week-count'); if(thisWeekCountEl) thisWeekCountEl.innerText = `${thisWeekCount} Pago${thisWeekCount !== 1 ? 's' : ''}`;
+            const nextWeekCountEl = $id('ap-next-week-count'); if(nextWeekCountEl) nextWeekCountEl.innerText = `${nextWeekCount} Pago${nextWeekCount !== 1 ? 's' : ''}`;
             
             const twTitle = $id('ap-this-week-title'); if(twTitle) twTitle.innerText = 'Corte: ' + cutoff1.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
             const nwTitle = $id('ap-next-week-title'); if(nwTitle) nwTitle.innerText = 'Corte: ' + cutoff2.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
@@ -3145,7 +3201,9 @@
             reader.readAsText(file);
         }
 
-        function requestFactoryReset() { const word = prompt("⚠ ALERTA DE SEGURIDAD CRÍTICA: Esta acción destruirá permanentemente toda la bóveda de datos y usuarios. Para confirmar, escriba: RESET"); if (word === 'RESET') { const keysToRemove = []; for(let i=0; i<localStorage.length; i++) { const key = localStorage.key(i); if(key.startsWith('nexus_')) keysToRemove.push(key); } keysToRemove.forEach(k => localStorage.removeItem(k)); alert("Bóveda destruida."); location.reload(); } else if (word !== null) alert("Operación cancelada."); }
+        function initFactoryReset() { $id('reset-confirm-zone').classList.remove('hidden'); $id('btn-init-reset').classList.add('hidden'); $id('reset-error-msg').classList.add('hidden'); }
+        function cancelFactoryReset() { $id('reset-confirm-zone').classList.add('hidden'); $id('btn-init-reset').classList.remove('hidden'); $id('reset-keyword').value = ''; }
+        function executeFactoryReset() { const word = $id('reset-keyword').value.trim().toUpperCase(); if (word === 'RESET') { const keysToRemove = []; for(let i=0; i<localStorage.length; i++) { const key = localStorage.key(i); if(key.startsWith('nexus_')) keysToRemove.push(key); } keysToRemove.forEach(k => localStorage.removeItem(k)); location.reload(); } else { $id('reset-error-msg').classList.remove('hidden'); } }
 
         // IMPUESTOS FISCALES
         function renderTaxes() {
