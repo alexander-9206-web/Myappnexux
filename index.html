@@ -659,6 +659,7 @@
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase text-teal-600 tracking-tighter">Afterpay Hub</h2></div>
                 <div class="flex items-center gap-2">
+                    <button onclick="toggleApDuplicates()" id="ap-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
                     <button onclick="toggleApSort()" id="ap-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
                     <button onclick="openForm('afterpay')" type="button" class="w-10 h-10 bg-teal-500 text-white rounded-full shadow-lg shadow-teal-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
@@ -2751,7 +2752,22 @@
 
         // AFTERPAY
         let apSortOrder = 'desc';
+        let apShowDuplicates = false;
+        
         function toggleApSort() { apSortOrder = apSortOrder === 'desc' ? 'asc' : 'desc'; const btn = $id('ap-sort-btn'); if (btn) { btn.innerHTML = apSortOrder === 'asc' ? '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC' : '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC'; } renderAfterpay(); }
+
+        function toggleApDuplicates() {
+            apShowDuplicates = !apShowDuplicates;
+            const btn = $id('ap-dup-btn');
+            if (btn) {
+                if (apShowDuplicates) {
+                    btn.className = "bg-rose-100 text-rose-600 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95";
+                } else {
+                    btn.className = "bg-slate-100 text-slate-500 px-2 py-1.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95";
+                }
+            }
+            renderAfterpay();
+        }
 
         function renderAfterpay() {
             const totalPendingEl = $id('ap-total-pending'); const availableEl = $id('ap-available'); const scheduleList = $id('ap-schedule-list'); const activeList = $id('ap-active-list');
@@ -2759,20 +2775,46 @@
             
             const apCurr = state.settings.apCurrency || 'AUD';
             
-            let totalPending = 0; const apTx = state.tx.filter(t => t.type === 'afterpay'); const activeAp = apTx.filter(t => (t.apPaid || 0) < (t.apQuotas || 4));
+            let totalPending = 0; const apTx = state.tx.filter(t => t.type === 'afterpay'); 
+            let activeAp = apTx.filter(t => (t.apPaid || 0) < (t.apQuotas || 4));
+            
+            // Calculamos el total antes del filtro visual para no romper los KPIs
+            activeAp.forEach(t => {
+                const quotas = t.apQuotas || 4;
+                totalPending += (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
+            });
+
+            // APEX FIX: Motor de Escaneo de Duplicados Exactos
+            if (apShowDuplicates) {
+                activeAp = activeAp.filter((t, idx, arr) => {
+                    return arr.some((other, oIdx) => 
+                        idx !== oIdx && 
+                        t.note === other.note && 
+                        t.cat === other.cat && 
+                        t.amount === other.amount && 
+                        (t.date && other.date && t.date.split('T')[0] === other.date.split('T')[0])
+                    );
+                });
+            }
+
             activeAp.sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
             let activeHtml = '';
 
             activeAp.forEach(t => {
                 const quotas = t.apQuotas || 4;
                 const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
-                totalPending += pendingForThis; 
                 const pct = ((t.apPaid || 0) / quotas) * 100;
                 const dDate = new Date(t.date);
                 const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
                 activeHtml += `<div class="theme-card p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase theme-text">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${dDate.toLocaleDateString('es-CO')} ${timeStr} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black text-slate-400 uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black theme-text">${fmt(pendingForThis, apCurr)}</p></div></div>`;
             });
-            if (activeAp.length === 0) activeHtml = `<div class="text-center p-6 border border-dashed border-teal-200 rounded-[1.5rem] bg-teal-50/30"><p class="text-[10px] font-bold text-teal-600/70 uppercase">Sin compras vigentes</p></div>`;
+            if (activeAp.length === 0) {
+                if (apShowDuplicates) {
+                    activeHtml = `<div class="text-center p-6 border border-dashed border-rose-200 rounded-[1.5rem] bg-rose-50/30"><p class="text-[10px] font-bold text-rose-600/70 uppercase">No hay duplicados exactos</p></div>`;
+                } else {
+                    activeHtml = `<div class="text-center p-6 border border-dashed border-teal-200 rounded-[1.5rem] bg-teal-50/30"><p class="text-[10px] font-bold text-teal-600/70 uppercase">Sin compras vigentes</p></div>`;
+                }
+            }
             activeList.innerHTML = activeHtml;
             
             const limit = state.settings.apLimit || 5000000; 
