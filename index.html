@@ -1052,62 +1052,84 @@
             }
         }
 
+        // APEX: Función global para que el contenedor nativo de iOS inyecte los datos descargados
+        window.receiveCloudStateFromIOS = function(jsonString) {
+            try {
+                const responseData = JSON.parse(jsonString);
+                processCloudResponse(responseData);
+            } catch(e) {
+                console.error("[APEX SYS] Error parseando módulos JSON de iOS:", e);
+                updateCloudBadge(false);
+            }
+        };
+
+        // APEX: Procesador universal de Módulos JSON (Web y iOS)
+        function processCloudResponse(responseData) {
+            if(responseData && responseData.success) {
+                let isLoaded = false;
+                
+                if (responseData.chunks && responseData.chunks.length > 0) {
+                    try {
+                        const firstChunk = JSON.parse(responseData.chunks[0]);
+                        if (firstChunk.part) {
+                            // APEX: Reconstrucción de módulos legibles (JSON Modules)
+                            let newState = { tx: [], accounts: [], loans: [], categories: {}, catParents: {}, settings: {}, theme: {}, taxes: {}, goals: [] };
+                            responseData.chunks.forEach(chunkStr => {
+                                if(!chunkStr) return;
+                                const parsed = JSON.parse(chunkStr);
+                                if (parsed.part === "CONFIG") {
+                                    newState.theme = parsed.theme; newState.settings = parsed.settings;
+                                    newState.categories = parsed.categories; newState.catParents = parsed.catParents;
+                                    newState.taxes = parsed.taxes; newState.goals = parsed.goals;
+                                } else if (parsed.part === "ACCOUNTS_LOANS") {
+                                    newState.accounts = parsed.accounts || []; newState.loans = parsed.loans || [];
+                                } else if (parsed.part && parsed.part.startsWith("TX_BLOCK_")) {
+                                    newState.tx = newState.tx.concat(parsed.tx || []);
+                                }
+                            });
+                            // Preservar estado local efímero
+                            newState.activeCurrency = state.activeCurrency || 'COP';
+                            newState.activeTab = state.activeTab || 'home';
+                            newState.context = state.context || 'day';
+                            state = newState;
+                            isLoaded = true;
+                        }
+                    } catch(err) {
+                        // Fallback Legacy (Bloques Base64 truncados)
+                        const base64Data = responseData.chunks.join('');
+                        state = decodeState(base64Data);
+                        isLoaded = true;
+                    }
+                } else if (responseData.data) {
+                    // Fallback Legacy (Data string único)
+                    state = decodeState(responseData.data);
+                    isLoaded = true;
+                }
+                
+                if (isLoaded) {
+                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
+                    if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
+                    console.log(`[APEX SYS] Módulos remotos cargados y ensamblados exitosamente.`);
+                }
+            }
+            updateCloudBadge(true, false);
+        }
+
         async function fetchCloudState() {
             if (!googleSheetUrl || !currentUser) return;
             try {
                 updateCloudBadge(true, true);
                 const url = `${googleSheetUrl}?action=load&email=${encodeURIComponent(currentUser)}`;
-                const res = await fetch(url);
-                const responseData = await res.json();
                 
-                if(responseData && responseData.success) {
-                    let isLoaded = false;
-                    
-                    if (responseData.chunks && responseData.chunks.length > 0) {
-                        try {
-                            const firstChunk = JSON.parse(responseData.chunks[0]);
-                            if (firstChunk.part) {
-                                // APEX: Reconstrucción de bloques legibles (Nuevo Formato)
-                                let newState = { tx: [], accounts: [], loans: [], categories: {}, catParents: {}, settings: {}, theme: {}, taxes: {}, goals: [] };
-                                responseData.chunks.forEach(chunkStr => {
-                                    if(!chunkStr) return;
-                                    const parsed = JSON.parse(chunkStr);
-                                    if (parsed.part === "CONFIG") {
-                                        newState.theme = parsed.theme; newState.settings = parsed.settings;
-                                        newState.categories = parsed.categories; newState.catParents = parsed.catParents;
-                                        newState.taxes = parsed.taxes; newState.goals = parsed.goals;
-                                    } else if (parsed.part === "ACCOUNTS_LOANS") {
-                                        newState.accounts = parsed.accounts || []; newState.loans = parsed.loans || [];
-                                    } else if (parsed.part && parsed.part.startsWith("TX_BLOCK_")) {
-                                        newState.tx = newState.tx.concat(parsed.tx || []);
-                                    }
-                                });
-                                // Preservar estado local efímero
-                                newState.activeCurrency = state.activeCurrency || 'COP';
-                                newState.activeTab = state.activeTab || 'home';
-                                newState.context = state.context || 'day';
-                                state = newState;
-                                isLoaded = true;
-                            }
-                        } catch(err) {
-                            // Fallback Legacy (Bloques Base64 truncados)
-                            const base64Data = responseData.chunks.join('');
-                            state = decodeState(base64Data);
-                            isLoaded = true;
-                        }
-                    } else if (responseData.data) {
-                        // Fallback Legacy (Data string único)
-                        state = decodeState(responseData.data);
-                        isLoaded = true;
-                    }
-                    
-                    if (isLoaded) {
-                        localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                        console.log(`[APEX SYS] Bóveda remota cargada y ensamblada.`);
-                    }
+                // APEX: Detección de motor nativo iOS para delegar la petición HTTP
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cloudFetchHandler) {
+                    window.webkit.messageHandlers.cloudFetchHandler.postMessage(url);
+                    console.log("[APEX SYS] Petición de carga delegada al contenedor iOS.");
+                } else {
+                    const res = await fetch(url);
+                    const responseData = await res.json();
+                    processCloudResponse(responseData);
                 }
-                updateCloudBadge(true, false);
             } catch(e) {
                 console.warn("[APEX SYS] Nube no disponible o Webhook incorrecto. Trabajando en modo Local-First.", e);
                 updateCloudBadge(false);
@@ -1122,11 +1144,10 @@
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
-                    // APEX FIX: Información dividida lógicamente en JSON puro para evitar
-                    // saturar la celda y asegurar que la información sea visible en Google Sheets.
+                    // APEX FIX: Creación de Módulos JSON
                     const chunks = [];
                     
-                    // 1. Configuración y Metadatos
+                    // 1. Módulo Configuración y Metadatos
                     chunks.push(JSON.stringify({
                         part: "CONFIG",
                         theme: state.theme || {}, settings: state.settings || {},
@@ -1134,13 +1155,13 @@
                         taxes: state.taxes || {}, goals: state.goals || []
                     }));
                     
-                    // 2. Cuentas y Préstamos
+                    // 2. Módulo Cuentas y Préstamos
                     chunks.push(JSON.stringify({
                         part: "ACCOUNTS_LOANS",
                         accounts: state.accounts || [], loans: state.loans || []
                     }));
                     
-                    // 3. Transacciones (Fragmentadas de 250 en 250 para no superar límite de caracteres)
+                    // 3. Módulos Transaccionales
                     const txArray = state.tx || [];
                     const txChunkSize = 250;
                     for (let i = 0; i < txArray.length; i += txChunkSize) {
@@ -1152,14 +1173,21 @@
 
                     const payload = { action: "save", email: currentUser, chunks: chunks };
                     
-                    // APEX FIX: Cabecera text/plain pura para evasión de Preflight CORS en WebKit/Safari
-                    await fetch(googleSheetUrl, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(payload)
-                    });
-                    console.log(`[APEX SYS] Sincronización exitosa. Base de datos legible enviada en ${chunks.length} bloque(s).`);
+                    // APEX: Delegación nativa iOS
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cloudSyncHandler) {
+                        const iosPayload = JSON.stringify({ url: googleSheetUrl, payload: payload });
+                        window.webkit.messageHandlers.cloudSyncHandler.postMessage(iosPayload);
+                        console.log(`[APEX SYS] Sincronización nativa iOS iniciada. ${chunks.length} módulos JSON enviados.`);
+                    } else {
+                        // Fallback Web normal
+                        await fetch(googleSheetUrl, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify(payload)
+                        });
+                        console.log(`[APEX SYS] Sincronización Web exitosa. ${chunks.length} módulos JSON enviados.`);
+                    }
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
@@ -1660,30 +1688,63 @@
             }
 
             const groups = {};
+            const virtualGroups = {};
+
             state.accounts.forEach(a => {
-                if(!groups[a.currency]) groups[a.currency] = [];
-                groups[a.currency].push(a);
+                if (a.type === 'virtual') {
+                    if(!virtualGroups[a.currency]) virtualGroups[a.currency] = [];
+                    virtualGroups[a.currency].push(a);
+                } else {
+                    if(!groups[a.currency]) groups[a.currency] = [];
+                    groups[a.currency].push(a);
+                }
             });
 
             let html = '';
-            for(let curr in groups) {
-                const accs = groups[curr];
-                let subTotal = 0;
-                accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
-                
-                html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100"><div class="flex justify-between items-center border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div class="space-y-3">`;
-                
-                accs.forEach(a => {
-                    const icon = a.type === 'liquid' ? 'fa-wallet text-blue-500' : (a.type === 'credit' ? 'fa-credit-card text-red-500' : (a.type === 'virtual' ? 'fa-mobile-screen text-purple-500' : 'fa-chart-line text-emerald-500'));
-                    const color = a.type === 'credit' || (a.type === 'virtual' && a.balance < 0) ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
-                    const sign = a.type === 'credit' ? '-' : '';
-                    const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : (a.type === 'virtual' ? `App: ${a.platform ? a.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(a.limit||0, curr)}` : `ID: ${a.id}`);
+            
+            if (Object.keys(groups).length > 0) {
+                for(let curr in groups) {
+                    const accs = groups[curr];
+                    let subTotal = 0;
+                    accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
                     
-                    html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-200"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
-                });
-                
-                html += `</div></div>`;
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100"><div class="flex justify-between items-center border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div class="space-y-3">`;
+                    
+                    accs.forEach(a => {
+                        const icon = a.type === 'liquid' ? 'fa-wallet text-blue-500' : (a.type === 'credit' ? 'fa-credit-card text-red-500' : 'fa-chart-line text-emerald-500');
+                        const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                        const sign = a.type === 'credit' ? '-' : '';
+                        const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
+                        
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-200"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                    });
+                    
+                    html += `</div></div>`;
+                }
             }
+
+            if (Object.keys(virtualGroups).length > 0) {
+                html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-solid fa-mobile-screen text-purple-500 mr-1"></i> Apps y Tarjetas Virtuales</h3></div>`;
+                for(let curr in virtualGroups) {
+                    const accs = virtualGroups[curr];
+                    let subTotal = 0;
+                    accs.forEach(a => { subTotal += a.balance; });
+                    
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50"><div class="flex justify-between items-center border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-purple-600">Virtuales ${curr}</h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div class="space-y-3">`;
+                    
+                    accs.forEach(a => {
+                        const icon = 'fa-mobile-screen text-purple-500';
+                        const color = a.balance < 0 ? 'theme-val-exp' : (a.balance > 0 ? 'theme-val-inc' : 'theme-text');
+                        const sign = '';
+                        const detailText = `App: ${a.platform ? a.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(a.limit||0, curr)}`;
+                        
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-slate-100 hover:border-purple-200 shadow-sm"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-purple-50 shadow-sm flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                    });
+                    
+                    html += `</div></div>`;
+                }
+            }
+
             listContainer.innerHTML = html;
         }
 
@@ -3138,31 +3199,37 @@
                     
                     const folderName = state.settings.backupFolder || 'Nexus';
                     const fileName = `nexus_backup_${currentUser}_${todayStr}.json`;
-                    const jsonData = JSON.stringify(state);
+                    const jsonData = JSON.stringify(state, null, 2);
                     
-                    // APEX HACK: Detección de iOS para automatización silenciosa vía Atajos
-                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-                    
-                    if (isIOS) {
-                        try {
-                            // 1. Inyectamos JSON pesado al portapapeles (Bypass límite de caracteres en URL)
-                            const tempTextArea = document.createElement("textarea");
-                            tempTextArea.value = jsonData;
-                            document.body.appendChild(tempTextArea);
-                            tempTextArea.select();
-                            document.execCommand("copy");
-                            document.body.removeChild(tempTextArea);
-                            
-                            // 2. Disparamos Atajo nativo pasándole la ruta deseada como Input
-                            const path = `${folderName}/${fileName}`;
-                            const shortcutUrl = `shortcuts://run-shortcut?name=NexusAutoSave&input=${encodeURIComponent(path)}`;
-                            window.location.href = shortcutUrl;
-                        } catch(e) {
+                    // APEX FIX: Detección prioritaria de contenedor nativo iOS (WKWebView)
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.saveBackupHandler) {
+                        window.webkit.messageHandlers.saveBackupHandler.postMessage(jsonData);
+                        console.log("[APEX SYS] Auto-Backup ejecutado y enviado al contenedor nativo de iOS.");
+                    } else {
+                        // APEX HACK: Fallback para iOS Safari normal vía Atajos
+                        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                        
+                        if (isIOS) {
+                            try {
+                                // 1. Inyectamos JSON pesado al portapapeles (Bypass límite de caracteres en URL)
+                                const tempTextArea = document.createElement("textarea");
+                                tempTextArea.value = jsonData;
+                                document.body.appendChild(tempTextArea);
+                                tempTextArea.select();
+                                document.execCommand("copy");
+                                document.body.removeChild(tempTextArea);
+                                
+                                // 2. Disparamos Atajo nativo pasándole la ruta deseada como Input
+                                const path = `${folderName}/${fileName}`;
+                                const shortcutUrl = `shortcuts://run-shortcut?name=NexusAutoSave&input=${encodeURIComponent(path)}`;
+                                window.location.href = shortcutUrl;
+                            } catch(e) {
+                                fallbackDownload(jsonData, fileName);
+                            }
+                        } else {
+                            // Fallback PWA estándar para Mac/PC (Requiere confirmación del navegador)
                             fallbackDownload(jsonData, fileName);
                         }
-                    } else {
-                        // Fallback PWA estándar para Mac/PC (Requiere confirmación del navegador)
-                        fallbackDownload(jsonData, fileName);
                     }
                 }
             }, 30000); // Check cada 30 segundos
