@@ -1175,21 +1175,18 @@
 
                     const payload = { action: "save", email: currentUser, chunks: chunks };
                     
-                    // APEX: Delegación nativa iOS
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cloudSyncHandler) {
-                        const iosPayload = JSON.stringify({ url: googleSheetUrl, payload: payload });
-                        window.webkit.messageHandlers.cloudSyncHandler.postMessage(iosPayload);
-                        console.log(`[APEX SYS] Sincronización nativa iOS iniciada. ${chunks.length} módulos JSON enviados.`);
-                    } else {
-                        // Fallback Web normal
-                        await fetch(googleSheetUrl, {
-                            method: 'POST',
-                            mode: 'no-cors',
-                            headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify(payload)
-                        });
-                        console.log(`[APEX SYS] Sincronización Web exitosa. ${chunks.length} módulos JSON enviados.`);
-                    }
+                    // APEX FIX: Forzar Fetch nativo (Bypass iOS Swift) para peticiones POST.
+                    // Las peticiones POST en Swift (URLSession) son destruidas por la redirección 302 
+                    // de Google Apps Script (borrando el body completo). El Fetch nativo en modo 'no-cors' 
+                    // atraviesa la redirección manteniendo todo el JSON intacto hacia la hoja de Sheets.
+                    await fetch(googleSheetUrl, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    console.log(`[APEX SYS] Sincronización Web SSoT exitosa. ${chunks.length} módulos JSON enviados.`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
@@ -1677,6 +1674,9 @@
             const bC = state.settings.baseCurrency || 'COP';
             
             (state.accounts || []).forEach(a => { 
+                // APEX FIX: Aislamiento contable estricto para cuentas de Terceros
+                if(a.type === 'terceros') return; 
+
                 const balInBase = convertCurrency(a.balance, a.currency, bC);
                 if(a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
                 else totalAssets += balInBase; 
@@ -1691,11 +1691,15 @@
 
             const groups = {};
             const virtualGroups = {};
+            const tercerosGroups = {}; // APEX FIX: Contenedor para Cuentas de Terceros
 
             state.accounts.forEach(a => {
                 if (a.type === 'virtual') {
                     if(!virtualGroups[a.currency]) virtualGroups[a.currency] = [];
                     virtualGroups[a.currency].push(a);
+                } else if (a.type === 'terceros') {
+                    if(!tercerosGroups[a.currency]) tercerosGroups[a.currency] = [];
+                    tercerosGroups[a.currency].push(a);
                 } else {
                     if(!groups[a.currency]) groups[a.currency] = [];
                     groups[a.currency].push(a);
@@ -1741,6 +1745,29 @@
                         const detailText = `App: ${a.platform ? a.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(a.limit||0, curr)}`;
                         
                         html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-slate-100 hover:border-purple-200 shadow-sm"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-purple-50 shadow-sm flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                    });
+                    
+                    html += `</div></div>`;
+                }
+            }
+
+            // APEX FIX: Módulo Independiente de Terceros (Fricción Cero en Totales Generales)
+            if (Object.keys(tercerosGroups).length > 0) {
+                html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-4"><i class="fa-solid fa-users text-orange-500 mr-1"></i> Cuentas de Terceros (Aisladas)</h3></div>`;
+                for(let curr in tercerosGroups) {
+                    const accs = tercerosGroups[curr];
+                    let subTotal = 0;
+                    accs.forEach(a => { subTotal += a.balance; });
+                    
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-orange-100/50 bg-slate-50/50"><div class="flex justify-between items-center border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-orange-600">Terceros ${curr}</h3><span class="text-sm font-black text-orange-600">${fmt(subTotal, curr)}</span></div><div class="space-y-3">`;
+                    
+                    accs.forEach(a => {
+                        const icon = 'fa-users text-orange-500';
+                        const color = a.balance < 0 ? 'text-red-500' : 'text-orange-500';
+                        const sign = '';
+                        const detailText = `Flujo Aislado | ID: ${a.id}`;
+                        
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-xl cursor-pointer transition-colors border border-slate-100 hover:border-orange-200 shadow-sm opacity-90"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-orange-50 shadow-sm flex items-center justify-center shrink-0"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-50/50 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2469,6 +2496,10 @@
             const curSel = $id('db-currency'); const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
             
             const tV = fTx.reduce((s,t) => {
+                // APEX FIX: Aislamiento del Flujo de Terceros en el motor de cálculo SSoT
+                const acc = state.accounts.find(a => a.id === t.accId);
+                if (acc && acc.type === 'terceros') return s; 
+                
                 const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
                 return t.type === 'income' ? s + amt : (t.type === 'expense' ? s - amt : s);
             }, 0); 
@@ -2915,7 +2946,8 @@
             totalPendingEl.innerText = fmt(totalPending, apCurr); 
             availableEl.innerText = fmt(limit - totalPending, apCurr);
             
-            const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => { const dA = new Date(a.date).getTime(); const dB = new Date(b.date).getTime(); return apSortOrder === 'asc' ? dA - dB : dB - dA; });
+            // APEX FIX: Aislamiento del filtro de ordenamiento. El calendario de pagos siempre es cronológico ascendente.
+            const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             
             const now = new Date(); now.setHours(0,0,0,0);
             let currentDay = now.getDay();
