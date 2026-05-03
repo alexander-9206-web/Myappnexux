@@ -817,7 +817,7 @@
                         </div>
                     </div>
                     
-                    <div id="note-container" style="order: 7;"><label id="f-note-label" class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota / Descripción</label><input type="text" id="f-note" class="form-input text-sm px-4 py-3 w-full" placeholder="Detalles de la transacción"></div>
+                    <div id="note-container" style="order: 7;"><label id="f-note-label" class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota / Descripción</label><input type="text" id="f-note" list="note-suggestions" oninput="handleNoteAutocomplete(event)" class="form-input text-sm px-4 py-3 w-full" placeholder="Detalles de la transacción"><datalist id="note-suggestions"></datalist></div>
                     <div id="datetime-container" class="grid grid-cols-2 gap-4" style="order: 8;"><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha</label><input type="date" id="f-date" required class="form-input text-xs px-2"></div><div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora</label><input type="time" id="f-time" required class="form-input text-xs px-2"></div></div>
                     
                     <div id="recur-container" class="hidden animate-slideUp border-t border-slate-100 pt-4" style="order: 9;">
@@ -2322,14 +2322,15 @@
             const subContainer = $id('sub-cat-container'); if(subContainer) subContainer.classList.add('hidden');
             const newSubCont = $id('new-cat-sub-container'); if(newSubCont) newSubCont.classList.add('hidden');
             
-            // Lógica Módulo Clasificación
-            const costMod = $id('cost-type-module'); 
-            if(costMod) { if(type === 'expense' || type === 'income') costMod.classList.remove('hidden'); else costMod.classList.add('hidden'); }
+            // APEX FIX: Popular datalist de autocompletado inteligente
+            const datalist = $id('note-suggestions');
+            if (datalist) {
+                datalist.innerHTML = '';
+                const pastNotes = new Set();
+                state.tx.filter(t => t.type === type && t.note).sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach(t => pastNotes.add(t.note.trim()));
+                pastNotes.forEach(n => { datalist.innerHTML += `<option value="${n}">`; });
+            }
 
-            const curS = $id('f-currency'); if(curS) { curS.innerHTML = ''; CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); curS.value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency; }
-            populateFormAccounts();
-            const apFreq = $id('ap-freq-container'); if(type === 'afterpay') { if(apFreq) apFreq.classList.remove('hidden'); } else { if(apFreq) apFreq.classList.add('hidden'); }
-            const recCont = $id('recur-container'); if(type === 'expense') { if(recCont) recCont.classList.remove('hidden'); } else { if(recCont) recCont.classList.add('hidden'); }
             if(!txId) { 
                 const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0');
                 if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : ''; $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
@@ -2377,6 +2378,49 @@
             checkTxAccount();
         }
 
+        // APEX FIX: Predictor Semántico (Autofill Categorías basado en Historial)
+        function handleNoteAutocomplete(e) {
+            const noteInput = $id('f-note');
+            if (!noteInput || !noteInput.value) return;
+            const val = noteInput.value;
+            const type = $id('f-type').value;
+            if(type === 'afterpay') return; 
+            
+            // Evitar auto-completado molesto si el usuario está borrando letras
+            if (e && e.inputType === 'deleteContentBackward') return;
+
+            // Buscar coincidencia por las "primeras letras" (Prefix Match)
+            const match = state.tx.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).find(t => t.type === type && t.note && t.note.toLowerCase().startsWith(val.toLowerCase()));
+            
+            if (match) {
+                // 1. Relleno predictivo y selección de texto sobrante
+                if (match.note.toLowerCase() !== val.toLowerCase() && e && e.inputType === 'insertText') {
+                    noteInput.value = match.note;
+                    noteInput.setSelectionRange(val.length, match.note.length);
+                }
+
+                // 2. Relleno automático de categorías
+                if (match.cat) {
+                    const parts = match.cat.match(/\[(.*?)\]\s*(.*)/);
+                    const selP = $id('f-cat-parent-select');
+                    if (selP) {
+                        if (parts && parts[1]) {
+                            selP.value = parts[1];
+                            handleParentCategoryChange();
+                            const selSub = $id('f-cat-sub-select');
+                            if (selSub && parts[2]) selSub.value = parts[2].trim();
+                        } else if (match.cat) {
+                            selP.value = match.cat;
+                            handleParentCategoryChange();
+                        }
+                    }
+                    const costMod = $id('f-cost-type');
+                    if (costMod && match.costType) costMod.value = match.costType;
+                }
+            }
+        }
+
+        function closeForm() { const modal = $id('tx-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
             if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
