@@ -2151,6 +2151,9 @@
                        else if (t.cat === currentParent) t.cat = newName.trim();
                     });
                     saveState(); updateDashboard(); openForm(type, $id('f-id').value);
+                    // APEX FIX: Sincronización en tiempo real con Configuración y Auditoría
+                    if(typeof updateCatManageView === 'function') updateCatManageView();
+                    if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
                 } else {
                     sel.value = ''; inp.value = '';
                 }
@@ -2171,6 +2174,9 @@
             if(!state.catParents[type].includes(val)) {
                 state.catParents[type].push(val);
                 saveState();
+                // APEX FIX: Enlace dinámico e inmediato con Configuración y Auditoría
+                if(typeof updateCatManageView === 'function') updateCatManageView();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
             }
             
             const selP = $id('f-cat-parent-select'); 
@@ -2197,6 +2203,9 @@
             if(!state.categories[type].includes(fullCatName)) {
                 state.categories[type].push(fullCatName);
                 saveState();
+                // APEX FIX: Enlace dinámico e inmediato con Configuración y Auditoría
+                if(typeof updateCatManageView === 'function') updateCatManageView();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
             }
             
             handleParentCategoryChange();
@@ -2460,6 +2469,21 @@
             
             let cat = sub ? `[${parent}] ${sub}` : parent;
             if(type === 'afterpay' && !parent) cat = '🛍️ Afterpay';
+            
+            // APEX FIX: Enlazar Diccionario global si se crea la categoría directo al guardar (bypass del botón +)
+            if (parent && type !== 'afterpay') {
+                if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+                if(!state.catParents[type]) state.catParents[type] = [];
+                if(!state.catParents[type].includes(parent)) state.catParents[type].push(parent);
+                
+                if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+                if(!state.categories[type]) state.categories[type] = [];
+                if(!state.categories[type].includes(cat)) state.categories[type].push(cat);
+                
+                if(typeof updateCatManageView === 'function') updateCatManageView();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
+            }
+
             const accId = $id('f-account').value; const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
             const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             const apCurr = state.settings.apCurrency || 'AUD';
