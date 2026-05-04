@@ -2521,10 +2521,15 @@
             const fsEl = $id('db-filter-start'); const feEl = $id('db-filter-end'); const ftEl = $id('db-filter-type'); const fcEl = $id('db-filter-cat'); const fCurrEl = $id('db-filter-currency'); if(!fsEl || !feEl || !ftEl || !fcEl) return;
             const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); const tp = ftEl.value; const ct = fcEl.value; const fCurr = fCurrEl ? fCurrEl.value : 'all';
             
+            const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
+
             let fTx = getEnrichedTx().filter(t => { 
                 const d = new Date(t.date); 
                 if(d < st || d > en) return false; 
                 
+                // APEX FIX: Aplicación estricta del Buscador de Texto (Cliente / Descripción)
+                if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
+
                 if(tp !== 'all') {
                     if (tp === 'afterpay' && !t.cat.includes('Afterpay')) return false;
                     if (tp !== 'afterpay' && t.type !== tp) return false;
@@ -2922,6 +2927,12 @@
                 const quotas = t.apQuotas || 4;
                 totalPending += (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
             });
+
+            // APEX FIX: Buscador Inteligente estricto por Cliente / Descripción
+            const apSearchQ = $id('ap-filter-search') ? $id('ap-filter-search').value.toLowerCase().trim() : '';
+            if (apSearchQ) {
+                activeAp = activeAp.filter(t => (t.note||'').toLowerCase().includes(apSearchQ));
+            }
 
             // APEX FIX: Motor de Escaneo de Duplicados Exactos y Agrupación
             if (apShowDuplicates) {
