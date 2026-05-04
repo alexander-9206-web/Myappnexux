@@ -1850,17 +1850,50 @@
             if(!el) return;
             if(el.classList.contains('hidden')) {
                 el.classList.remove('hidden'); el.classList.add('flex');
-                const txs = state.tx.filter(t => t.accId === id).sort((a,b) => new Date(b.date) - new Date(a.date));
+                
+                // APEX FIX: Interceptar Transferencias como Entradas (toAccId) o Salidas (accId)
+                const txs = state.tx.filter(t => t.accId === id || (t.type === 'transfer' && t.toAccId === id)).sort((a,b) => new Date(b.date) - new Date(a.date));
+                
                 if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
+                
                 el.innerHTML = txs.slice(0, 15).map(t => {
                     const dDate = new Date(t.date);
                     const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                    return `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase">${dDate.toLocaleDateString()} ${timeStr}</span></div><span class="text-[10px] font-black ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'theme-text'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</span></div>`;
+                    
+                    // APEX FIX: Determinar polaridad del flujo para esta cuenta específica
+                    const isOutflow = t.type === 'expense' || (t.type === 'transfer' && t.accId === id);
+                    const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === id);
+                    const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text');
+                    const sign = isOutflow ? '-' : '+';
+
+                    return `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase">${dDate.toLocaleDateString()} ${timeStr}</span></div><span class="text-[10px] font-black ${colorCls}">${sign}${fmt(t.amount, t.currency)}</span></div>`;
                 }).join('');
             } else {
                 el.classList.add('hidden'); el.classList.remove('flex');
             }
         }
+        
+        // APEX FIX: Restauración de funciones del modal de Historial de Cuenta
+        function openAccountHistory(id) { currentHistAccId = id; const acc = state.accounts.find(a => a.id === id); if(!acc) return; const mod = $id('account-history-modal'); if(mod) mod.classList.remove('hidden'); $id('hist-acc-name').innerText = acc.name; $id('hist-acc-balance').innerText = fmt(acc.balance, acc.currency); setHistFilter('all'); }
+        function closeAccountHistory() { const mod = $id('account-history-modal'); if(mod) { mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); currentHistAccId = null; }, 300); } }
+        function setHistFilter(period) { currentHistPeriod = period; $qAll('#account-history-modal .filter-chip').forEach(b => b.classList.remove('active')); const btn = $id('hf-' + period); if(btn) btn.classList.add('active'); renderHistAccList(); }
+        function renderHistAccList() {
+            const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return; const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
+            let txs = state.tx.filter(t => t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId));
+            const now = new Date();
+            if(currentHistPeriod === '30d') { const past30 = new Date(now.getTime() - 30 * 86400000); txs = txs.filter(t => new Date(t.date) >= past30); } else if(currentHistPeriod === 'month') { txs = txs.filter(t => new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()); } else if(currentHistPeriod === 'year') { txs = txs.filter(t => new Date(t.date).getFullYear() === now.getFullYear()); }
+            txs.sort((a,b) => new Date(b.date) - new Date(a.date));
+            if(txs.length === 0) { list.innerHTML = '<p class="text-center text-[10px] font-bold uppercase text-slate-400 mt-4">No hay transacciones en este periodo.</p>'; return; }
+            list.innerHTML = txs.map(t => {
+                const dDate = new Date(t.date); const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
+                const isOutflow = t.type === 'expense' || (t.type === 'transfer' && t.accId === currentHistAccId);
+                const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === currentHistAccId);
+                const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text'); const sign = isOutflow ? '-' : '+';
+                const iClass = isOutflow ? 'fa-arrow-down text-red-500 bg-red-50' : (isInflow ? 'fa-arrow-up text-emerald-500 bg-emerald-50' : 'fa-right-left text-indigo-500 bg-indigo-50');
+                return `<div class="theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${dDate.toLocaleDateString()} ${timeStr}</p></div></div><p class="font-black text-xs ${colorCls}">${sign}${fmt(t.amount, t.currency)}</p></div>`;
+            }).join('');
+        }
+
         function openAccountModal() { const mod = $id('new-account-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('acc-form-title').innerText = "Nueva Cuenta"; $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; $id('fa-id').value = ''; $id('fa-name').value = ''; const scp = $id('fa-scope'); if(scp) scp.value = 'personal'; const balEl = $id('fa-balance'); balEl.value = ''; balEl.dataset.raw = ''; $id('fa-type').value = 'liquid'; const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value=''; vLimEl.dataset.raw=''; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value=''; vTerm.dataset.raw=''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value=''; vPay.dataset.raw=''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = 'latitud'; toggleCreditFields(); const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.add('hidden'); }
         function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); $id('acc-form-title').innerText = "Detalles y Edición"; $id('fa-id').value = acc.id; $id('fa-name').value = acc.name.replace('👥 ', ''); $id('fa-currency').value = acc.currency || 'COP'; const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal'; const balEl = $id('fa-balance'); balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; $id('fa-type').value = acc.type; toggleCreditFields(); if(acc.type === 'credit') { const limEl = $id('fa-limit'); limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; const cutEl = $id('fa-cutoff'); cutEl.value = acc.cutoffDay||1; cutEl.dataset.raw = acc.cutoffDay||1; const payEl = $id('fa-payday'); payEl.value = acc.payDay||15; payEl.dataset.raw = acc.payDay||15; const rateEl = $id('fa-rate'); rateEl.value = acc.rate||0; rateEl.dataset.raw = acc.rate||0; } else if(acc.type === 'virtual') { const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value = fmt(acc.limit||0, acc.currency); vLimEl.dataset.raw = acc.limit||0; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value = acc.virtualTerm||''; vTerm.dataset.raw = acc.virtualTerm||''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value = acc.payDay||''; vPay.dataset.raw = acc.payDay||''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = acc.platform || 'latitud'; } const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.remove('hidden'); }
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
