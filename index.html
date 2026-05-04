@@ -773,6 +773,12 @@
                         <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="f-currency" class="form-input text-sm text-center" onchange="populateFormAccounts()"></select></div>
                         <div id="account-container"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta / Medio</label><select id="f-account" class="form-input text-sm" required onchange="checkTxAccount()"></select></div>
                     </div>
+
+                    <!-- APEX FIX: Campo de Cuenta Destino exclusivo para Transferencias -->
+                    <div id="account-dest-container" class="hidden animate-slideUp" style="order: 4;">
+                        <label class="text-[10px] font-black uppercase text-indigo-600 ml-2"><i class="fa-solid fa-arrow-right mr-1"></i>Cuenta Destino</label>
+                        <select id="f-account-dest" class="form-input text-sm bg-indigo-50 border-indigo-200 text-indigo-900 font-bold"></select>
+                    </div>
                     
                     <!-- APEX FIX: Reubicación visual base. El JS controlará el orden final -->
                     <div id="note-container" style="order: 1;"><label id="f-note-label" class="text-[10px] font-black uppercase text-slate-400 ml-2">Nota / Descripción</label><input type="text" id="f-note" list="note-suggestions" oninput="handleNoteAutocomplete(event)" class="form-input text-sm px-4 py-3 w-full" placeholder="Detalles de la transacción"><datalist id="note-suggestions"></datalist></div>
@@ -2308,6 +2314,7 @@
             const type = $id('f-type').value;
             const curS = $id('f-currency');
             const aS = $id('f-account'); const accCont = $id('account-container');
+            const aSDest = $id('f-account-dest');
             const lbl = $id('f-currency-label'); 
             
             if(type === 'afterpay') {
@@ -2317,15 +2324,22 @@
                 if(lbl) lbl.innerText = apCurr;
             } else {
                 if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = '';
+                if(aSDest) aSDest.innerHTML = '';
                 if(curS) curS.disabled = false;
                 const selectedCurr = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
                 if(lbl) lbl.innerText = selectedCurr;
                 const accs = (state.accounts || []).filter(a => a.currency === selectedCurr);
                 
-                // APEX FIX: Fondo normal en lista desplegable
+                // APEX FIX: Llenado de cuenta origen y destino
                 accs.forEach(a => { 
                     aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; 
+                    if (aSDest) aSDest.innerHTML += `<option value="${a.id}">${a.name}</option>`; 
                 });
+
+                // Prevenir colisiones: si hay más de una cuenta y es transferencia, elegimos una destino distinta a la origen
+                if (type === 'transfer' && accs.length > 1 && aSDest) {
+                    aSDest.selectedIndex = 1;
+                }
             }
             checkTxAccount();
         }
@@ -2349,14 +2363,15 @@
 
             const catMod = $id('category-module');
             if (catMod) {
-                // APEX FIX: Nunca ocultar el módulo de categoría (Habilitado para Afterpay)
                 catMod.classList.remove('hidden');
             }
 
-            // APEX FIX: Reordenamiento global: Descripción -> Monto -> Cuenta -> Categoría
+            // APEX FIX: Reordenamiento global adaptativo (Transferencias incluidas)
             const amtEl = $id('f-amount');
             const lblWrap = $id('f-currency-label-wrapper');
             const caCont = $id('currency-account-container');
+            const destCont = $id('account-dest-container');
+            const accLbl = $id('f-account') ? $id('f-account').previousElementSibling : null;
             
             $id('note-container').style.order = '1';
             $id('amount-container').style.order = '2';
@@ -2368,14 +2383,29 @@
                 if(amtEl) amtEl.dataset.type = 'number';
                 if(lblWrap) lblWrap.classList.add('hidden');
                 if(caCont) caCont.classList.add('hidden');
+                if(destCont) destCont.classList.add('hidden');
+            } else if (type === 'transfer') {
+                if(caCont) { caCont.classList.remove('hidden'); caCont.style.order = '3'; }
+                if(accLbl) accLbl.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square mr-1 text-indigo-500"></i> Origen';
+                if(destCont) { destCont.classList.remove('hidden'); destCont.style.order = '4'; }
+                if(catMod) catMod.classList.add('hidden');
+                const costMod = $id('cost-type-module'); if(costMod) costMod.classList.add('hidden');
+                const ccCont = $id('cc-term-container'); if(ccCont) ccCont.classList.add('hidden');
+                const apFreq = $id('ap-freq-container'); if(apFreq) apFreq.classList.add('hidden');
+                const dtCont = $id('datetime-container'); if(dtCont) dtCont.style.order = '5';
+                const recCont = $id('recur-container'); if(recCont) recCont.classList.add('hidden');
+                if(amtEl) amtEl.dataset.type = 'currency';
+                if(lblWrap) lblWrap.classList.remove('hidden');
             } else {
-                if(caCont) { caCont.classList.remove('hidden'); caCont.style.order = '3'; } // Cuenta después de monto
-                if(catMod) catMod.style.order = '4';
-                const costMod = $id('cost-type-module'); if(costMod) costMod.style.order = '5';
+                if(caCont) { caCont.classList.remove('hidden'); caCont.style.order = '3'; } 
+                if(accLbl) accLbl.innerText = 'Cuenta / Medio';
+                if(destCont) destCont.classList.add('hidden');
+                if(catMod) { catMod.classList.remove('hidden'); catMod.style.order = '4'; }
+                const costMod = $id('cost-type-module'); if(costMod) { costMod.classList.remove('hidden'); costMod.style.order = '5'; }
                 const ccCont = $id('cc-term-container'); if(ccCont) ccCont.style.order = '6';
                 const apFreq = $id('ap-freq-container'); if(apFreq) apFreq.style.order = '7';
                 const dtCont = $id('datetime-container'); if(dtCont) dtCont.style.order = '8';
-                const recCont = $id('recur-container'); if(recCont) recCont.style.order = '9';
+                const recCont = $id('recur-container'); if(recCont) { recCont.classList.remove('hidden'); recCont.style.order = '9'; }
                 if(amtEl) amtEl.dataset.type = 'currency';
                 if(lblWrap) lblWrap.classList.remove('hidden');
             }
@@ -2416,10 +2446,15 @@
 
             if(!txId) { 
                 const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0');
-                if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : ''; $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
+                if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : (type === 'transfer' ? '🔀 Entre Cuentas' : ''); $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
                 if($id('f-cat-sub')) $id('f-cat-sub').value = '';
                 if($id('f-cost-type')) $id('f-cost-type').value = 'variable';
                 const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
+            } else {
+                const oldTx = state.tx.find(t => t.id === txId);
+                if (oldTx && oldTx.type === 'transfer' && oldTx.toAccId) {
+                    setTimeout(() => { const destEl = $id('f-account-dest'); if(destEl) destEl.value = oldTx.toAccId; }, 50);
+                }
             }
             checkTxAccount();
         }
@@ -2428,8 +2463,16 @@
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
             if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
-                const acc = state.accounts.find(a => a.id === tx.accId); 
-                if(acc && tx.type !== 'afterpay' && tx.type !== 'transfer') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
+                // APEX FIX: Reversión contable precisa para Transferencias
+                if (tx.type === 'transfer') {
+                    const oOrig = state.accounts.find(a => a.id === tx.accId);
+                    const oDest = state.accounts.find(a => a.id === tx.toAccId);
+                    if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
+                    if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
+                } else {
+                    const acc = state.accounts.find(a => a.id === tx.accId); 
+                    if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
+                }
                 state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
                 saveState(); updateDashboard(); if(state.activeTab === 'database') renderDatabase(); if(state.activeTab === 'afterpay') renderAfterpay(); 
             } 
@@ -2448,9 +2491,10 @@
             
             let cat = sub ? `[${parent}] ${sub}` : parent;
             if(type === 'afterpay' && !parent) cat = '🛍️ Afterpay';
+            if(type === 'transfer') cat = '🔀 Entre Cuentas';
             
             // APEX FIX: Enlazar Diccionario global si se crea la categoría directo al guardar (bypass del botón +)
-            if (parent && type !== 'afterpay') {
+            if (parent && type !== 'afterpay' && type !== 'transfer') {
                 if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
                 if(!state.catParents[type]) state.catParents[type] = [];
                 if(!state.catParents[type].includes(parent)) state.catParents[type].push(parent);
@@ -2463,14 +2507,23 @@
                 if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
             }
 
-            const accId = $id('f-account').value; const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
+            const accId = $id('f-account').value; 
+            const destAccId = $id('f-account-dest') ? $id('f-account-dest').value : null;
+            const date = $id('f-date').value; const time = $id('f-time') ? $id('f-time').value : '12:00'; const note = $id('f-note').value; 
             const selectedCurr = $id('f-currency') ? $id('f-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             const apCurr = state.settings.apCurrency || 'AUD';
             
             if(!amount || amount <= 0) return alert("Ingresa un monto válido mayor a cero mediante el teclado numérico."); 
             if(type !== 'afterpay' && (!accId || $id('f-account').options.length === 0)) return alert("Atención: Necesitas crear una cuenta (Bóveda) en esta divisa antes de registrar un movimiento.");
 
+            // APEX FIX: Barreras de Protección y Lógica para Transferencias
+            if (type === 'transfer') {
+                if (!destAccId) return alert("Debes seleccionar una cuenta destino válida.");
+                if (accId === destAccId) return alert("La cuenta de origen y destino no pueden ser la misma bóveda.");
+            }
+
             const acc = state.accounts.find(a => a.id === accId); 
+            const destAcc = state.accounts.find(a => a.id === destAccId); 
 
             if(!id && type === 'expense' && acc && acc.type === 'credit') {
                 const termStr = $id('f-cc-term').dataset.raw; const term = parseInt(termStr);
@@ -2478,7 +2531,6 @@
                     const available = (acc.limit || 0) - acc.balance; 
                     if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`)) return; } 
                     acc.balance += amount; 
-                    // APEX FIX: Añadiendo costType a TC
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
                     state.tx.push(ccTx); saveCloudTx(ccTx);
@@ -2489,18 +2541,48 @@
 
             if(id) {
                 const oldTx = state.tx.find(t => t.id === id);
-                if(oldTx && oldTx.accId) { const oldAcc = state.accounts.find(a => a.id === oldTx.accId); if(oldAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } }
-                // APEX FIX: Actualizar metadato costType
-                oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; oldTx.date = new Date(`${date}T${time}`).toISOString(); oldTx.note = note; oldTx.costType = costType;
-                if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
-                const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
-                const newAcc = state.accounts.find(a => a.id === oldTx.accId);
-                if(newAcc && oldTx.type !== 'afterpay' && oldTx.type !== 'transfer') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
-                saveCloudTx(oldTx);
+                if(oldTx) {
+                    // Reversión contable antigua
+                    if (oldTx.type === 'transfer') {
+                        const oOrig = state.accounts.find(a => a.id === oldTx.accId);
+                        const oDest = state.accounts.find(a => a.id === oldTx.toAccId);
+                        if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= oldTx.amount; else oOrig.balance += oldTx.amount; }
+                        if(oDest) { if(oDest.type === 'credit') oDest.balance += oldTx.amount; else oDest.balance -= oldTx.amount; }
+                    } else if (oldTx.accId) { 
+                        const oldAcc = state.accounts.find(a => a.id === oldTx.accId); 
+                        if(oldAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } 
+                    }
+                    
+                    // Actualización de propiedades
+                    oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = type==='afterpay'?null:accId; 
+                    if(type === 'transfer') oldTx.toAccId = destAccId;
+                    oldTx.date = new Date(`${date}T${time}`).toISOString(); oldTx.note = note; oldTx.costType = costType;
+                    if(type === 'afterpay') { oldTx.apFreq = $id('f-ap-freq').value; oldTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; oldTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; oldTx.currency = apCurr; oldTx.original_currency = apCurr; } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
+                    const isRecur = $id('f-is-recur') ? $id('f-is-recur').checked : false; oldTx.isRecurrent = isRecur; if(isRecur) { oldTx.recurFreq = $id('f-recur-freq').value; oldTx.recurCount = parseInt($id('f-recur-count').value) || 12; } else { delete oldTx.recurFreq; delete oldTx.recurCount; }
+                    
+                    // Aplicación contable nueva
+                    if (type === 'transfer') {
+                        const nOrig = state.accounts.find(a => a.id === accId);
+                        const nDest = state.accounts.find(a => a.id === destAccId);
+                        if(nOrig) { if(nOrig.type === 'credit') nOrig.balance += amount; else nOrig.balance -= amount; }
+                        if(nDest) { if(nDest.type === 'credit') nDest.balance -= amount; else nDest.balance += amount; }
+                    } else {
+                        const newAcc = state.accounts.find(a => a.id === oldTx.accId);
+                        if(newAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
+                    }
+                    saveCloudTx(oldTx);
+                }
             } else {
-                if(acc && type !== 'afterpay' && type !== 'transfer') { if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } } 
-                // APEX FIX: Inyectar metadato costType en nuevos ingresos y gastos para que el Predictor lo memorice
-                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, date: new Date(`${date}T${time}`).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr, costType: costType }; 
+                // Nuevo registro
+                if(type === 'transfer') {
+                    if(acc) { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; }
+                    if(destAcc) { if(destAcc.type === 'credit') destAcc.balance -= amount; else destAcc.balance += amount; }
+                } else if(acc && type !== 'afterpay') { 
+                    if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } 
+                    if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } 
+                } 
+                
+                const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, toAccId: type === 'transfer' ? destAccId : null, date: new Date(`${date}T${time}`).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr, costType: costType }; 
                 const newTx = buildTransactionSchema(rawTx); if (type === 'afterpay') { newTx.apFreq = $id('f-ap-freq').value; newTx.apQuotas = parseInt($id('f-ap-quotas').value) || 4; newTx.apPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : 0; } 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
@@ -2652,7 +2734,6 @@
                 const origCur = t.original_currency || t.currency;
                 const origAmt = t.original_amount || t.amount;
                 
-                // APEX FIX: Coloración de transacciones pares en modo duplicados
                 let isPar = false;
                 if (dbShowDuplicates) {
                     const sig = `${t.note || ''}|${t.cat || ''}|${origAmt}|${t.date ? t.date.split('T')[0] : ''}`;
@@ -2669,6 +2750,13 @@
                 
                 const iE = t.type === 'expense' || t.type === 'afterpay'; 
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
+                
+                // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
+                let aNDest = '';
+                if(t.type === 'transfer') {
+                    const dN = state.accounts.find(a=>a.id===t.toAccId)?.name||'--';
+                    aNDest = ` <i class="fa-solid fa-arrow-right text-[7px] mx-1 text-indigo-400"></i> ${dN}`;
+                }
                 
                 let pBadge = ''; 
                 if (t.type === 'afterpay' && !t.isProjected) {
@@ -2704,7 +2792,7 @@
                 const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
