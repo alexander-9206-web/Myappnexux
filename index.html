@@ -2322,7 +2322,9 @@
             const selP = $id('f-cat-parent-select'); 
             if (selP) { 
                 selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
-                const parents = state.catParents ? (state.catParents[type] || []) : []; 
+                // APEX FIX: Inicialización profunda de memoria para evitar amnesia en UI
+                if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+                const parents = state.catParents[type] || []; 
                 parents.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
                 selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
                 selP.classList.remove('hidden'); 
@@ -2543,15 +2545,17 @@
                 select.innerHTML = '<option value="all">Todas</option>'; 
                 let cats = [];
                 
+                if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+                
                 if (type === 'all') {
-                    const incCats = state.categories && state.categories.income ? state.categories.income : DEFAULT_CATEGORIES.income;
-                    const expCats = state.categories && state.categories.expense ? state.categories.expense : DEFAULT_CATEGORIES.expense;
-                    const transCats = state.categories && state.categories.transfer ? state.categories.transfer : DEFAULT_CATEGORIES.transfer;
+                    const incCats = state.categories.income || [];
+                    const expCats = state.categories.expense || [];
+                    const transCats = state.categories.transfer || [];
                     cats = [...incCats, ...expCats, ...transCats];
                 } else if (type === 'afterpay') {
                     cats = ['🛍️ Afterpay'];
                 } else {
-                    cats = state.categories && state.categories[type] ? state.categories[type] : DEFAULT_CATEGORIES[type] || [];
+                    cats = state.categories[type] || [];
                 }
                 
                 // Remover duplicados por seguridad
@@ -3364,15 +3368,14 @@
                 if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS)); 
                 if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
                 
-                // Cargar padres explícitos
                 (state.catParents[type] || []).forEach(p => parents.add(p));
                 
-                // Cargar padres implícitos desde las categorías completas (por si falló la estructura en versiones previas)
-                const currentCats = state.categories[type] || DEFAULT_CATEGORIES[type] || [];
+                // Cargar padres implícitos por si hay datos corruptos
+                const currentCats = state.categories[type] || [];
                 currentCats.forEach(c => { 
                     const m = c.match(/\[(.*?)\]\s*(.*)/); 
                     if(m && m[1]) parents.add(m[1].trim()); 
-                    else parents.add(c.trim()); // Si no tiene corchetes, asumimos que es padre puro
+                    else parents.add(c.trim()); 
                 });
                 
                 Array.from(parents).forEach(p => { dList.innerHTML += `<option value="${p}">`; }); 
@@ -3383,15 +3386,26 @@
         function renderAdvancedCategories() {
             const type = $id('cat-manage-type').value; const list = $id('cat-manage-list'); 
             
-            // Forzar lectura desde state.categories o usar defaults como fallback
-            const cats = state.categories && state.categories[type] ? state.categories[type] : DEFAULT_CATEGORIES[type] || [];
+            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+            if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+
+            const cats = state.categories[type] || [];
+            const parents = state.catParents[type] || [];
             
-            if(cats.length === 0) {
+            // Combina Padres y Subcategorías para poder gestionar todo el ecosistema
+            const allItems = new Set([...parents, ...cats]);
+            
+            if(allItems.size === 0) {
                  list.innerHTML = `<p class="text-[10px] text-center text-slate-400 font-bold uppercase col-span-2 py-4">No hay categorías configuradas.</p>`;
                  return;
             }
             
-            list.innerHTML = cats.map(c => `<div onclick="openCategoryEdit('${c}')" class="flex justify-between items-center p-4 hover:bg-purple-50 bg-white rounded-[1.5rem] cursor-pointer border border-slate-100 hover:border-purple-200 transition-colors group"><div class="flex items-center gap-3"><div class="w-2.5 h-2.5 rounded-full ${type==='income'?'bg-emerald-400':type==='expense'?'bg-red-400':'bg-indigo-400'} shadow-sm"></div><span class="text-[10px] font-black uppercase text-slate-700">${c}</span></div><div class="flex items-center gap-4"><span class="text-[8px] font-bold text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity bg-purple-100 px-2 py-0.5 rounded">EDITAR</span><button onclick="event.stopPropagation(); removeAdvancedCategory('${c}')" type="button" class="text-slate-300 hover:text-red-500 bg-slate-50 w-8 h-8 rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`).join('');
+            list.innerHTML = Array.from(allItems).sort().map(c => {
+                const isParentOnly = !c.includes('[');
+                const badge = isParentOnly ? '<span class="bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded text-[8px] font-black uppercase ml-2">PADRE</span>' : '<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase ml-2">SUB</span>';
+                
+                return `<div onclick="openCategoryEdit('${c}')" class="flex justify-between items-center p-4 hover:bg-purple-50 bg-white rounded-[1.5rem] cursor-pointer border border-slate-100 hover:border-purple-200 transition-colors group"><div class="flex items-center gap-3"><div class="w-2.5 h-2.5 rounded-full ${type==='income'?'bg-emerald-400':type==='expense'?'bg-red-400':'bg-indigo-400'} shadow-sm"></div><div class="flex flex-col"><span class="text-[10px] font-black uppercase text-slate-700 flex items-center">${c} ${badge}</span></div></div><div class="flex items-center gap-4"><span class="text-[8px] font-bold text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity bg-purple-100 px-2 py-0.5 rounded">EDITAR</span><button onclick="event.stopPropagation(); removeAdvancedCategory('${c}')" type="button" class="text-slate-300 hover:text-red-500 bg-slate-50 w-8 h-8 rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`;
+            }).join('');
         }
 
         function addParentCategory() { 
@@ -3405,35 +3419,87 @@
             
             if(!parent) return alert("Debes indicar Categoría Padre (Ej: Transporte). La subcategoría es opcional.");
             
-            // Fallbacks de seguridad
             if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
             if(!state.catParents[type]) state.catParents[type] = [];
             if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
             if(!state.categories[type]) state.categories[type] = [];
 
-            if(!state.catParents[type].includes(parent)) { state.catParents[type].push(parent); }
+            let added = false;
 
-            const fullCatName = sub ? `[${parent}] ${sub}` : parent; 
-            
-            if(!state.categories[type].includes(fullCatName)) { 
-                state.categories[type].push(fullCatName); 
+            if(!state.catParents[type].includes(parent)) { 
+                state.catParents[type].push(parent); 
+                added = true;
+            }
+
+            if (sub) {
+                const fullCatName = `[${parent}] ${sub}`; 
+                if(!state.categories[type].includes(fullCatName)) { 
+                    state.categories[type].push(fullCatName); 
+                    added = true;
+                } else {
+                    alert("Esta subcategoría ya existe.");
+                }
+            } else {
+                if(!state.categories[type].includes(parent)) {
+                    state.categories[type].push(parent);
+                    added = true;
+                }
+            }
+
+            if(added) {
                 saveState(); 
                 renderAdvancedCategories(); 
                 populateFilters(); 
                 updateCatManageView();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
                 $id('manage-cat-parent').value = ''; 
                 $id('manage-cat-sub').value = ''; 
-            } else {
-                alert("Esta categoría ya existe.");
             }
         }
-        function removeAdvancedCategory(cat) { const type = $id('cat-manage-type').value; state.categories[type] = state.categories[type].filter(c => c !== cat); saveState(); renderAdvancedCategories(); populateFilters(); }
+        function removeAdvancedCategory(cat) { 
+            const type = $id('cat-manage-type').value; 
+            if(state.categories[type]) state.categories[type] = state.categories[type].filter(c => c !== cat); 
+            if(state.catParents[type]) state.catParents[type] = state.catParents[type].filter(p => p !== cat);
+            saveState(); renderAdvancedCategories(); populateFilters(); if(typeof updateDbCatFilter === 'function') updateDbCatFilter(); updateCatManageView();
+        }
         function openCategoryEdit(cat) { $id('edit-cat-panel').classList.remove('hidden'); $id('edit-cat-original').value = cat; $id('edit-cat-name').value = cat; }
         function closeCategoryEdit() { $id('edit-cat-panel').classList.add('hidden'); }
         function saveCategoryEdit() {
             const type = $id('cat-manage-type').value; const oldName = $id('edit-cat-original').value; const newName = $id('edit-cat-name').value.trim();
-            if(!newName || oldName === newName) return closeCategoryEdit(); const idx = state.categories[type].indexOf(oldName);
-            if(idx > -1) { state.categories[type][idx] = newName; state.tx.forEach(t => { if(t.cat === oldName) t.cat = newName; }); saveState(); updateDashboard(); renderAdvancedCategories(); populateFilters(); closeCategoryEdit(); }
+            if(!newName || oldName === newName) return closeCategoryEdit(); 
+            
+            // Actualización Profunda en Memoria
+            if(state.categories[type]) {
+                const idx = state.categories[type].indexOf(oldName);
+                if(idx > -1) state.categories[type][idx] = newName;
+            }
+            if(state.catParents[type]) {
+                const pIdx = state.catParents[type].indexOf(oldName);
+                if(pIdx > -1) state.catParents[type][pIdx] = newName;
+            }
+
+            // Sincronización Inversa en Base de Datos (Auditoría / Egresos)
+            state.tx.forEach(t => { 
+                if(t.cat === oldName) t.cat = newName; 
+                // Actualiza las subcategorías huérfanas si se edita el padre
+                if(!oldName.includes('[')) {
+                    const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
+                    if(m && m[1] === oldName) {
+                        t.cat = `[${newName}] ${m[2]}`;
+                    }
+                }
+            });
+
+            // Renombra en cascada todas las subcategorías vinculadas al padre
+            if(!oldName.includes('[')) {
+                state.categories[type] = state.categories[type].map(c => {
+                    const m = c.match(/\[(.*?)\]\s*(.*)/);
+                    if(m && m[1] === oldName) return `[${newName}] ${m[2]}`;
+                    return c;
+                });
+            }
+
+            saveState(); updateDashboard(); renderAdvancedCategories(); populateFilters(); if(typeof updateDbCatFilter === 'function') updateDbCatFilter(); closeCategoryEdit(); updateCatManageView();
         }
         
         // Función universal para guardar el backup de tu base de datos o estado actual
