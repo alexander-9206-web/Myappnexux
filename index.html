@@ -823,7 +823,19 @@
                     </div>
                     <!-- ========================================== -->
 
-                    <div id="cc-term-container" class="hidden animate-slideUp" style="order: 6;"><label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center" placeholder="Cuotas (Ej: 12)"></div>
+                    <!-- APEX FIX: Sistema de 0% de Interés y Pago Mínimo (Latitud / Campañas) -->
+                    <div id="cc-term-container" class="hidden animate-slideUp" style="order: 6;">
+                        <label class="text-[10px] font-black uppercase text-rose-600 ml-2">Diferir a Cuotas (TC)</label>
+                        <div class="flex gap-2 mt-1">
+                            <input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="f-cc-term" class="form-input border-rose-200 bg-rose-50 text-rose-900 cursor-pointer text-center flex-1" placeholder="N° Cuotas">
+                            <label class="flex items-center justify-center gap-2 bg-rose-50 border border-rose-200 px-4 rounded-[14px] cursor-pointer select-none active:scale-95 transition-transform">
+                                <input type="checkbox" id="f-cc-zero" class="w-4 h-4 text-rose-600 rounded border-rose-300 focus:ring-rose-500">
+                                <span class="text-[10px] font-black uppercase text-rose-600 whitespace-nowrap">0% Int.</span>
+                            </label>
+                        </div>
+                        <p class="text-[8px] text-rose-500/70 ml-2 mt-1 font-bold">Activa 0% para calcular el pago mínimo exacto mensual sin intereses.</p>
+                    </div>
+                    
                     <div id="ap-freq-container" class="hidden" style="order: 7;">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2">Afterpay: Frecuencia y Cuotas (Totales / Pagadas)</label>
                         <div class="flex gap-2 mt-1">
@@ -2449,7 +2461,9 @@
                 if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : (type === 'transfer' ? '🔀 Entre Cuentas' : ''); $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
                 if($id('f-cat-sub')) $id('f-cat-sub').value = '';
                 if($id('f-cost-type')) $id('f-cost-type').value = 'variable';
-                const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
+                const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } 
+                const zeroEl = $id('f-cc-zero'); if(zeroEl) zeroEl.checked = false;
+                if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4; if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
             } else {
                 const oldTx = state.tx.find(t => t.id === txId);
                 if (oldTx && oldTx.type === 'transfer' && oldTx.toAccId) {
@@ -2457,6 +2471,53 @@
                 }
             }
             checkTxAccount();
+        }
+
+        // APEX FIX: Restauración del Predictor Semántico (Autofill Inteligente)
+        function handleNoteAutocomplete(e) {
+            const noteInput = $id('f-note');
+            if (!noteInput || !noteInput.value) return;
+            const val = noteInput.value;
+            const type = $id('f-type').value;
+            
+            // Evitar auto-completado molesto si el usuario está borrando letras
+            if (e && e.inputType === 'deleteContentBackward') return;
+
+            // Buscar coincidencia por las "primeras letras" (Prefix Match)
+            const match = state.tx.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).find(t => t.type === type && t.note && t.note.toLowerCase().startsWith(val.toLowerCase()));
+            
+            if (match) {
+                // 1. Relleno predictivo y selección de texto sobrante
+                if (match.note.toLowerCase() !== val.toLowerCase() && e && e.inputType === 'insertText') {
+                    noteInput.value = match.note;
+                    noteInput.setSelectionRange(val.length, match.note.length);
+                }
+
+                // 2. Relleno automático de categorías
+                if (match.cat) {
+                    const parts = match.cat.match(/\[(.*?)\]\s*(.*)/);
+                    const selP = $id('f-cat-parent-select');
+                    if (selP) {
+                        if (parts && parts[1]) {
+                            selP.value = parts[1];
+                            handleParentCategoryChange();
+                            const selSub = $id('f-cat-sub-select');
+                            if (selSub && parts[2]) selSub.value = parts[2].trim();
+                        } else if (match.cat) {
+                            selP.value = match.cat;
+                            handleParentCategoryChange();
+                        }
+                    }
+                    const costMod = $id('f-cost-type');
+                    if (costMod && match.costType) costMod.value = match.costType;
+                }
+                
+                // 3. Relleno automático de metadatos de Afterpay
+                if (type === 'afterpay') {
+                    if ($id('f-ap-freq') && match.apFreq) $id('f-ap-freq').value = match.apFreq;
+                    if ($id('f-ap-quotas') && match.apQuotas) $id('f-ap-quotas').value = match.apQuotas;
+                }
+            }
         }
 
         function closeForm() { const modal = $id('tx-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
@@ -2534,7 +2595,12 @@
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
                     state.tx.push(ccTx); saveCloudTx(ccTx);
-                    state.loans.push({ id: 'CC_' + Date.now(), name: `${note||cat.substring(2)} (${acc.name})`, total: amount, balance: amount, rate: acc.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: acc.id, date: new Date(`${date}T${time}`).toISOString(), currency: acc.currency }); 
+                    
+                    // APEX FIX: Extracción de Tasa Condicional (Aplica 0% o Tasa de Tarjeta)
+                    const isZero = $id('f-cc-zero') ? $id('f-cc-zero').checked : false;
+                    const appliedRate = isZero ? 0 : (acc.rate || 0);
+
+                    state.loans.push({ id: 'CC_' + Date.now(), name: `${note||cat.substring(2)} (${acc.name})`, total: amount, balance: amount, rate: appliedRate, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: acc.id, date: new Date(`${date}T${time}`).toISOString(), currency: acc.currency }); 
                     saveState(); updateDashboard(); closeForm(); if(state.activeTab === 'database') renderDatabase(); return; 
                 }
             }
