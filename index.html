@@ -128,6 +128,10 @@
                     <h3 class="text-[10px] font-black opacity-30 uppercase italic tracking-widest theme-text">Evolución 7 Días (<span class="currency-label">COP</span>)</h3>
                     <div class="h-[150px] md:h-[250px]"><canvas id="chart-7days"></canvas></div>
                 </div>
+
+                <!-- APEX FIX: Lista de Tareas Pendientes en Dashboard -->
+                <div id="dash-tasks-container" class="hidden"></div>
+
                 <div class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                     <button onclick="switchTab('accounts')" type="button" class="glass-btn"><i class="fa-solid fa-building-columns text-blue-500 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Cuentas</span></button>
                     <button onclick="switchTab('loans')" type="button" class="glass-btn"><i class="fa-solid fa-landmark text-amber-500 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Deudas</span></button>
@@ -138,6 +142,7 @@
                     <button onclick="switchTab('report')" type="button" class="glass-btn"><i class="fa-solid fa-briefcase text-emerald-500 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Directiva</span></button>
                     <button onclick="switchTab('finances')" type="button" class="glass-btn"><i class="fa-solid fa-file-invoice-dollar text-blue-600 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Finanzas</span></button>
                     <button onclick="switchTab('budget')" type="button" class="glass-btn"><i class="fa-solid fa-bullseye text-orange-500 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Presupuestos</span></button>
+                    <button onclick="switchTab('tasks')" type="button" class="glass-btn"><i class="fa-solid fa-list-check text-indigo-400 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Tareas</span></button>
                     <button onclick="switchTab('scanner')" type="button" class="glass-btn"><i class="fa-solid fa-camera text-blue-400 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Escáner</span></button>
                     <button onclick="switchTab('taxes')" type="button" class="glass-btn"><i class="fa-solid fa-file-invoice text-emerald-700 text-xl mb-1"></i><span class="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-slate-400">Impuestos</span></button>
                 </div>
@@ -271,7 +276,22 @@
                 <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Desde</label><input type="date" id="db-filter-start" class="form-input text-xs" onchange="renderDatabase()"></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hasta</label><input type="date" id="db-filter-end" class="form-input text-xs" onchange="renderDatabase()"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo</label><select id="db-filter-type" class="form-input text-xs" onchange="updateDbCatFilter()"><option value="all">Todas</option><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="transfer">Transf.</option><option value="afterpay">Afterpay</option></select></div>
+                    
+                    <!-- APEX FIX: Selector expandido con nuevos tipos de transacción aislados -->
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo</label>
+                        <select id="db-filter-type" class="form-input text-xs" onchange="updateDbCatFilter()">
+                            <option value="all">Todas</option>
+                            <option value="income">Ingreso</option>
+                            <option value="expense">Gasto</option>
+                            <option value="transfer">Transf. entre cuentas</option>
+                            <option value="afterpay">Afterpay</option>
+                            <option value="debt">Deuda</option>
+                            <option value="single_debt">Deuda Única</option>
+                        </select>
+                    </div>
+                    <!-- ========================================== -->
+
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cat.</label><select id="db-filter-cat" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option></select></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="db-filter-currency" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
                 </div>
@@ -747,6 +767,46 @@
                 </div>
             </div>
         </section>
+
+        <!-- 🟢 TAB TAREAS Y PENDIENTES NO FINANCIEROS -->
+        <section id="tab-tasks" class="tab-content space-y-8 pb-20">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-500">Mis Tareas</h2></div>
+                <button onclick="openTaskForm()" type="button" class="w-10 h-10 bg-indigo-500 text-white rounded-full shadow-lg shadow-indigo-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+            </div>
+            
+            <!-- APEX FIX: Indicadores de Tareas (KPIs) -->
+            <div id="tasks-kpi-container" class="grid grid-cols-3 gap-3 mb-2"></div>
+
+            <!-- APEX FIX: Calendario Interactivo de Tareas -->
+            <div class="theme-card p-5 md:p-8 rounded-[2rem] border shadow-sm">
+                <div class="flex justify-between items-center mb-3 border-b border-slate-100/50 pb-2">
+                    <div class="flex items-center gap-3">
+                        <button onclick="changeTaskCalMonth(-1)" class="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 active:scale-90 transition-transform"><i class="fa-solid fa-chevron-left text-[8px]"></i></button>
+                        <h3 id="task-cal-month" class="text-[10px] font-black uppercase theme-text">--</h3>
+                        <button onclick="changeTaskCalMonth(1)" class="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 active:scale-90 transition-transform"><i class="fa-solid fa-chevron-right text-[8px]"></i></button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="setTaskCalDate(null)" class="text-[8px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md hidden" id="task-cal-clear-btn">Ver Todas</button>
+                        <button onclick="changeTaskCalMonth(0)" class="w-2 h-2 rounded-full bg-red-500 cursor-pointer" title="Volver a Hoy"></button>
+                    </div>
+                </div>
+                <div class="cal-grid text-[8px] md:text-[10px] text-center font-black text-slate-400 mb-2"><div>LUN</div><div>MAR</div><div>MIÉ</div><div>JUE</div><div>VIE</div><div>SÁB</div><div>DOM</div></div>
+                <div id="task-cal-grid" class="cal-grid md:text-base"></div>
+            </div>
+            <!-- ============================================ -->
+
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-regular fa-square mr-1 text-indigo-400"></i> Pendientes</h3>
+                    <div id="tasks-list-pending" class="space-y-3"></div>
+                </div>
+                <div id="tasks-list-completed-container" class="hidden">
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-6"><i class="fa-solid fa-check-square mr-1 text-emerald-500"></i> Completadas</h3>
+                    <div id="tasks-list-completed" class="space-y-3 opacity-70"></div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <!-- FAB Y MODALES GLOBALES -->
@@ -1015,6 +1075,23 @@
         </div>
     </div>
 
+    <!-- MODAL TAREAS / PENDIENTES NO FINANCIEROS -->
+    <div id="task-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase tracking-tighter text-indigo-500">Tarea</h3><button type="button" onclick="closeTaskForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <form onsubmit="saveTask(event)" class="space-y-4">
+                <input type="hidden" id="ftk-id">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Título / Pendiente</label><input type="text" id="ftk-title" required class="form-input text-sm" placeholder="Ej: Comprar mercado, Llamar al abogado..."></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Detalles (Opcional)</label><textarea id="ftk-desc" class="form-input text-xs min-h-[80px]" placeholder="Notas adicionales..."></textarea></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="ftk-date" class="form-input text-xs px-2"></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Prioridad</label><select id="ftk-priority" class="form-input text-xs px-2"><option value="low">Baja</option><option value="medium" selected>Media</option><option value="high">Alta</option></select></div>
+                </div>
+                <button type="submit" class="w-full bg-indigo-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Tarea</button>
+            </form>
+        </div>
+    </div>
+
     <!-- MODAL DE INFORMACIÓN DEL SCORE -->
     <div id="score-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
         <div class="theme-card w-full max-w-lg md:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
@@ -1113,7 +1190,7 @@
                         const firstChunk = JSON.parse(responseData.chunks[0]);
                         if (firstChunk.part) {
                             // APEX: Reconstrucción de módulos legibles (JSON Modules)
-                            let newState = { tx: [], accounts: [], loans: [], categories: {}, catParents: {}, settings: {}, theme: {}, taxes: {}, goals: [] };
+                            let newState = { tx: [], accounts: [], loans: [], categories: {}, catParents: {}, settings: {}, theme: {}, taxes: {}, goals: [], tasks: [] };
                             responseData.chunks.forEach(chunkStr => {
                                 if(!chunkStr) return;
                                 const parsed = JSON.parse(chunkStr);
@@ -1121,6 +1198,7 @@
                                     newState.theme = parsed.theme; newState.settings = parsed.settings;
                                     newState.categories = parsed.categories; newState.catParents = parsed.catParents;
                                     newState.taxes = parsed.taxes; newState.goals = parsed.goals;
+                                    newState.tasks = parsed.tasks || [];
                                 } else if (parsed.part === "ACCOUNTS_LOANS") {
                                     newState.accounts = parsed.accounts || []; newState.loans = parsed.loans || [];
                                 } else if (parsed.part && parsed.part.startsWith("TX_BLOCK_")) {
@@ -1192,7 +1270,7 @@
                         part: "CONFIG",
                         theme: state.theme || {}, settings: state.settings || {},
                         categories: state.categories || {}, catParents: state.catParents || {},
-                        taxes: state.taxes || {}, goals: state.goals || []
+                        taxes: state.taxes || {}, goals: state.goals || [], tasks: state.tasks || []
                     }));
                     
                     // 2. Módulo Cuentas y Préstamos
@@ -1512,9 +1590,9 @@
             const isBack = id === 'home' && state.activeTab !== 'home'; state.activeTab = id;
             $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
             const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
-            const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
+            const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes', 'tasks'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
             
-            if(id === 'loans') renderLoansList(); if(id === 'analysis') renderAnalysis(); if(id === 'afterpay') renderAfterpay(); if(id === 'report') renderReport(); if(id === 'accounts') renderAccountsTab(); if(id === 'settings') renderSettingsTab(); if(id === 'database') initDatabaseTab(); if(id === 'calendar') renderCalendar(); if(id === 'finances') renderFinancesUnified(); if(id === 'budget') renderBudgetTab(); if(id === 'scanner') initScanner(); if(id === 'taxes') renderTaxes();
+            if(id === 'loans') renderLoansList(); if(id === 'analysis') renderAnalysis(); if(id === 'afterpay') renderAfterpay(); if(id === 'report') renderReport(); if(id === 'accounts') renderAccountsTab(); if(id === 'settings') renderSettingsTab(); if(id === 'database') initDatabaseTab(); if(id === 'calendar') renderCalendar(); if(id === 'finances') renderFinancesUnified(); if(id === 'budget') renderBudgetTab(); if(id === 'scanner') initScanner(); if(id === 'taxes') renderTaxes(); if(id === 'tasks') renderTasksTab();
         }
 
         function toggleFab() { 
@@ -1628,7 +1706,54 @@
             if(totIncAltEl) totIncAltEl.innerText = "+" + fmt(cI_alt, dashAltCurr);
             if(totExpAltEl) totExpAltEl.innerText = "-" + fmt(cE_alt, dashAltCurr);
 
-            if(state.context === 'day') { renderAccounts(); render7DaysChart(aTx); } else { renderPeriodChart(cTx); renderPeriodList(cTx); }
+            if(state.context === 'day') { renderAccounts(); render7DaysChart(aTx); renderDashTasks(); } else { renderPeriodChart(cTx); renderPeriodList(cTx); }
+        }
+
+        // APEX FIX: Dashboard Tasks Render
+        function renderDashTasks() {
+            const cont = $id('dash-tasks-container'); if(!cont) return;
+            if(!state.tasks || state.tasks.length === 0) { cont.classList.add('hidden'); return; }
+            const now = new Date();
+            const todayStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+            
+            const dayTasks = state.tasks.filter(t => t.date === todayStr && !t.completed).sort((a,b) => {
+                const pMap = { 'high': 3, 'medium': 2, 'low': 1 };
+                return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
+            });
+            
+            if(dayTasks.length > 0) {
+                let html = `<div class="theme-card p-5 rounded-[2rem] border shadow-sm space-y-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest"><i class="fa-solid fa-list-check text-indigo-400 mr-1"></i> Pendientes de Hoy</h3>
+                        <button onclick="switchTab('tasks')" type="button" class="text-[8px] bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 font-black uppercase shadow-sm active:scale-95 transition-transform">Ver Todas</button>
+                    </div>`;
+                dayTasks.slice(0, 3).forEach(t => {
+                    let pBg = '', pText = '';
+                    if(t.priority === 'high') { pBg = 'bg-red-100'; pText = 'text-red-600 border-red-200'; }
+                    else if(t.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; }
+                    else { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; }
+                    
+                    html += `<div class="flex items-center justify-between p-3 rounded-[1rem] bg-slate-50 border border-slate-100 cursor-pointer hover:border-indigo-200 transition-colors" onclick="switchTab('tasks')">
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <button type="button" onclick="event.stopPropagation(); toggleTaskStatusDash('${t.id}')" class="w-5 h-5 shrink-0 rounded border-2 border-slate-300 flex items-center justify-center hover:border-indigo-400 transition-colors bg-white"></button>
+                            <p class="text-[10px] font-black uppercase text-slate-700 truncate">${t.title}</p>
+                        </div>
+                        <span class="text-[7px] font-black uppercase ${pBg} ${pText} border px-2 py-0.5 rounded shadow-sm shrink-0">${t.priority==='high'?'Alta':t.priority==='medium'?'Media':'Baja'}</span>
+                    </div>`;
+                });
+                if(dayTasks.length > 3) html += `<p class="text-[9px] font-bold text-slate-400 text-center uppercase pt-1 cursor-pointer hover:text-indigo-500 transition-colors" onclick="switchTab('tasks')">+ ${dayTasks.length - 3} tareas más</p>`;
+                html += `</div>`;
+                cont.innerHTML = html;
+                cont.classList.remove('hidden');
+                cont.classList.add('animate-slideUp');
+            } else {
+                cont.classList.add('hidden');
+            }
+        }
+
+        function toggleTaskStatusDash(id) {
+            const t = state.tasks.find(x => x.id === id);
+            if(t) { t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); }
         }
 
         function showScoreModal() { const mod = $id('score-modal'); if(mod) mod.classList.remove('hidden'); }
@@ -2554,6 +2679,14 @@
         }
 
         function closeForm() { const modal = $id('tx-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        
+        // APEX FIX: Restaurar la función faltante para poder editar transacciones
+        function editTransaction(id) {
+            const tx = state.tx.find(t => t.id === id);
+            if (!tx) return;
+            openForm(tx.type, tx.id);
+        }
+
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
             if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
@@ -2739,6 +2872,12 @@
                     cats = [...incCats, ...expCats, ...transCats, '⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay'];
                 } else if (type === 'afterpay') {
                     cats = ['🛍️ Afterpay'];
+                } else if (type === 'debt') {
+                    // APEX FIX: Aislamiento de categorías para "Deuda"
+                    cats = ['💳 Pago TC', '💳 Pago Deuda'];
+                } else if (type === 'single_debt') {
+                    // APEX FIX: Aislamiento exclusivo para "Deuda Única"
+                    cats = ['⚡ Pendiente Único'];
                 } else {
                     cats = state.categories[type] || [];
                     if (type === 'expense') cats.push('⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay');
@@ -2779,10 +2918,14 @@
                 // APEX FIX: Aplicación estricta del Buscador de Texto (Cliente / Descripción)
                 if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
 
+                // APEX FIX: Lógica profunda de intercepción para los nuevos filtros agregados
                 if(tp !== 'all') {
                     if (tp === 'afterpay' && !(t.cat || '').includes('Afterpay')) return false;
-                    if (tp !== 'afterpay' && t.type !== tp) return false;
+                    else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
+                    else if (tp === 'single_debt' && !(t.cat || '').includes('Pendiente Único')) return false;
+                    else if (['afterpay', 'debt', 'single_debt'].indexOf(tp) === -1 && t.type !== tp) return false;
                 }
+                
                 if(ct !== 'all' && t.cat !== ct) return false; 
                 
                 const origCur = t.original_currency || t.currency;
@@ -3088,6 +3231,249 @@
             saveState(); closeGoalForm(); renderBudgetTab();
         }
         function deleteGoal(id) { if(confirm("¿Eliminar esta meta?")) { state.goals = state.goals.filter(g => g.id !== id); saveState(); renderBudgetTab(); } }
+
+        // --- MÓDULO DE TAREAS / PENDIENTES NO FINANCIEROS ---
+        let taskCalMonthOffset = 0;
+        let taskCalSelectedDate = null;
+
+        function changeTaskCalMonth(val) { 
+            if(val === 0) taskCalMonthOffset = 0; 
+            else taskCalMonthOffset += val; 
+            renderTasksTab(); 
+        }
+
+        function setTaskCalDate(dateStr) {
+            if (taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
+            else taskCalSelectedDate = dateStr;
+            renderTasksTab();
+        }
+
+        function renderTasksTab() {
+            if(!state.tasks) state.tasks = [];
+            const pendingList = $id('tasks-list-pending');
+            const completedList = $id('tasks-list-completed');
+            const completedContainer = $id('tasks-list-completed-container');
+            const taskGrid = $id('task-cal-grid');
+            const taskMonthEl = $id('task-cal-month');
+            const clearBtn = $id('task-cal-clear-btn');
+            const kpiContainer = $id('tasks-kpi-container');
+
+            if(!pendingList || !completedList || !completedContainer) return;
+
+            // APEX FIX: Cálculo de Indicadores KPI
+            if (kpiContainer) {
+                const todayD = new Date(); todayD.setHours(0,0,0,0);
+                const todayStr = todayD.getFullYear() + '-' + String(todayD.getMonth()+1).padStart(2,'0') + '-' + String(todayD.getDate()).padStart(2,'0');
+                const endOfWeek = new Date(todayD); endOfWeek.setDate(todayD.getDate() + 7);
+                const eowStr = endOfWeek.getFullYear() + '-' + String(endOfWeek.getMonth()+1).padStart(2,'0') + '-' + String(endOfWeek.getDate()).padStart(2,'0');
+                
+                const tasksToday = state.tasks.filter(t => t.date === todayStr && !t.completed).length;
+                const pendingWeek = state.tasks.filter(t => t.date >= todayStr && t.date <= eowStr && !t.completed).length;
+                const completedTotal = state.tasks.filter(t => t.completed).length;
+
+                kpiContainer.innerHTML = `
+                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-indigo-50/30">
+                        <p class="text-[8px] font-black uppercase text-indigo-400 tracking-widest mb-1">Del Día</p>
+                        <h4 class="text-xl font-black text-indigo-600 tabular-nums leading-none">${tasksToday}</h4>
+                    </div>
+                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-amber-50/30">
+                        <p class="text-[8px] font-black uppercase text-amber-500 tracking-widest mb-1">Semana</p>
+                        <h4 class="text-xl font-black text-amber-600 tabular-nums leading-none">${pendingWeek}</h4>
+                    </div>
+                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-emerald-50/30">
+                        <p class="text-[8px] font-black uppercase text-emerald-500 tracking-widest mb-1">Completadas</p>
+                        <h4 class="text-xl font-black text-emerald-600 tabular-nums leading-none">${completedTotal}</h4>
+                    </div>
+                `;
+            }
+
+            // APEX FIX: Renderizado del Calendario de Tareas
+            if (taskGrid && taskMonthEl) {
+                const now = new Date(); now.setHours(0,0,0,0);
+                const viewDate = new Date(now.getFullYear(), now.getMonth() + taskCalMonthOffset, 1);
+                taskMonthEl.innerText = viewDate.toLocaleDateString('es-CO', {month: 'long', year: 'numeric'});
+
+                if(clearBtn) {
+                    if(taskCalSelectedDate) clearBtn.classList.remove('hidden');
+                    else clearBtn.classList.add('hidden');
+                }
+
+                const fdom = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1); 
+                const ldom = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
+                let startDay = fdom.getDay() - 1; if(startDay < 0) startDay = 6;
+                
+                let gridHtml = ''; 
+                for(let i=0; i<startDay; i++) gridHtml += `<div class="cal-cell is-empty"></div>`;
+                
+                for(let i=1; i<=ldom.getDate(); i++) {
+                    const d = new Date(viewDate.getFullYear(), viewDate.getMonth(), i); 
+                    // Asegurar formato YYYY-MM-DD local
+                    const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                    const isToday = d.toDateString() === now.toDateString();
+                    const isSelected = taskCalSelectedDate === dateStr;
+                    
+                    const dayTasks = state.tasks.filter(t => t.date === dateStr);
+                    const pendingDayTasks = dayTasks.filter(t => !t.completed);
+                    const hasEv = dayTasks.length > 0;
+                    const allCompleted = hasEv && pendingDayTasks.length === 0;
+                    
+                    // APEX FIX: Fondo Sólido y efecto Tachado (Forzando estilos inline contra colisiones CSS)
+                    let cellStyle = '';
+                    if (hasEv && !allCompleted) {
+                        if(pendingDayTasks.some(t => t.priority === 'high')) cellStyle = 'background-color: #ef4444 !important; color: white !important; border-color: #ef4444 !important;';
+                        else if(pendingDayTasks.some(t => t.priority === 'medium')) cellStyle = 'background-color: #f59e0b !important; color: white !important; border-color: #f59e0b !important;';
+                        else cellStyle = 'background-color: #6366f1 !important; color: white !important; border-color: #6366f1 !important;';
+                    } else if (allCompleted) {
+                        cellStyle = 'background-color: #10b981 !important; color: white !important; border-color: #10b981 !important; text-decoration: line-through; opacity: 0.8;';
+                    }
+
+                    let extraClasses = '';
+                    if (isSelected) extraClasses += ' ring-2 ring-indigo-500 ring-offset-2 font-black ';
+                    
+                    if (hasEv) {
+                        extraClasses += ` font-black shadow-md cursor-pointer active:scale-90 transition-transform `;
+                    } else {
+                        if (isToday) extraClasses += ' border-2 border-indigo-400 text-indigo-600 font-black cursor-pointer hover:bg-indigo-50 ';
+                        else extraClasses += ' bg-slate-50 text-slate-400 cursor-pointer hover:bg-slate-100 ';
+                    }
+
+                    // APEX FIX: Lógica diferencial al tocar el calendario (Día con Tareas vs Día Vacío)
+                    const clickAction = hasEv ? `setTaskCalDate('${dateStr}')` : `openTaskForm(null, '${dateStr}')`;
+
+                    gridHtml += `<div onclick="${clickAction}" class="cal-cell ${extraClasses}" style="min-height:32px; ${cellStyle}" ${hasEv ? `title="${dayTasks.map(t=>t.title).join(', ')}"` : ''}>${i}</div>`;
+                }
+                taskGrid.innerHTML = gridHtml;
+            }
+
+            let pendingHtml = '';
+            let completedHtml = '';
+
+            // Filtrar por fecha si hay una selección activa en el calendario
+            let filteredTasks = [...state.tasks];
+            if (taskCalSelectedDate) {
+                filteredTasks = filteredTasks.filter(t => t.date === taskCalSelectedDate);
+            }
+
+            const sortedTasks = filteredTasks.sort((a,b) => {
+                if(!a.date && !b.date) return new Date(b.createdAt||0) - new Date(a.createdAt||0);
+                if(!a.date) return 1;
+                if(!b.date) return -1;
+                return new Date(a.date) - new Date(b.date);
+            });
+
+            sortedTasks.forEach(t => {
+                let pBg = '', pText = '';
+                if(t.priority === 'high') { pBg = 'bg-red-100'; pText = 'text-red-600 border-red-200'; }
+                else if(t.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; }
+                else { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; }
+
+                const badge = `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>`;
+                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}</span>` : '';
+                
+                const card = `
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex gap-3 transition-all ${t.completed ? 'opacity-60 bg-slate-50 border-slate-200' : 'hover:border-indigo-200 cursor-pointer'}">
+                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 mt-1 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
+                        <i class="fa-solid fa-check text-[10px]"></i>
+                    </button>
+                    <div class="flex-1 min-w-0" onclick="${t.completed ? '' : `openTaskForm('${t.id}')`}">
+                        <div class="flex items-start justify-between">
+                            <h4 class="text-xs font-black theme-text ${t.completed ? 'line-through text-slate-400' : ''}">${t.title}</h4>
+                            ${badge}
+                        </div>
+                        ${t.description ? `<p class="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-tight">${t.description}</p>` : ''}
+                        ${dateStr}
+                    </div>
+                    <button type="button" onclick="deleteTask('${t.id}')" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90">
+                        <i class="fa-solid fa-trash text-[10px]"></i>
+                    </button>
+                </div>`;
+
+                if(t.completed) completedHtml += card;
+                else pendingHtml += card;
+            });
+
+            const emptyMessage = taskCalSelectedDate ? 'No hay tareas para la fecha seleccionada.' : 'Todo al día. No hay tareas pendientes.';
+            
+            // APEX FIX: Inyectar botón de "Nueva Tarea" cuando el calendario filtra una fecha específica
+            let headerAction = '';
+            if (taskCalSelectedDate) {
+                const displayDate = new Date(taskCalSelectedDate + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'});
+                headerAction = `<button onclick="openTaskForm(null, '${taskCalSelectedDate}')" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg border border-indigo-100 active:scale-95 transition-transform"><i class="fa-solid fa-plus mr-1"></i>Añadir a ${displayDate}</button>`;
+                pendingList.innerHTML = `<div class="flex justify-between items-center mb-3"><div></div>${headerAction}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`);
+            } else {
+                pendingList.innerHTML = pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`;
+            }
+            
+            completedList.innerHTML = completedHtml;
+            if (completedHtml) completedContainer.classList.remove('hidden');
+            else completedContainer.classList.add('hidden');
+        }
+
+        // APEX FIX: Permitir inyección de fecha específica al abrir el formulario
+        function openTaskForm(id = null, prefillDate = null) {
+            const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); 
+            const mod = $id('task-modal'); if(!mod) return; mod.classList.remove('hidden');
+            if(!state.tasks) state.tasks = [];
+            
+            if(id) {
+                const t = state.tasks.find(x => x.id === id);
+                if(t) {
+                    $id('ftk-id').value = t.id;
+                    $id('ftk-title').value = t.title;
+                    $id('ftk-desc').value = t.description || '';
+                    $id('ftk-date').value = t.date || '';
+                    $id('ftk-priority').value = t.priority || 'medium';
+                }
+            } else {
+                $id('ftk-id').value = '';
+                $id('ftk-title').value = '';
+                $id('ftk-desc').value = '';
+                // Asignar fecha pre-seleccionada si existe, si no, dejar en blanco
+                $id('ftk-date').value = prefillDate || '';
+                $id('ftk-priority').value = 'medium';
+            }
+        }
+
+        function closeTaskForm() {
+            const modal = $id('task-modal'); if(!modal) return; 
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function saveTask(e) {
+            e.preventDefault();
+            if(!state.tasks) state.tasks = [];
+            const id = $id('ftk-id').value;
+            const title = $id('ftk-title').value.trim();
+            const desc = $id('ftk-desc').value.trim();
+            const date = $id('ftk-date').value;
+            const priority = $id('ftk-priority').value;
+
+            if(!title) return alert("El título de la tarea es obligatorio.");
+
+            if(id) {
+                const t = state.tasks.find(x => x.id === id);
+                if(t) {
+                    t.title = title; t.description = desc; t.date = date; t.priority = priority;
+                }
+            } else {
+                state.tasks.push({ id: 'task_' + Date.now(), title, description: desc, date, priority, completed: false, createdAt: new Date().toISOString() });
+            }
+            saveState(); renderTasksTab(); closeTaskForm();
+        }
+
+        function toggleTaskStatus(id) {
+            const t = state.tasks.find(x => x.id === id);
+            if(t) { t.completed = !t.completed; saveState(); renderTasksTab(); }
+        }
+
+        function deleteTask(id) {
+            if(confirm("¿Eliminar esta tarea de forma permanente?")) {
+                state.tasks = state.tasks.filter(t => t.id !== id);
+                saveState(); renderTasksTab();
+            }
+        }
+        // --- FIN MÓDULO DE TAREAS ---
 
         // REPORT
         function renderReport() {
