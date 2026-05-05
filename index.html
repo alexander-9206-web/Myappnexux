@@ -3556,21 +3556,23 @@
                 const eowStr = endOfWeek.getFullYear() + '-' + String(endOfWeek.getMonth()+1).padStart(2,'0') + '-' + String(endOfWeek.getDate()).padStart(2,'0');
                 
                 const tasksToday = state.tasks.filter(t => t.date === todayStr && !t.completed).length;
-                const pendingWeek = state.tasks.filter(t => t.date >= todayStr && t.date <= eowStr && !t.completed).length;
                 const completedTotal = state.tasks.filter(t => t.completed).length;
+                const totalTasks = state.tasks.length;
+                const completionRate = totalTasks > 0 ? Math.round((completedTotal / totalTasks) * 100) : 0;
+                const overdueTasks = state.tasks.filter(t => t.date && t.date < todayStr && !t.completed).length;
 
                 kpiContainer.innerHTML = `
                     <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-indigo-50/30">
                         <p class="text-[8px] font-black uppercase text-indigo-400 tracking-widest mb-1">Del Día</p>
                         <h4 class="text-xl font-black text-indigo-600 tabular-nums leading-none">${tasksToday}</h4>
                     </div>
-                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-amber-50/30">
-                        <p class="text-[8px] font-black uppercase text-amber-500 tracking-widest mb-1">Semana</p>
-                        <h4 class="text-xl font-black text-amber-600 tabular-nums leading-none">${pendingWeek}</h4>
-                    </div>
                     <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-emerald-50/30">
-                        <p class="text-[8px] font-black uppercase text-emerald-500 tracking-widest mb-1">Completadas</p>
-                        <h4 class="text-xl font-black text-emerald-600 tabular-nums leading-none">${completedTotal}</h4>
+                        <p class="text-[8px] font-black uppercase text-emerald-500 tracking-widest mb-1">Cumplimiento</p>
+                        <h4 class="text-xl font-black text-emerald-600 tabular-nums leading-none">${completionRate}%</h4>
+                    </div>
+                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center ${overdueTasks > 0 ? 'bg-red-50/30 border-red-100' : 'bg-slate-50/30'}">
+                        <p class="text-[8px] font-black uppercase ${overdueTasks > 0 ? 'text-red-500' : 'text-slate-400'} tracking-widest mb-1">Procrastinación</p>
+                        <h4 class="text-xl font-black ${overdueTasks > 0 ? 'text-red-600' : 'text-slate-500'} tabular-nums leading-none">${overdueTasks}</h4>
                     </div>
                 `;
             }
@@ -3659,13 +3661,16 @@
                 const badge = t.priority !== 'none' ? `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>` : '';
                 const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}${t.timeAlarm ? ` <i class="fa-regular fa-clock ml-2 mr-1"></i>${t.timeAlarm}` : ''}</span>` : '';
                 
-                // APEX FIX: UI de tarea nativa limpia. Sin temporizadores Pomodoro
+                // APEX FIX: UI de tarea con checkboxes para selección múltiple y botones explícitos de Edición/Borrado
                 const card = `
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex gap-3 transition-all ${t.completed ? 'opacity-60 bg-slate-50 border-slate-200' : 'hover:border-indigo-200 cursor-pointer'}">
-                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 mt-1 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 shadow-sm ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
+                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex gap-3 items-center transition-all ${t.completed ? 'opacity-60 bg-slate-50 border-slate-200' : 'hover:border-indigo-200'}">
+                    <div class="flex items-center justify-center shrink-0">
+                        <input type="checkbox" value="${t.id}" onclick="event.stopPropagation(); handleTaskSelect()" class="task-select-cb w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shadow-sm">
+                    </div>
+                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 shadow-sm ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
                         <i class="fa-solid fa-check text-[10px]"></i>
                     </button>
-                    <div class="flex-1 min-w-0" onclick="${t.completed ? '' : `openTaskForm('${t.id}')`}">
+                    <div class="flex-1 min-w-0 cursor-pointer" onclick="${t.completed ? '' : `openTaskForm('${t.id}')`}">
                         <div class="flex items-start justify-between">
                             <h4 class="text-xs font-black theme-text ${t.completed ? 'line-through text-slate-400' : ''}">${t.title}</h4>
                             <div class="flex gap-1 flex-col sm:flex-row items-end sm:items-center">
@@ -3675,8 +3680,9 @@
                         ${t.description ? `<p class="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-tight">${t.description}</p>` : ''}
                         ${dateStr}
                     </div>
-                    <div class="flex flex-col justify-center shrink-0">
-                        <button type="button" onclick="deleteTask('${t.id}')" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90 border border-slate-100 shadow-sm">
+                    <div class="flex flex-col gap-2 justify-center shrink-0">
+                        ${t.completed ? '' : `<button type="button" onclick="event.stopPropagation(); openTaskForm('${t.id}')" title="Editar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-blue-500 rounded-full flex items-center justify-center hover:bg-blue-50 transition-colors active:scale-90 border border-slate-100 shadow-sm"><i class="fa-solid fa-pen text-[10px]"></i></button>`}
+                        <button type="button" onclick="event.stopPropagation(); deleteTask('${t.id}')" title="Borrar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90 border border-slate-100 shadow-sm">
                             <i class="fa-solid fa-trash text-[10px]"></i>
                         </button>
                     </div>
@@ -3692,14 +3698,47 @@
             if (taskCalSelectedDate) {
                 const displayDate = new Date(taskCalSelectedDate + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'});
                 headerAction = `<button onclick="openTaskForm(null, '${taskCalSelectedDate}')" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg border border-indigo-100 active:scale-95 transition-transform"><i class="fa-solid fa-plus mr-1"></i>Añadir a ${displayDate}</button>`;
-                pendingList.innerHTML = `<div class="flex justify-between items-center mb-3"><div></div>${headerAction}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`);
-            } else {
-                pendingList.innerHTML = pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`;
             }
+
+            const bulkBtnHtml = `<button id="btn-bulk-delete-tasks" onclick="deleteSelectedTasks()" class="hidden text-[9px] font-black uppercase bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 active:scale-95 transition-transform ml-auto shadow-sm flex items-center"><i class="fa-solid fa-trash-can mr-1"></i>Eliminar Selección (<span id="bulk-delete-count">0</span>)</button>`;
+
+            pendingList.innerHTML = `<div class="flex justify-between items-center mb-3 w-full">${headerAction}${bulkBtnHtml}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`);
             
             completedList.innerHTML = completedHtml;
             if (completedHtml) completedContainer.classList.remove('hidden');
             else completedContainer.classList.add('hidden');
+        }
+
+        // APEX FIX: Motor de Selección Múltiple y Borrado en Masa
+        function handleTaskSelect() {
+            const checkboxes = document.querySelectorAll('.task-select-cb:checked');
+            const bulkBtn = $id('btn-bulk-delete-tasks');
+            const bulkCount = $id('bulk-delete-count');
+            if (bulkBtn && bulkCount) {
+                if (checkboxes.length > 0) {
+                    bulkBtn.classList.remove('hidden');
+                    bulkCount.innerText = checkboxes.length;
+                } else {
+                    bulkBtn.classList.add('hidden');
+                }
+            }
+        }
+
+        function deleteSelectedTasks() {
+            const checkboxes = document.querySelectorAll('.task-select-cb:checked');
+            if (checkboxes.length === 0) return;
+            if (confirm(`¿Eliminar ${checkboxes.length} tareas seleccionadas de forma permanente?`)) {
+                checkboxes.forEach(cb => {
+                    const id = cb.value;
+                    state.tasks = state.tasks.filter(t => t.id !== id);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                    }
+                });
+                saveState();
+                renderTasksTab();
+                updateDashboard();
+            }
         }
 
         // APEX FIX: Modal simplificado al estilo iOS
