@@ -1083,9 +1083,11 @@
                 <input type="hidden" id="ftk-id">
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Título / Pendiente</label><input type="text" id="ftk-title" required class="form-input text-sm" placeholder="Ej: Comprar mercado, Llamar al abogado..."></div>
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Detalles (Opcional)</label><textarea id="ftk-desc" class="form-input text-xs min-h-[80px]" placeholder="Notas adicionales..."></textarea></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="ftk-date" class="form-input text-xs px-2"></div>
                 <div class="grid grid-cols-2 gap-4">
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="ftk-date" class="form-input text-xs px-2"></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Prioridad</label><select id="ftk-priority" class="form-input text-xs px-2"><option value="low">Baja</option><option value="medium" selected>Media</option><option value="high">Alta</option></select></div>
+                    <!-- APEX FIX: Esfuerzo Anti-Procrastinación -->
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Esfuerzo</label><select id="ftk-time" class="form-input text-xs px-2"><option value="5">Regla 2 Min (Hazlo YA)</option><option value="25" selected>Enfoque (25 min)</option><option value="60">Profundo (1hr+)</option></select></div>
                 </div>
                 <button type="submit" class="w-full bg-indigo-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Tarea</button>
             </form>
@@ -1115,6 +1117,34 @@
                 </div>
             </div>
             <button onclick="closeScoreModal()" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Entendido</button>
+        </div>
+    </div>
+
+    <!-- APEX FIX: TARJETA INFORMATIVA DIARIA (DAILY BRIEFING) -->
+    <div id="daily-briefing-modal" class="fixed inset-0 z-[110] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-black uppercase tracking-tighter theme-text"><i class="fa-solid fa-sun text-amber-500 mr-2"></i>Resumen del Día</h3>
+                <button type="button" onclick="closeDailyBriefing()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="briefing-content" class="space-y-4"></div>
+            <button onclick="closeDailyBriefing()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">¡A dominar el día!</button>
+        </div>
+    </div>
+
+    <!-- APEX FIX: MODO ENFOQUE (POMODORO ANTI-PROCRASTINACIÓN) -->
+    <div id="pomodoro-modal" class="fixed inset-0 z-[150] hidden bg-slate-900 flex flex-col items-center justify-center p-8 transition-all duration-300">
+        <h3 id="pomo-task-title" class="text-white font-black text-xl md:text-3xl text-center mb-2 uppercase tracking-tighter w-full max-w-sm truncate"></h3>
+        <p class="text-indigo-400 text-[10px] font-bold uppercase tracking-widest mb-12 flex items-center"><i class="fa-solid fa-brain mr-2"></i>Modo Enfoque Absoluto</p>
+        
+        <div class="w-64 h-64 md:w-80 md:h-80 rounded-full border-4 border-slate-800 flex items-center justify-center relative shadow-[0_0_60px_rgba(99,102,241,0.15)]">
+            <div class="absolute inset-0 rounded-full border-t-4 border-indigo-500 animate-[spin_3s_linear_infinite]"></div>
+            <span id="pomo-timer" class="text-7xl md:text-8xl font-black text-white tabular-nums tracking-tighter z-10">25:00</span>
+        </div>
+        
+        <div class="flex gap-6 mt-16">
+            <button onclick="togglePomodoro()" id="pomo-btn-play" class="w-16 h-16 bg-indigo-500 text-white rounded-full flex items-center justify-center text-2xl shadow-lg shadow-indigo-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-pause"></i></button>
+            <button onclick="stopPomodoro()" class="w-16 h-16 bg-slate-800 text-slate-400 rounded-full flex items-center justify-center text-xl hover:text-white active:scale-90 transition-transform border border-slate-700"><i class="fa-solid fa-stop"></i></button>
         </div>
     </div>
 
@@ -1425,6 +1455,9 @@
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
             initNexus();
+            
+            // APEX FIX: Disparador del resumen diario tras inicializar la app
+            setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
         function logout() { sessionUnlocked = false; localStorage.removeItem('nexus_current_user'); location.reload(); }
@@ -3367,25 +3400,35 @@
                 else if(t.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; }
                 else { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; }
 
-                const badge = `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>`;
+                const badge = `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>`;
                 const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}</span>` : '';
                 
+                // APEX FIX: Elementos de Organización y Procrastinación
+                const timeBadge = t.estimatedTime === '5' ? `<span class="bg-amber-100 text-amber-600 px-2 py-0.5 rounded text-[8px] font-black uppercase border border-amber-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>Regla 2 Min</span>` : '';
+                const focusBtn = !t.completed ? `<button type="button" onclick="openPomodoro('${t.id}')" title="Modo Enfoque" class="w-8 h-8 shrink-0 bg-indigo-50 text-indigo-500 hover:bg-indigo-500 hover:text-white rounded-full flex items-center justify-center transition-colors active:scale-90 shadow-sm border border-indigo-100"><i class="fa-solid fa-stopwatch text-[10px]"></i></button>` : '';
+
                 const card = `
                 <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex gap-3 transition-all ${t.completed ? 'opacity-60 bg-slate-50 border-slate-200' : 'hover:border-indigo-200 cursor-pointer'}">
-                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 mt-1 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
+                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 mt-1 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 shadow-sm ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
                         <i class="fa-solid fa-check text-[10px]"></i>
                     </button>
                     <div class="flex-1 min-w-0" onclick="${t.completed ? '' : `openTaskForm('${t.id}')`}">
                         <div class="flex items-start justify-between">
                             <h4 class="text-xs font-black theme-text ${t.completed ? 'line-through text-slate-400' : ''}">${t.title}</h4>
-                            ${badge}
+                            <div class="flex gap-1 flex-col sm:flex-row items-end sm:items-center">
+                                ${timeBadge}
+                                ${badge}
+                            </div>
                         </div>
                         ${t.description ? `<p class="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-tight">${t.description}</p>` : ''}
                         ${dateStr}
                     </div>
-                    <button type="button" onclick="deleteTask('${t.id}')" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90">
-                        <i class="fa-solid fa-trash text-[10px]"></i>
-                    </button>
+                    <div class="flex flex-col gap-2 shrink-0">
+                        ${focusBtn}
+                        <button type="button" onclick="deleteTask('${t.id}')" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90 border border-slate-100 shadow-sm">
+                            <i class="fa-solid fa-trash text-[10px]"></i>
+                        </button>
+                    </div>
                 </div>`;
 
                 if(t.completed) completedHtml += card;
@@ -3423,14 +3466,15 @@
                     $id('ftk-desc').value = t.description || '';
                     $id('ftk-date').value = t.date || '';
                     $id('ftk-priority').value = t.priority || 'medium';
+                    $id('ftk-time').value = t.estimatedTime || '25';
                 }
             } else {
                 $id('ftk-id').value = '';
                 $id('ftk-title').value = '';
                 $id('ftk-desc').value = '';
-                // Asignar fecha pre-seleccionada si existe, si no, dejar en blanco
                 $id('ftk-date').value = prefillDate || '';
                 $id('ftk-priority').value = 'medium';
+                $id('ftk-time').value = '25';
             }
         }
 
@@ -3448,30 +3492,144 @@
             const desc = $id('ftk-desc').value.trim();
             const date = $id('ftk-date').value;
             const priority = $id('ftk-priority').value;
+            const estimatedTime = $id('ftk-time').value;
 
             if(!title) return alert("El título de la tarea es obligatorio.");
 
             if(id) {
                 const t = state.tasks.find(x => x.id === id);
                 if(t) {
-                    t.title = title; t.description = desc; t.date = date; t.priority = priority;
+                    t.title = title; t.description = desc; t.date = date; t.priority = priority; t.estimatedTime = estimatedTime;
                 }
             } else {
-                state.tasks.push({ id: 'task_' + Date.now(), title, description: desc, date, priority, completed: false, createdAt: new Date().toISOString() });
+                state.tasks.push({ id: 'task_' + Date.now(), title, description: desc, date, priority, estimatedTime, completed: false, createdAt: new Date().toISOString() });
             }
-            saveState(); renderTasksTab(); closeTaskForm();
+            saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
         }
 
         function toggleTaskStatus(id) {
             const t = state.tasks.find(x => x.id === id);
-            if(t) { t.completed = !t.completed; saveState(); renderTasksTab(); }
+            if(t) { t.completed = !t.completed; saveState(); renderTasksTab(); updateDashboard(); }
         }
 
         function deleteTask(id) {
             if(confirm("¿Eliminar esta tarea de forma permanente?")) {
                 state.tasks = state.tasks.filter(t => t.id !== id);
-                saveState(); renderTasksTab();
+                saveState(); renderTasksTab(); updateDashboard();
             }
+        }
+        
+        // --- APEX FIX: ORGANIZACIÓN Y PROCRASTINACIÓN (POMODORO & DAILY BRIEFING) ---
+        function checkDailyBriefing() {
+            const now = new Date();
+            const todayStr = now.toLocaleDateString('es-CO');
+            const lastBriefing = localStorage.getItem(`nexus_briefing_${currentUser}`);
+            if (lastBriefing !== todayStr) {
+                localStorage.setItem(`nexus_briefing_${currentUser}`, todayStr);
+                showDailyBriefing();
+            }
+        }
+
+        function showDailyBriefing() {
+            const modal = $id('daily-briefing-modal'); if(!modal) return;
+            const now = new Date();
+            const todayStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+            
+            const tasksToday = state.tasks ? state.tasks.filter(t => t.date === todayStr && !t.completed).length : 0;
+            const highTasks = state.tasks ? state.tasks.filter(t => t.date === todayStr && !t.completed && t.priority === 'high').length : 0;
+            const shortTasks = state.tasks ? state.tasks.filter(t => !t.completed && t.estimatedTime === '5').length : 0;
+
+            let content = `<p class="text-sm text-slate-600 font-bold mb-4">Bienvenido de nuevo, <span class="text-indigo-600">${userProfile.name.split(' ')[0]}</span>.</p>`;
+            
+            if (tasksToday > 0) {
+                content += `<div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 mb-3">
+                    <p class="text-xs font-black text-indigo-800 uppercase">Agenda de Hoy</p>
+                    <p class="text-[10px] text-indigo-600 mt-1">Tienes <b>${tasksToday}</b> tarea(s) programada(s). ${highTasks > 0 ? `<b>${highTasks}</b> son de ALTA prioridad.` : ''}</p>
+                </div>`;
+            } else {
+                content += `<div class="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 mb-3">
+                    <p class="text-xs font-black text-emerald-800 uppercase">Día Libre</p>
+                    <p class="text-[10px] text-emerald-600 mt-1">No tienes tareas urgentes programadas para hoy. Excelente trabajo.</p>
+                </div>`;
+            }
+
+            if (shortTasks > 0) {
+                content += `<div class="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-3">
+                    <p class="text-[10px] font-black text-amber-800 uppercase"><i class="fa-solid fa-bolt mr-1"></i> Anti-Procrastinación</p>
+                    <p class="text-[9px] text-amber-600 mt-1">Tienes ${shortTasks} tarea(s) que toman menos de 5 minutos. <b>La Regla de los 2 Minutos dicta que debes hacerlas de inmediato</b> para liberar carga mental.</p>
+                </div>`;
+            }
+
+            const quotes = [
+                "El mejor momento para plantar un árbol fue hace 20 años. El segundo mejor es ahora.",
+                "La procrastinación es el asesino natural del éxito.",
+                "No dejes que lo que no puedes hacer interfiera con lo que puedes hacer.",
+                "La acción es la clave fundamental de todo éxito.",
+                "Un día o el día uno. Tú decides."
+            ];
+            content += `<p class="text-[9px] font-bold text-slate-400 italic text-center mt-6">"${quotes[Math.floor(Math.random()*quotes.length)]}"</p>`;
+
+            $id('briefing-content').innerHTML = content;
+            modal.classList.remove('hidden');
+        }
+
+        function closeDailyBriefing() {
+            const modal = $id('daily-briefing-modal'); if(!modal) return;
+            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        let pomoInterval = null;
+        let pomoTimeLeft = 0;
+        let pomoIsRunning = false;
+        let pomoOriginalTime = 0;
+
+        function openPomodoro(taskId) {
+            const t = state.tasks.find(x => x.id === taskId);
+            if(!t) return;
+            $id('pomo-task-title').innerText = t.title;
+            const mins = parseInt(t.estimatedTime || 25);
+            pomoOriginalTime = mins * 60;
+            pomoTimeLeft = pomoOriginalTime;
+            pomoIsRunning = true;
+            updatePomoDisplay();
+            $id('pomodoro-modal').classList.remove('hidden');
+            $id('pomo-btn-play').innerHTML = '<i class="fa-solid fa-pause"></i>';
+            clearInterval(pomoInterval);
+            pomoInterval = setInterval(pomoTick, 1000);
+        }
+
+        function pomoTick() {
+            if(!pomoIsRunning) return;
+            if(pomoTimeLeft > 0) {
+                pomoTimeLeft--;
+                updatePomoDisplay();
+            } else {
+                clearInterval(pomoInterval);
+                if(navigator.vibrate) navigator.vibrate([500, 200, 500]);
+                alert("¡Tiempo cumplido! Has terminado tu sesión de enfoque. Gran trabajo.");
+                stopPomodoro();
+            }
+        }
+
+        function updatePomoDisplay() {
+            const m = Math.floor(pomoTimeLeft / 60);
+            const s = pomoTimeLeft % 60;
+            $id('pomo-timer').innerText = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        }
+
+        function togglePomodoro() {
+            pomoIsRunning = !pomoIsRunning;
+            $id('pomo-btn-play').innerHTML = pomoIsRunning ? '<i class="fa-solid fa-pause"></i>' : '<i class="fa-solid fa-play ml-1"></i>';
+        }
+
+        function stopPomodoro() {
+            clearInterval(pomoInterval);
+            $id('pomodoro-modal').classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                $id('pomodoro-modal').classList.add('hidden');
+                $id('pomodoro-modal').classList.remove('opacity-0', 'pointer-events-none');
+            }, 300);
         }
         // --- FIN MÓDULO DE TAREAS ---
 
