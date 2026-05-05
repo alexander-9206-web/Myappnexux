@@ -432,7 +432,10 @@
         <section id="tab-budget" class="tab-content space-y-8 pb-12">
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-orange-500">Presupuestos</h2></div>
-                <button onclick="openGoalForm()" type="button" class="w-10 h-10 bg-orange-500 text-white rounded-full shadow-lg shadow-orange-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                <div class="flex gap-2">
+                    <button onclick="openCatBudgetForm()" type="button" title="Presupuesto por Categoría" class="w-10 h-10 bg-orange-100 text-orange-600 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-chart-pie"></i></button>
+                    <button onclick="openGoalForm()" type="button" title="Nueva Meta" class="w-10 h-10 bg-orange-500 text-white rounded-full shadow-lg shadow-orange-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                </div>
             </div>
             <div id="budget-unified-content" class="space-y-6 md:grid md:grid-cols-2 md:gap-6 md:space-y-0"></div>
         </section>
@@ -1071,6 +1074,24 @@
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Objetivo</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="g-amount" required class="form-input text-3xl font-black text-center text-orange-500 cursor-pointer"></div>
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="g-date" required class="form-input text-xs"></div>
                 <button type="submit" class="w-full bg-orange-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Crear Meta</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- APEX FIX: MODAL PRESUPUESTO POR CATEGORÍA -->
+    <div id="cat-budget-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase tracking-tighter text-orange-500">Límite Categoría</h3><button type="button" onclick="closeCatBudgetForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <form onsubmit="saveCatBudget(event)" class="space-y-4">
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Categoría o Subcategoría</label>
+                    <select id="cb-cat" required class="form-input text-sm bg-white border border-slate-200 font-bold text-slate-700"></select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Presupuesto Mensual</label>
+                    <input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="cb-amount" required class="form-input text-3xl font-black text-center text-orange-500 cursor-pointer">
+                </div>
+                <button type="submit" class="w-full bg-orange-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Fijar Presupuesto</button>
             </form>
         </div>
     </div>
@@ -2170,8 +2191,8 @@
             }).join('');
         }
 
-        function openAccountModal() { const mod = $id('new-account-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('acc-form-title').innerText = "Nueva Cuenta"; $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; $id('fa-id').value = ''; $id('fa-name').value = ''; const scp = $id('fa-scope'); if(scp) scp.value = 'personal'; const balEl = $id('fa-balance'); balEl.value = ''; balEl.dataset.raw = ''; $id('fa-type').value = 'liquid'; const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value=''; vLimEl.dataset.raw=''; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value=''; vTerm.dataset.raw=''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value=''; vPay.dataset.raw=''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = 'latitud'; toggleCreditFields(); const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.add('hidden'); }
-        function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); $id('acc-form-title').innerText = "Detalles y Edición"; $id('fa-id').value = acc.id; $id('fa-name').value = acc.name.replace('👥 ', ''); $id('fa-currency').value = acc.currency || 'COP'; const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal'; const balEl = $id('fa-balance'); balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; $id('fa-type').value = acc.type; toggleCreditFields(); if(acc.type === 'credit') { const limEl = $id('fa-limit'); limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; const cutEl = $id('fa-cutoff'); cutEl.value = acc.cutoffDay||1; cutEl.dataset.raw = acc.cutoffDay||1; const payEl = $id('fa-payday'); payEl.value = acc.payDay||15; payEl.dataset.raw = acc.payDay||15; const rateEl = $id('fa-rate'); rateEl.value = acc.rate||0; rateEl.dataset.raw = acc.rate||0; } else if(acc.type === 'virtual') { const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value = fmt(acc.limit||0, acc.currency); vLimEl.dataset.raw = acc.limit||0; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value = acc.virtualTerm||''; vTerm.dataset.raw = acc.virtualTerm||''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value = acc.payDay||''; vPay.dataset.raw = acc.payDay||''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = acc.platform || 'latitud'; } const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.remove('hidden'); }
+        function openAccountModal() { const mod = $id('new-account-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('acc-form-title').innerText = "Nueva Cuenta"; $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; $id('fa-id').value = ''; $id('fa-name').value = ''; const scp = $id('fa-scope'); if(scp) scp.value = 'personal'; const balEl = $id('fa-balance'); balEl.value = ''; balEl.dataset.raw = ''; $id('fa-type').value = 'liquid'; if($id('fa-color')) $id('fa-color').value = '#e2e8f0'; const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value=''; vLimEl.dataset.raw=''; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value=''; vTerm.dataset.raw=''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value=''; vPay.dataset.raw=''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = 'latitud'; toggleCreditFields(); const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.add('hidden'); }
+        function editAccount(id) { const acc = state.accounts.find(a => a.id === id); if(!acc) return; openAccountModal(); $id('acc-form-title').innerText = "Detalles y Edición"; $id('fa-id').value = acc.id; $id('fa-name').value = acc.name.replace('👥 ', ''); $id('fa-currency').value = acc.currency || 'COP'; const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal'; const balEl = $id('fa-balance'); balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; $id('fa-type').value = acc.type; if($id('fa-color')) $id('fa-color').value = acc.color || '#e2e8f0'; toggleCreditFields(); if(acc.type === 'credit') { const limEl = $id('fa-limit'); limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; const cutEl = $id('fa-cutoff'); cutEl.value = acc.cutoffDay||1; cutEl.dataset.raw = acc.cutoffDay||1; const payEl = $id('fa-payday'); payEl.value = acc.payDay||15; payEl.dataset.raw = acc.payDay||15; const rateEl = $id('fa-rate'); rateEl.value = acc.rate||0; rateEl.dataset.raw = acc.rate||0; } else if(acc.type === 'virtual') { const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value = fmt(acc.limit||0, acc.currency); vLimEl.dataset.raw = acc.limit||0; } const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value = acc.virtualTerm||''; vTerm.dataset.raw = acc.virtualTerm||''; } const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value = acc.payDay||''; vPay.dataset.raw = acc.payDay||''; } const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = acc.platform || 'latitud'; } const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.remove('hidden'); }
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         function deleteAccount() {
             const id = $id('fa-id').value; if(!id) return; const acc = state.accounts.find(a => a.id === id); if(!acc) return;
@@ -2183,7 +2204,7 @@
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
         }
         function toggleCreditFields() { const type = $id('fa-type').value; const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const lbl = $id('fa-balance-lbl'); if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden'); const lim = $id('fa-limit'); if(lim) lim.required = false; if(type === 'credit') { if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; if(lim) lim.required = true; } else if (type === 'virtual') { if(vFields) vFields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Balance (+ a favor, - deuda)'; } else { if(lbl) lbl.innerText = 'Balance Inicial'; } }
-        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), rate: parseFloat($id('fa-rate').dataset.raw) || 0, platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && typeof fsLib !== 'undefined' && cloudDb) { fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
+        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), rate: parseFloat($id('fa-rate').dataset.raw) || 0, platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null, color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && typeof fsLib !== 'undefined' && cloudDb) { fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
 
         function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
         function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
@@ -3368,7 +3389,38 @@
 
             const htmlZBB = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm h-fit"><div class="flex justify-between items-center border-b border-slate-100/50 pb-3 mb-4"><h3 class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Estructura Base Cero y Capacidad</h3><span class="text-[8px] font-black uppercase bg-slate-100 text-slate-600 px-2 py-1 rounded">Análisis</span></div><div class="mb-4"><p class="text-[9px] font-black uppercase text-slate-400">Capital Sin Asignar (ZBB)</p><h4 class="text-xl font-black ${unassignedCapital >= 0 ? 'theme-text' : 'text-red-500'} mt-1">${fmt(unassignedCapital)}</h4><p class="text-[8px] text-slate-500 mt-1 leading-tight">Función: Rastrear cada centavo. Causa: Ingreso Total - (Gastos Fijos + Variables + Metas).</p></div><div class="mb-4 border-t border-slate-100/50 pt-4"><p class="text-[9px] font-black uppercase text-slate-400">Margen de Endeudamiento (35%)</p><h4 class="text-xl font-black ${availableDebtCapacity >= 0 ? 'theme-val-inc' : 'text-red-500'} mt-1">${fmt(availableDebtCapacity)}</h4><p class="text-[8px] text-slate-500 mt-1 leading-tight">Función: Límite seguro para nuevo crédito. Causa: 35% del Ingreso - Carga de Deuda Actual.</p></div><div class="border-t border-slate-100/50 pt-4"><p class="text-[9px] font-black uppercase text-slate-400">Fricción Financiera</p><h4 class="text-xl font-black ${frictionRate >= 80 ? 'text-red-500' : 'theme-val-exp'} mt-1">${frictionRate.toFixed(1)}%</h4><p class="text-[8px] text-slate-500 mt-1 leading-tight">Función: Riesgo de iliquidez. Causa: Porcentaje del ingreso absorbido en gastos fijos y deuda.</p></div></div>`;
 
-            cont.innerHTML = `${html503020}${htmlZBB}<div class="col-span-1 md:col-span-2 w-full mt-2"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">Proyección de Metas (Sinking Funds)</h3><div id="goals-list-container" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0">${goalsHtml}</div></div>`;
+            // APEX FIX: Renderizado del nuevo módulo de presupuestos por categoría
+            state.budgets = state.budgets || {};
+            let catBudgetsHtml = '';
+            
+            if (Object.keys(state.budgets).length > 0) {
+                const expByCat = {};
+                currentMonthTx.filter(t=>t.type==='expense' || t.type==='afterpay').forEach(t => {
+                    const cAmt = convertCurrency(t.amount, t.currency, state.settings.baseCurrency);
+                    // Rastrear subcategoría exacta
+                    expByCat[t.cat] = (expByCat[t.cat] || 0) + cAmt;
+                    // Rastrear Padre
+                    const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
+                    if (m && m[1]) {
+                        expByCat[m[1]] = (expByCat[m[1]] || 0) + cAmt;
+                    }
+                });
+
+                catBudgetsHtml += `<div class="col-span-1 md:col-span-2 w-full mt-2"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">Límites por Categoría (Mes Actual)</h3><div class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0">`;
+                
+                for (const [catName, limit] of Object.entries(state.budgets)) {
+                    const spent = expByCat[catName] || 0;
+                    const pct = Math.min(100, (spent / limit) * 100);
+                    const isOver = spent > limit;
+                    const barColor = isOver ? 'bg-red-500' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500');
+                    const textColor = isOver ? 'text-red-500' : 'theme-text';
+                    
+                    catBudgetsHtml += `<div class="theme-card p-5 rounded-2xl border shadow-sm flex flex-col justify-center"><div class="flex justify-between items-center mb-3"><h4 class="text-[10px] font-black uppercase ${textColor} truncate pr-2">${catName}</h4><button onclick="deleteCatBudget('${catName}')" class="text-slate-300 hover:text-red-500 shrink-0"><i class="fa-solid fa-trash text-[10px]"></i></button></div><div class="flex justify-between items-end mb-1"><p class="text-[9px] font-black uppercase text-slate-400">Consumo</p><p class="text-sm font-black ${textColor}">${fmt(spent)} <span class="text-[8px] font-bold text-slate-400 uppercase tracking-widest">/ ${fmt(limit)}</span></p></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-1"><div class="h-full ${barColor} rounded-full transition-all" style="width: ${pct}%"></div></div><p class="text-[8px] font-bold text-slate-400 uppercase text-right">${pct.toFixed(1)}%</p></div>`;
+                }
+                catBudgetsHtml += `</div></div>`;
+            }
+
+            cont.innerHTML = `${html503020}${htmlZBB}${catBudgetsHtml}<div class="col-span-1 md:col-span-2 w-full mt-2"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">Proyección de Metas (Sinking Funds)</h3><div id="goals-list-container" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0">${goalsHtml}</div></div>`;
         }
 
         function openGoalForm() { const mod = $id('goal-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('g-name').value = ''; const amtEl = $id('g-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('g-date').value = ''; }
@@ -3382,6 +3434,55 @@
             saveState(); closeGoalForm(); renderBudgetTab();
         }
         function deleteGoal(id) { if(confirm("¿Eliminar esta meta?")) { state.goals = state.goals.filter(g => g.id !== id); saveState(); renderBudgetTab(); } }
+
+        // APEX FIX: Funciones para presupuestos por categoría
+        function openCatBudgetForm() {
+            const mod = $id('cat-budget-modal'); if(!mod) return;
+            const catSel = $id('cb-cat');
+            if(catSel) {
+                catSel.innerHTML = '';
+                let expCats = new Set();
+                if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+                if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+                
+                (state.catParents['expense'] || []).forEach(p => expCats.add(p));
+                (state.categories['expense'] || []).forEach(c => {
+                    expCats.add(c);
+                    const m = c.match(/\[(.*?)\]\s*(.*)/);
+                    if(m && m[1]) expCats.add(m[1]);
+                });
+                
+                Array.from(expCats).sort().forEach(c => {
+                    catSel.innerHTML += `<option value="${c}">${c}</option>`;
+                });
+            }
+            const amtEl = $id('cb-amount'); if(amtEl) { amtEl.value = ''; amtEl.dataset.raw = ''; }
+            mod.classList.remove('hidden');
+        }
+
+        function closeCatBudgetForm() {
+            const mod = $id('cat-budget-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function saveCatBudget(e) {
+            e.preventDefault();
+            const cat = $id('cb-cat').value;
+            const limit = parseFloat($id('cb-amount').dataset.raw);
+            if (!cat || !limit || limit <= 0) return alert("Selecciona una categoría e ingresa un límite válido mayor a cero.");
+            
+            state.budgets = state.budgets || {};
+            state.budgets[cat] = limit;
+            saveState(); closeCatBudgetForm(); renderBudgetTab();
+        }
+
+        function deleteCatBudget(cat) {
+            if (confirm(`¿Eliminar el límite de presupuesto para la categoría "${cat}"?`)) {
+                delete state.budgets[cat];
+                saveState(); renderBudgetTab();
+            }
+        }
 
         // --- MÓDULO DE TAREAS / PENDIENTES NO FINANCIEROS ---
         let taskCalMonthOffset = 0;
