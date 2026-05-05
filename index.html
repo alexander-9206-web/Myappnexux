@@ -1896,9 +1896,13 @@
             if(t) { 
                 t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); 
                 
-                // APEX FIX: Enviar señal a iOS para cancelar notificación si se completa
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, completed: t.completed }));
+                // APEX FIX: Sincronización estricta. Reprograma si desmarcas la tarea.
+                if (window.webkit && window.webkit.messageHandlers) {
+                    if (t.completed) {
+                        if (window.webkit.messageHandlers.cancelAlarmHandler) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                    } else if (t.date && t.timeAlarm) {
+                        if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                    }
                 }
             }
         }
@@ -3620,7 +3624,10 @@
             const title = $id('ftk-title').value.trim();
             const desc = $id('ftk-desc').value.trim();
             const date = $id('ftk-date').value;
-            const timeAlarm = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
+            // APEX FIX: Esterilización agresiva de la hora (Siempre forzamos HH:mm para evitar error de parseo en Swift)
+            const timeAlarmRaw = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
+            const timeAlarm = timeAlarmRaw.length > 5 ? timeAlarmRaw.substring(0, 5) : timeAlarmRaw;
+            
             const priority = $id('ftk-priority').value;
             const estimatedTime = $id('ftk-time').value;
 
@@ -3639,17 +3646,21 @@
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
 
             // APEX FIX: Integración nativa con contenedor iOS para crear Alarmas / Push Notifications
-            if (date && timeAlarm && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                const payload = {
-                    id: finalId,
-                    title: "NEXUS: " + title,
-                    body: desc ? desc : "Tarea pendiente programada.",
-                    date: date,
-                    time: timeAlarm,
-                    priority: priority
-                };
-                window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
-                console.log("[APEX SYS] Comando de Alarma/Push enviado al contenedor iOS:", payload);
+            if (window.webkit && window.webkit.messageHandlers) {
+                if (date && timeAlarm) {
+                    const payload = {
+                        id: finalId,
+                        title: "NEXUS: " + title,
+                        body: desc ? desc : "Tarea pendiente programada.",
+                        date: date,
+                        time: timeAlarm,
+                        priority: priority
+                    };
+                    if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
+                    console.log("[APEX SYS] Comando de Alarma/Push esterilizado enviado al contenedor iOS:", payload);
+                } else {
+                    if (window.webkit.messageHandlers.cancelAlarmHandler) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: finalId }));
+                }
             }
         }
 
@@ -3659,9 +3670,13 @@
                 t.completed = !t.completed; 
                 saveState(); renderTasksTab(); updateDashboard(); 
                 
-                // APEX FIX: Enviar señal a iOS para cancelar notificación si se completa
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, completed: t.completed }));
+                // APEX FIX: Sincronización estricta. Reprograma si desmarcas la tarea.
+                if (window.webkit && window.webkit.messageHandlers) {
+                    if (t.completed) {
+                        if (window.webkit.messageHandlers.cancelAlarmHandler) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                    } else if (t.date && t.timeAlarm) {
+                        if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                    }
                 }
             }
         }
@@ -3671,9 +3686,9 @@
                 state.tasks = state.tasks.filter(t => t.id !== id);
                 saveState(); renderTasksTab(); updateDashboard();
                 
-                // APEX FIX: Enviar señal a iOS para cancelar notificación
+                // APEX FIX: Enviar señal a iOS para cancelar notificación de forma limpia
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
                 }
             }
         }
@@ -3742,10 +3757,12 @@
         let pomoTimeLeft = 0;
         let pomoIsRunning = false;
         let pomoOriginalTime = 0;
+        let currentPomoTaskTitle = ""; // APEX FIX: Memoria para Push Nativo
 
         function openPomodoro(taskId) {
             const t = state.tasks.find(x => x.id === taskId);
             if(!t) return;
+            currentPomoTaskTitle = t.title;
             $id('pomo-task-title').innerText = t.title;
             const mins = parseInt(t.estimatedTime || 25);
             pomoOriginalTime = mins * 60;
@@ -3756,6 +3773,23 @@
             $id('pomo-btn-play').innerHTML = '<i class="fa-solid fa-pause"></i>';
             clearInterval(pomoInterval);
             pomoInterval = setInterval(pomoTick, 1000);
+
+            // APEX FIX: Sincronizar el Pomodoro con el sistema nativo de iOS (Fondo/Background)
+            // Esto asegura que si el usuario bloquea el iPhone, la alarma suene como app nativa.
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                const target = new Date(Date.now() + (pomoTimeLeft * 1000));
+                const dateStr = target.getFullYear() + '-' + String(target.getMonth()+1).padStart(2,'0') + '-' + String(target.getDate()).padStart(2,'0');
+                const timeStr = String(target.getHours()).padStart(2,'0') + ':' + String(target.getMinutes()).padStart(2,'0');
+                
+                const payload = {
+                    id: 'pomo_alarm_bg',
+                    title: "NEXUS: Enfoque Terminado",
+                    body: "¡Tiempo cumplido para: " + currentPomoTaskTitle + "!",
+                    date: dateStr,
+                    time: timeStr
+                };
+                window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
+            }
         }
 
         function pomoTick() {
@@ -3766,7 +3800,23 @@
             } else {
                 clearInterval(pomoInterval);
                 if(navigator.vibrate) navigator.vibrate([500, 200, 500]);
-                alert("¡Tiempo cumplido! Has terminado tu sesión de enfoque. Gran trabajo.");
+                
+                // APEX FIX: Erradicación del alert() HTML. Invocación de Push Nativo Inmediato.
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.immediateAlarmHandler) {
+                    // Cancelamos la alarma de background para evitar notificaciones duplicadas
+                    if (window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: 'pomo_alarm_bg' }));
+                    }
+                    window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({ 
+                        id: 'pomo_alarm_imm', 
+                        title: "NEXUS: Enfoque Terminado", 
+                        body: "¡Tiempo cumplido para: " + currentPomoTaskTitle + "! Gran trabajo." 
+                    }));
+                } else if (!window.webkit) {
+                    // Fallback solo para navegadores de PC o Safari sin el contenedor Swift
+                    alert("¡Tiempo cumplido! Has terminado tu sesión de enfoque. Gran trabajo.");
+                }
+                
                 stopPomodoro();
             }
         }
@@ -3789,6 +3839,11 @@
                 $id('pomodoro-modal').classList.add('hidden');
                 $id('pomodoro-modal').classList.remove('opacity-0', 'pointer-events-none');
             }, 300);
+            
+            // APEX FIX: Cancelar la alarma nativa si el usuario detiene el Pomodoro manualmente
+            if (pomoTimeLeft > 0 && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: 'pomo_alarm_bg' }));
+            }
         }
         // --- FIN MÓDULO DE TAREAS ---
 
