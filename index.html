@@ -1083,7 +1083,13 @@
                 <input type="hidden" id="ftk-id">
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Título / Pendiente</label><input type="text" id="ftk-title" required class="form-input text-sm" placeholder="Ej: Comprar mercado, Llamar al abogado..."></div>
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Detalles (Opcional)</label><textarea id="ftk-desc" class="form-input text-xs min-h-[80px]" placeholder="Notas adicionales..."></textarea></div>
-                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="ftk-date" class="form-input text-xs px-2"></div>
+                
+                <!-- APEX FIX: Fechas y Alarmas Nativas iOS -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite</label><input type="date" id="ftk-date" class="form-input text-xs px-2"></div>
+                    <div><label class="text-[10px] font-black uppercase text-indigo-500 ml-2"><i class="fa-solid fa-bell mr-1"></i>Alarma iOS (Opcional)</label><input type="time" id="ftk-time-alarm" class="form-input text-xs px-2 border-indigo-100 bg-indigo-50/50"></div>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Prioridad</label><select id="ftk-priority" class="form-input text-xs px-2"><option value="low">Baja</option><option value="medium" selected>Media</option><option value="high">Alta</option></select></div>
                     <!-- APEX FIX: Esfuerzo Anti-Procrastinación -->
@@ -1769,7 +1775,10 @@
                     html += `<div class="flex items-center justify-between p-3 rounded-[1rem] bg-slate-50 border border-slate-100 cursor-pointer hover:border-indigo-200 transition-colors" onclick="switchTab('tasks')">
                         <div class="flex items-center gap-3 overflow-hidden">
                             <button type="button" onclick="event.stopPropagation(); toggleTaskStatusDash('${t.id}')" class="w-5 h-5 shrink-0 rounded border-2 border-slate-300 flex items-center justify-center hover:border-indigo-400 transition-colors bg-white"></button>
-                            <p class="text-[10px] font-black uppercase text-slate-700 truncate">${t.title}</p>
+                            <div class="flex flex-col truncate">
+                                <p class="text-[10px] font-black uppercase text-slate-700 truncate">${t.title}</p>
+                                ${t.timeAlarm ? `<p class="text-[8px] font-bold text-indigo-400 mt-0.5"><i class="fa-solid fa-bell mr-1"></i>${t.timeAlarm}</p>` : ''}
+                            </div>
                         </div>
                         <span class="text-[7px] font-black uppercase ${pBg} ${pText} border px-2 py-0.5 rounded shadow-sm shrink-0">${t.priority==='high'?'Alta':t.priority==='medium'?'Media':'Baja'}</span>
                     </div>`;
@@ -1786,7 +1795,14 @@
 
         function toggleTaskStatusDash(id) {
             const t = state.tasks.find(x => x.id === id);
-            if(t) { t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); }
+            if(t) { 
+                t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); 
+                
+                // APEX FIX: Enviar señal a iOS para cancelar notificación si se completa
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, completed: t.completed }));
+                }
+            }
         }
 
         function showScoreModal() { const mod = $id('score-modal'); if(mod) mod.classList.remove('hidden'); }
@@ -3401,7 +3417,7 @@
                 else { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; }
 
                 const badge = `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>`;
-                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}</span>` : '';
+                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}${t.timeAlarm ? ` <i class="fa-regular fa-clock ml-2 mr-1"></i>${t.timeAlarm}` : ''}</span>` : '';
                 
                 // APEX FIX: Elementos de Organización y Procrastinación
                 const timeBadge = t.estimatedTime === '5' ? `<span class="bg-amber-100 text-amber-600 px-2 py-0.5 rounded text-[8px] font-black uppercase border border-amber-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>Regla 2 Min</span>` : '';
@@ -3465,6 +3481,7 @@
                     $id('ftk-title').value = t.title;
                     $id('ftk-desc').value = t.description || '';
                     $id('ftk-date').value = t.date || '';
+                    if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = t.timeAlarm || '';
                     $id('ftk-priority').value = t.priority || 'medium';
                     $id('ftk-time').value = t.estimatedTime || '25';
                 }
@@ -3473,6 +3490,7 @@
                 $id('ftk-title').value = '';
                 $id('ftk-desc').value = '';
                 $id('ftk-date').value = prefillDate || '';
+                if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = '';
                 $id('ftk-priority').value = 'medium';
                 $id('ftk-time').value = '25';
             }
@@ -3491,31 +3509,61 @@
             const title = $id('ftk-title').value.trim();
             const desc = $id('ftk-desc').value.trim();
             const date = $id('ftk-date').value;
+            const timeAlarm = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
             const priority = $id('ftk-priority').value;
             const estimatedTime = $id('ftk-time').value;
 
             if(!title) return alert("El título de la tarea es obligatorio.");
 
+            let finalId = id;
             if(id) {
                 const t = state.tasks.find(x => x.id === id);
                 if(t) {
-                    t.title = title; t.description = desc; t.date = date; t.priority = priority; t.estimatedTime = estimatedTime;
+                    t.title = title; t.description = desc; t.date = date; t.timeAlarm = timeAlarm; t.priority = priority; t.estimatedTime = estimatedTime;
                 }
             } else {
-                state.tasks.push({ id: 'task_' + Date.now(), title, description: desc, date, priority, estimatedTime, completed: false, createdAt: new Date().toISOString() });
+                finalId = 'task_' + Date.now();
+                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, estimatedTime, completed: false, createdAt: new Date().toISOString() });
             }
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
+
+            // APEX FIX: Integración nativa con contenedor iOS para crear Alarmas / Push Notifications
+            if (date && timeAlarm && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                const payload = {
+                    id: finalId,
+                    title: "NEXUS: " + title,
+                    body: desc ? desc : "Tarea pendiente programada.",
+                    date: date,
+                    time: timeAlarm,
+                    priority: priority
+                };
+                window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
+                console.log("[APEX SYS] Comando de Alarma/Push enviado al contenedor iOS:", payload);
+            }
         }
 
         function toggleTaskStatus(id) {
             const t = state.tasks.find(x => x.id === id);
-            if(t) { t.completed = !t.completed; saveState(); renderTasksTab(); updateDashboard(); }
+            if(t) { 
+                t.completed = !t.completed; 
+                saveState(); renderTasksTab(); updateDashboard(); 
+                
+                // APEX FIX: Enviar señal a iOS para cancelar notificación si se completa
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, completed: t.completed }));
+                }
+            }
         }
 
         function deleteTask(id) {
             if(confirm("¿Eliminar esta tarea de forma permanente?")) {
                 state.tasks = state.tasks.filter(t => t.id !== id);
                 saveState(); renderTasksTab(); updateDashboard();
+                
+                // APEX FIX: Enviar señal a iOS para cancelar notificación
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                }
             }
         }
         
