@@ -1090,6 +1090,18 @@
                     <div><label class="text-[10px] font-black uppercase text-indigo-500 ml-2"><i class="fa-solid fa-bell mr-1"></i>Alarma iOS (Opcional)</label><input type="time" id="ftk-time-alarm" class="form-input text-xs px-2 border-indigo-100 bg-indigo-50/50"></div>
                 </div>
 
+                <!-- APEX FIX: Temporizador Rápido de Recordatorio -->
+                <div>
+                    <label class="text-[10px] font-black uppercase text-indigo-500 ml-2"><i class="fa-solid fa-stopwatch mr-1"></i>Temporizador Rápido (Calcula Hora Automáticamente)</label>
+                    <select id="ftk-quick-timer" onchange="applyQuickTimer()" class="form-input text-xs px-2 border-indigo-100 bg-indigo-50/50 font-bold text-indigo-900">
+                        <option value="">Personalizado / Sin Temporizador</option>
+                        <option value="10">En 10 minutos</option>
+                        <option value="30">En 30 minutos</option>
+                        <option value="60">En 1 hora</option>
+                        <option value="120">En 2 horas</option>
+                    </select>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Prioridad</label><select id="ftk-priority" class="form-input text-xs px-2"><option value="low">Baja</option><option value="medium" selected>Media</option><option value="high">Alta</option></select></div>
                     <!-- APEX FIX: Esfuerzo Anti-Procrastinación -->
@@ -1167,6 +1179,40 @@
         let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency';
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
+
+        // ============================================================================
+        // --- MOTOR DE PERSISTENCIA INDEXEDDB (APEX ARCHITECTURE) ---
+        // ============================================================================
+        const NexusIDB = {
+            dbName: 'NexusAR_DB',
+            init: async function() {
+                return new Promise((resolve, reject) => {
+                    const req = indexedDB.open(this.dbName, 1);
+                    req.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains('states')) db.createObjectStore('states', { keyPath: 'userId' });
+                    };
+                    req.onsuccess = (e) => resolve(e.target.result);
+                    req.onerror = (e) => reject(e);
+                });
+            },
+            saveState: async function(userId, stateObj) {
+                const db = await this.init();
+                return new Promise((resolve) => {
+                    const tx = db.transaction('states', 'readwrite');
+                    tx.objectStore('states').put({ userId, data: JSON.parse(JSON.stringify(stateObj)) });
+                    tx.oncomplete = () => resolve();
+                });
+            },
+            getState: async function(userId) {
+                const db = await this.init();
+                return new Promise((resolve) => {
+                    const tx = db.transaction('states', 'readonly');
+                    const req = tx.objectStore('states').get(userId);
+                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
+                });
+            }
+        };
 
         // ============================================================================
         // --- MOTOR DE NUBE (GOOGLE SHEETS REST API) APEX OPTIMIZED ---
@@ -1261,9 +1307,10 @@
                 }
                 
                 if (isLoaded) {
-                    localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state));
-                    if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
-                    console.log(`[APEX SYS] Módulos remotos cargados y ensamblados exitosamente.`);
+                    NexusIDB.saveState(currentUser, state).then(() => {
+                        if (sessionUnlocked) { updateDashboard(); if(state.activeTab) switchTab(state.activeTab); }
+                        console.log(`[APEX SYS] Módulos remotos cargados y ensamblados en IndexedDB exitosamente.`);
+                    });
                 }
             }
             updateCloudBadge(true, false);
@@ -1298,47 +1345,73 @@
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
-                    // APEX FIX: Creación de Módulos JSON
-                    const chunks = [];
+                    // APEX FIX: Motor CQRS (Sincronización Delta)
+                    const queue = JSON.parse(localStorage.getItem(`nexus_delta_${currentUser}`) || '[]');
                     
-                    // 1. Módulo Configuración y Metadatos
-                    chunks.push(JSON.stringify({
-                        part: "CONFIG",
-                        theme: state.theme || {}, settings: state.settings || {},
-                        categories: state.categories || {}, catParents: state.catParents || {},
-                        taxes: state.taxes || {}, goals: state.goals || [], tasks: state.tasks || []
-                    }));
-                    
-                    // 2. Módulo Cuentas y Préstamos
-                    chunks.push(JSON.stringify({
-                        part: "ACCOUNTS_LOANS",
-                        accounts: state.accounts || [], loans: state.loans || []
-                    }));
-                    
-                    // 3. Módulos Transaccionales
-                    const txArray = state.tx || [];
-                    const txChunkSize = 250;
-                    for (let i = 0; i < txArray.length; i += txChunkSize) {
+                    if (queue.length > 0) {
+                        const payload = {
+                            action: "delta_sync",
+                            email: currentUser,
+                            events: queue
+                        };
+                        
+                        await fetch(googleSheetUrl, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        // Limpiar los eventos de la cola que ya fueron enviados
+                        const remaining = JSON.parse(localStorage.getItem(`nexus_delta_${currentUser}`) || '[]');
+                        const sentIds = queue.map(q => q.id);
+                        const newQueue = remaining.filter(q => !sentIds.includes(q.id));
+                        localStorage.setItem(`nexus_delta_${currentUser}`, JSON.stringify(newQueue));
+                        
+                        console.log(`[APEX SYS] Sincronización Delta CQRS exitosa. ${queue.length} eventos inyectados.`);
+                    } else {
+                        // Sincronización Completa (Fallback) para Cuentas, Loans y Configuración
+                        const chunks = [];
+                        
+                        // 1. Módulo Configuración y Metadatos
                         chunks.push(JSON.stringify({
-                            part: `TX_BLOCK_${Math.floor(i / txChunkSize) + 1}`,
-                            tx: txArray.slice(i, i + txChunkSize)
+                            part: "CONFIG",
+                            theme: state.theme || {}, settings: state.settings || {},
+                            categories: state.categories || {}, catParents: state.catParents || {},
+                            taxes: state.taxes || {}, goals: state.goals || [], tasks: state.tasks || []
                         }));
-                    }
+                        
+                        // 2. Módulo Cuentas y Préstamos
+                        chunks.push(JSON.stringify({
+                            part: "ACCOUNTS_LOANS",
+                            accounts: state.accounts || [], loans: state.loans || []
+                        }));
+                        
+                        // 3. Módulos Transaccionales
+                        const txArray = state.tx || [];
+                        const txChunkSize = 250;
+                        for (let i = 0; i < txArray.length; i += txChunkSize) {
+                            chunks.push(JSON.stringify({
+                                part: `TX_BLOCK_${Math.floor(i / txChunkSize) + 1}`,
+                                tx: txArray.slice(i, i + txChunkSize)
+                            }));
+                        }
 
-                    const payload = { action: "save", email: currentUser, chunks: chunks };
-                    
-                    // APEX FIX: Forzar Fetch nativo (Bypass iOS Swift) para peticiones POST.
-                    // Las peticiones POST en Swift (URLSession) son destruidas por la redirección 302 
-                    // de Google Apps Script (borrando el body completo). El Fetch nativo en modo 'no-cors' 
-                    // atraviesa la redirección manteniendo todo el JSON intacto hacia la hoja de Sheets.
-                    await fetch(googleSheetUrl, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(payload)
-                    });
-                    
-                    console.log(`[APEX SYS] Sincronización Web SSoT exitosa. ${chunks.length} módulos JSON enviados.`);
+                        const payload = { action: "save", email: currentUser, chunks: chunks };
+                        
+                        // APEX FIX: Forzar Fetch nativo (Bypass iOS Swift) para peticiones POST.
+                        // Las peticiones POST en Swift (URLSession) son destruidas por la redirección 302 
+                        // de Google Apps Script (borrando el body completo). El Fetch nativo en modo 'no-cors' 
+                        // atraviesa la redirección manteniendo todo el JSON intacto hacia la hoja de Sheets.
+                        await fetch(googleSheetUrl, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        console.log(`[APEX SYS] Sincronización Completa Web SSoT exitosa. ${chunks.length} módulos JSON enviados.`);
+                    }
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red.", e);
                 } finally {
@@ -1348,8 +1421,19 @@
             }, 1500);
         }
 
-        function saveCloudTx(tx) { /* Se procesa en masa con triggerCloudSync() */ }
-        function deleteCloudTx(id) { /* Idem */ }
+        function saveCloudTx(tx) { 
+            if(!currentUser) return;
+            const q = JSON.parse(localStorage.getItem(`nexus_delta_${currentUser}`) || '[]');
+            q.push({ id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7), action: 'UPSERT_TX', data: tx, ts: Date.now() });
+            localStorage.setItem(`nexus_delta_${currentUser}`, JSON.stringify(q));
+        }
+        
+        function deleteCloudTx(id) { 
+            if(!currentUser) return;
+            const q = JSON.parse(localStorage.getItem(`nexus_delta_${currentUser}`) || '[]');
+            q.push({ id: 'evt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7), action: 'DELETE_TX', data: { id }, ts: Date.now() });
+            localStorage.setItem(`nexus_delta_${currentUser}`, JSON.stringify(q));
+        }
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
@@ -1373,7 +1457,7 @@
                 if(le) le.addEventListener('input', (e) => { const em = e.target.value.trim().toLowerCase(); const rf = $id('register-fields'); if(rf) { if(em && !localStorage.getItem(`nexus_profile_${em}`)) rf.classList.remove('hidden'); else rf.classList.add('hidden'); } });
             } else {
                 // ARRANQUE LOCAL-FIRST
-                bootApp(); 
+                await bootApp(); 
                 
                 // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
                 initCloud().then(() => {
@@ -1398,23 +1482,23 @@
             const loginScreen = $id('login-screen');
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
-                setTimeout(() => { 
+                setTimeout(async () => { 
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
-                    bootApp(); 
+                    await bootApp(); 
                     fetchCloudState(); // Sincronizar tras la animación
                 }, 300); 
             } else {
-                bootApp();
+                await bootApp();
                 fetchCloudState();
             }
         }
 
-        function unlockSession() {
+        async function unlockSession() {
             const input = $id('session-pin-input').value;
             if(input === userProfile.pin) {
                 sessionUnlocked = true; const lockScreen = $id('session-lock-screen');
-                if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(() => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; bootApp(); }, 300); } else bootApp();
+                if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(async () => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; await bootApp(); }, 300); } else await bootApp();
             } else { alert("PIN Incorrecto."); $id('session-pin-input').value = ''; }
         }
 
@@ -1431,9 +1515,22 @@
             ['touchstart', 'click', 'keypress', 'scroll'].forEach(evt => { document.removeEventListener(evt, resetTimer); document.addEventListener(evt, resetTimer, {passive: true}); }); resetTimer();
         }
 
-        function bootApp() {
+        async function bootApp() {
             userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
-            const savedState = JSON.parse(localStorage.getItem(`nexus_db_${currentUser}`));
+            
+            // APEX FIX: Migración Transparente a IndexedDB
+            let savedState = await NexusIDB.getState(currentUser);
+            
+            if (!savedState) {
+                const lsSaved = localStorage.getItem(`nexus_db_${currentUser}`);
+                if (lsSaved) {
+                    savedState = JSON.parse(lsSaved);
+                    await NexusIDB.saveState(currentUser, savedState);
+                    localStorage.removeItem(`nexus_db_${currentUser}`); 
+                    console.log("[APEX SYS] Migración de LocalStorage a IndexedDB completada.");
+                }
+            }
+
             const reqPin = savedState && savedState.settings ? savedState.settings.requirePin : false;
             if(!sessionUnlocked && reqPin) {
                 const lock = $id('session-lock-screen');
@@ -1470,8 +1567,9 @@
         
         function saveState() { 
             if(currentUser && sessionUnlocked && state) {
-                localStorage.setItem(`nexus_db_${currentUser}`, JSON.stringify(state)); 
-                if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                NexusIDB.saveState(currentUser, state).then(() => {
+                    if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                });
             } 
         }
         
@@ -3484,6 +3582,7 @@
                     if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = t.timeAlarm || '';
                     $id('ftk-priority').value = t.priority || 'medium';
                     $id('ftk-time').value = t.estimatedTime || '25';
+                    if($id('ftk-quick-timer')) $id('ftk-quick-timer').value = '';
                 }
             } else {
                 $id('ftk-id').value = '';
@@ -3493,7 +3592,19 @@
                 if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = '';
                 $id('ftk-priority').value = 'medium';
                 $id('ftk-time').value = '25';
+                if($id('ftk-quick-timer')) $id('ftk-quick-timer').value = '';
             }
+        }
+
+        // APEX FIX: Calculador de temporizador rápido
+        function applyQuickTimer() {
+            const val = parseInt($id('ftk-quick-timer').value);
+            if(!val) return;
+            const target = new Date();
+            target.setMinutes(target.getMinutes() + val);
+            
+            if($id('ftk-date')) $id('ftk-date').value = target.getFullYear() + '-' + String(target.getMonth()+1).padStart(2,'0') + '-' + String(target.getDate()).padStart(2,'0');
+            if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = String(target.getHours()).padStart(2,'0') + ':' + String(target.getMinutes()).padStart(2,'0');
         }
 
         function closeTaskForm() {
