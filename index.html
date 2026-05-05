@@ -2735,11 +2735,13 @@
                     const incCats = state.categories.income || [];
                     const expCats = state.categories.expense || [];
                     const transCats = state.categories.transfer || [];
-                    cats = [...incCats, ...expCats, ...transCats];
+                    // APEX FIX: Inyectar categorías de proyecciones sin los contratos madre
+                    cats = [...incCats, ...expCats, ...transCats, '⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay'];
                 } else if (type === 'afterpay') {
                     cats = ['🛍️ Afterpay'];
                 } else {
                     cats = state.categories[type] || [];
+                    if (type === 'expense') cats.push('⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay');
                 }
                 
                 // Remover duplicados por seguridad
@@ -2756,7 +2758,21 @@
             
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
-            let fTx = getEnrichedTx().filter(t => { 
+            // APEX FIX: Ocultar contratos "madre" (deuda total) de AP y TC. Mantener solo flujo normal.
+            let rawTxList = state.tx
+                .filter(t => t.type !== 'afterpay' && !t.isCCPurchase)
+                .map(t => ({...t, original_amount: t.amount, original_currency: t.currency}));
+
+            // Extraemos las proyecciones (cuotas) haciendo bypass temporal de la divisa activa
+            const tempCurr = state.activeCurrency;
+            state.activeCurrency = 'GLOBAL';
+            let projTxs = getEnrichedTx().filter(t => t.isProjected);
+            state.activeCurrency = tempCurr;
+
+            // Unimos el flujo real con las proyecciones (cuotas) y omitimos orígenes de deuda masiva
+            let combinedTxs = [...rawTxList, ...projTxs];
+
+            let fTx = combinedTxs.filter(t => { 
                 const d = new Date(t.date); 
                 if(d < st || d > en) return false; 
                 
@@ -2764,7 +2780,7 @@
                 if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
 
                 if(tp !== 'all') {
-                    if (tp === 'afterpay' && !t.cat.includes('Afterpay')) return false;
+                    if (tp === 'afterpay' && !(t.cat || '').includes('Afterpay')) return false;
                     if (tp !== 'afterpay' && t.type !== tp) return false;
                 }
                 if(ct !== 'all' && t.cat !== ct) return false; 
@@ -2778,6 +2794,10 @@
             const curSel = $id('db-currency'); const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
             
             const tV = fTx.reduce((s,t) => {
+                // APEX FIX: Control contable estricto
+                if (t.isProjected) return s; // Las proyecciones no son flujo real
+                if (t.type === 'transfer') return s; // Las transferencias son flujo neutro 0
+                
                 // APEX FIX: Aislamiento del Flujo de Terceros en el motor de cálculo SSoT
                 const acc = state.accounts.find(a => a.id === t.accId);
                 if (acc && acc.type === 'terceros') return s; 
@@ -2858,11 +2878,7 @@
                 }
                 
                 let pBadge = ''; 
-                if (t.type === 'afterpay' && !t.isProjected) {
-                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200">CONTRATO AP</span>`;
-                } else if (t.isCCPurchase && !t.isProjected) {
-                    pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA TC</span>`;
-                } else if (t.isProjected) {
+                if (t.isProjected) {
                     const isPast = new Date(t.date) <= new Date(); 
                     let bTxt = isPast ? 'PENDIENTE' : 'PROYECTADO'; 
                     let bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-amber-100 text-amber-600 border-amber-200'; 
@@ -2888,10 +2904,11 @@
                 const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
                 const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
                 
-                const deleteAction = t.isProjected ? `alert('Edita la deuda original para eliminarlo.')` : `deleteDatabaseRecord('${t.id}')`;
+                // APEX FIX: Alertar al usuario que elimine la deuda desde el módulo de Pasivos
+                const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||t.cat.substring(2)}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
