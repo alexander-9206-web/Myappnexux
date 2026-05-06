@@ -894,6 +894,13 @@
                     <!-- APEX FIX: Contenedor Afterpay Reconstruido y Blindado en el DOM -->
                     <div id="ap-freq-container" class="hidden animate-slideUp bg-teal-50/50 p-4 rounded-3xl border border-teal-100" style="order: 7; width: 100%;">
                         <label class="text-[10px] font-black uppercase text-teal-600 ml-2 mb-2 block"><i class="fa-solid fa-layer-group mr-1"></i>Opciones Afterpay (Pay-in-4)</label>
+                        
+                        <!-- APEX FIX: Selector Táctil de Modalidad (Nueva vs Conciliación) -->
+                        <div class="flex gap-2 bg-teal-100/50 p-1 rounded-xl mb-3">
+                            <button type="button" id="ap-mode-new" onclick="setApMode('new')" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg bg-white text-teal-700 shadow-sm transition-all">1ª Compra</button>
+                            <button type="button" id="ap-mode-recon" onclick="setApMode('recon')" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-teal-600/50 transition-all">Conciliar (0 Pagos)</button>
+                        </div>
+                        
                         <div class="flex gap-2">
                             <select id="f-ap-freq" class="form-input border-teal-200 bg-white text-teal-900 flex-1 font-semibold text-center shadow-sm">
                                 <option value="weekly">Semanal</option>
@@ -1447,6 +1454,18 @@
                 }
             });
 
+            // APEX FIX: Sincronización perfecta al volver del background en iOS.
+            // Esto asegura que cuando el iPhone despierte la app tras haber estado minimizada, 
+            // Firebase y la vista se recarguen de forma instantánea.
+            document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === "visible") {
+                    if (sessionUnlocked) {
+                        if (fbUser && window.db) fetchCloudState(); 
+                        if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
+                    }
+                }
+            });
+
             currentUser = localStorage.getItem('nexus_current_user');
             if (!currentUser) {
                 initCloud(); // Inicializa nube visualmente
@@ -1578,6 +1597,23 @@
         }
 
         function logout() { sessionUnlocked = false; localStorage.removeItem('nexus_current_user'); location.reload(); }
+        
+        // APEX FIX: Lógica del Toggle de Modalidad Afterpay
+        function setApMode(mode) {
+            const btnNew = $id('ap-mode-new');
+            const btnRecon = $id('ap-mode-recon');
+            const paidSelect = $id('f-ap-paid');
+            
+            if(mode === 'new') {
+                if(btnNew) { btnNew.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.remove('text-teal-600/50'); }
+                if(btnRecon) { btnRecon.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.add('text-teal-600/50'); }
+                if(paidSelect) paidSelect.value = "1";
+            } else {
+                if(btnRecon) { btnRecon.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.remove('text-teal-600/50'); }
+                if(btnNew) { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
+                if(paidSelect) paidSelect.value = "0";
+            }
+        }
         
         // APEX FIX: Forzar actualización de caché (Útil para contenedores nativos iOS y PWA)
         function forceAppUpdate() {
@@ -2765,6 +2801,11 @@
             const destCont = $id('account-dest-container');
             const accLbl = $id('f-account') ? $id('f-account').previousElementSibling : null;
             
+            // APEX FIX: Declaración de variables de UI faltantes
+            const apFreqC = $id('ap-freq-container');
+            const dtCont = $id('datetime-container');
+            const dateLbl = $id('lbl-date-main');
+            
             $id('note-container').style.order = '1';
             $id('amount-container').style.order = '2';
 
@@ -2774,23 +2815,21 @@
                 if(destCont) { destCont.classList.add('hidden'); destCont.style.display = 'none'; }
                 if(catMod) { catMod.classList.remove('hidden'); catMod.style.display = 'block'; catMod.style.order = '4'; }
                 
-                // APEX FIX: Failsafe absoluto de visibilidad para Frecuencia y Cuotas
-                const apFreqC = $id('ap-freq-container'); 
-                if(apFreqC) { 
+                // APEX FIX: Revelar Afterpay y modificar Date
+                if (apFreqC) { 
                     apFreqC.classList.remove('hidden'); 
-                    apFreqC.style.display = 'block'; // Sobrescribe cualquier bloqueo CSS
-                    apFreqC.style.order = '5'; 
+                    apFreqC.style.display = 'block'; 
+                }
+                if (dtCont) { 
+                    dtCont.style.order = '6'; 
+                }
+                if (dateLbl) { 
+                    dateLbl.innerText = 'Fecha de Compra'; 
+                    dateLbl.classList.replace('text-slate-400', 'text-teal-600');
                 }
                 
-                // APEX FIX: Failsafe absoluto para la Fecha de Compra
-                const dtCont = $id('datetime-container'); 
-                if(dtCont) { 
-                    dtCont.classList.remove('hidden'); 
-                    dtCont.style.display = 'grid'; // Mantiene la estructura de columnas
-                    dtCont.style.order = '6'; 
-                    const dateLbl = $id('lbl-date-main');
-                    if(dateLbl) dateLbl.innerText = 'Fecha de Compra'; // Adapta el texto para Afterpay
-                }
+                // APEX FIX: Reset a Primera Compra al abrir el form
+                if(typeof setApMode === 'function') setApMode('new');
                 
                 if(amtEl) amtEl.dataset.type = 'currency';
                 if(lblWrap) lblWrap.classList.remove('hidden');
