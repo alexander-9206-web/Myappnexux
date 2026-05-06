@@ -1316,30 +1316,68 @@
         async function fetchCloudState() {
             if (!fbUser || !window.db) return;
             try {
-                const { doc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
+                const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 updateCloudBadge(true, true);
                 
-                const stateDocRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'state');
+                const colRef = collection(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data');
                 
                 if (unsubscribeSnapshot) unsubscribeSnapshot();
                 
-                // Listener WebSockets (Actualiza la app en tiempo real si otro dispositivo guarda algo)
-                unsubscribeSnapshot = onSnapshot(stateDocRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        const cloudState = docSnap.data();
-                        // Previene un loop de recarga si el cambio lo originó esta misma pestaña
-                        if (!docSnap.metadata.hasPendingWrites) {
-                            state = { ...state, ...cloudState };
-                            if(currentUser) {
-                                NexusIDB.saveState(currentUser, state).then(() => {
-                                    if (sessionUnlocked) { 
-                                        updateDashboard(); 
-                                        if(state.activeTab) switchTab(state.activeTab); 
-                                    }
-                                });
+                // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
+                unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
+                    let hasChanges = false;
+                    let incomingTxByYear = {};
+                    
+                    snapshot.docChanges().forEach((change) => {
+                        if (!change.doc.metadata.hasPendingWrites) {
+                            hasChanges = true;
+                            const data = change.doc.data();
+                            
+                            if (change.doc.id === 'core') {
+                                // Preservamos las transacciones locales y fusionamos el resto de variables
+                                const currentTx = state.tx || [];
+                                state = { ...state, ...data };
+                                state.tx = currentTx;
+                            } else if (change.doc.id.startsWith('tx_')) {
+                                // Capturamos las transacciones agrupadas por año
+                                const year = change.doc.id.split('_')[1];
+                                incomingTxByYear[year] = data.tx || [];
                             }
-                            console.log(`[APEX SYS] Datos SSoT sincronizados desde Firestore vía WebSocket.`);
                         }
+                    });
+
+                    if (hasChanges) {
+                        // Reconstruimos el array de transacciones sin duplicar datos
+                        if (Object.keys(incomingTxByYear).length > 0) {
+                            let newTxArray = [];
+                            const localTxByYear = {};
+                            
+                            (state.tx || []).forEach(t => {
+                                const y = new Date(t.date).getFullYear() || new Date().getFullYear();
+                                if(!localTxByYear[y]) localTxByYear[y] = [];
+                                localTxByYear[y].push(t);
+                            });
+                            
+                            for (const y in incomingTxByYear) {
+                                localTxByYear[y] = incomingTxByYear[y];
+                            }
+                            
+                            for (const y in localTxByYear) {
+                                newTxArray = newTxArray.concat(localTxByYear[y]);
+                            }
+                            state.tx = newTxArray;
+                        }
+
+                        if(currentUser) {
+                            NexusIDB.saveState(currentUser, state).then(() => {
+                                if (sessionUnlocked) { 
+                                    updateDashboard(); 
+                                    if(state.activeTab) switchTab(state.activeTab); 
+                                }
+                            });
+                        }
+                        console.log(`[APEX SYS] Sincronización WebSockets Exitosa. Arquitectura: Sharding Anual (Free Tier Optimized).`);
                     }
                     updateCloudBadge(true, false);
                 }, (error) => {
@@ -1357,19 +1395,39 @@
                 isSyncing = true;
                 updateCloudBadge(true, true);
                 try {
-                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const stateDocRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'state');
-                    const cleanState = JSON.parse(JSON.stringify(state)); // Sanitización criptográfica de objetos anómalos
+                    // APEX FIX: Uso de writeBatch para consolidar escrituras y evitar cobros extra en Firebase
+                    const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const batch = writeBatch(window.db);
                     
-                    await setDoc(stateDocRef, cleanState);
-                    console.log(`[APEX SYS] Sincronización WebSockets (Firestore) Exitosa.`);
+                    // 1. Guardar Core (Cuentas, Configuración, Presupuestos)
+                    const coreState = { ...state };
+                    delete coreState.tx; // Excluimos transacciones masivas del core
+                    const cleanCore = JSON.parse(JSON.stringify(coreState));
+                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'core');
+                    batch.set(coreRef, cleanCore);
+
+                    // 2. Guardar Transacciones fragmentadas por Año (Evita el límite de 1MB por documento)
+                    const txByYear = {};
+                    (state.tx || []).forEach(t => {
+                        const year = new Date(t.date).getFullYear() || new Date().getFullYear();
+                        if(!txByYear[year]) txByYear[year] = [];
+                        txByYear[year].push(t);
+                    });
+
+                    for (const year in txByYear) {
+                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'tx_' + year);
+                        batch.set(txRef, { tx: txByYear[year] });
+                    }
+                    
+                    await batch.commit();
+                    console.log(`[APEX SYS] Sincronización Batch Completada. Consumo: ${Object.keys(txByYear).length + 1} Writes.`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
                 }
-            }, 1500); // Debounce delay
+            }, 2500); // Aumentado el debounce a 2.5s para agrupar más transacciones rápidas en un solo batch
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
