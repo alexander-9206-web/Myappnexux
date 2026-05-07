@@ -1424,6 +1424,28 @@
                     console.error("[APEX SYS] Error de Snapshot Firestore", error);
                     updateCloudBadge(false);
                 });
+
+                // APEX FIX: Listener en tiempo real para Bóvedas Compartidas (P2P)
+                const sharedAccs = state.accounts ? state.accounts.filter(a => a.isShared && a.remoteId) : [];
+                if (sharedAccs.length > 0 && !window.unsubscribeSharedSnapshot) {
+                    const sharedRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults');
+                    window.unsubscribeSharedSnapshot = onSnapshot(sharedRef, (snap) => {
+                        let hasSharedChanges = false;
+                        snap.forEach(docSnap => {
+                            const data = docSnap.data();
+                            const localAcc = state.accounts.find(a => a.remoteId === docSnap.id);
+                            if (localAcc && localAcc.balance !== data.balance) {
+                                localAcc.balance = data.balance;
+                                hasSharedChanges = true;
+                            }
+                        });
+                        if (hasSharedChanges) {
+                            if(currentUser) NexusIDB.saveState(currentUser, state);
+                            if (sessionUnlocked) { updateDashboard(); if(state.activeTab === 'accounts') renderAccountsTab(); }
+                        }
+                    }, (error) => console.error("[APEX P2P] Error de Snapshot Público", error));
+                }
+
             } catch(e) { console.error(e); }
         }
 
@@ -1461,6 +1483,12 @@
                         batch.set(txRef, { tx: txByYear[year] });
                     }
                     
+                    // APEX FIX: Sincronizar saldos de Cuentas Compartidas P2P al endpoint público en el mismo Batch
+                    (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
+                        const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
+                        batch.set(sharedRef, { balance: sharedAcc.balance, currency: sharedAcc.currency, updatedAt: new Date().toISOString() }, { merge: true });
+                    });
+
                     await batch.commit();
                     console.log(`[APEX SYS] Snapshot guardado en la nube. Total de escrituras: ${Object.keys(txByYear).length + 1}.`);
                 } catch (e) {
@@ -2180,7 +2208,10 @@
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f1f5f9; color: #64748b;';
                         
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
+                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2207,7 +2238,10 @@
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
+                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2235,7 +2269,10 @@
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #fff7ed; color: #f97316;';
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-90" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1"><button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
+                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-90" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2321,7 +2358,7 @@
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
         }
         function toggleCreditFields() { const type = $id('fa-type').value; const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const lbl = $id('fa-balance-lbl'); if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden'); const lim = $id('fa-limit'); if(lim) lim.required = false; if(type === 'credit') { if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; if(lim) lim.required = true; } else if (type === 'virtual') { if(vFields) vFields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Balance (+ a favor, - deuda)'; } else { if(lbl) lbl.innerText = 'Balance Inicial'; } }
-        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), rate: parseFloat($id('fa-rate').dataset.raw) || 0, platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null, color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && typeof fsLib !== 'undefined' && cloudDb) { fsLib.setDoc(fsLib.doc(cloudDb, 'artifacts', cloudAppId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
+        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), rate: parseFloat($id('fa-rate').dataset.raw) || 0, platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null, color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && window.db) { import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, setDoc }) => { setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); }); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
 
         function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
         function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
@@ -2583,7 +2620,10 @@
         function generateShareTokenForAccount(accId) {
             const acc = state.accounts.find(a => a.id === accId);
             if(!acc) return;
-            const payload = { vaultId: acc.id, name: acc.name, currency: acc.currency };
+            
+            // APEX FIX: Obtener el ID remoto correcto para que ambos celulares apunten al mismo archivo en Firebase
+            const targetRemoteId = acc.remoteId || acc.id; 
+            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency };
             const token = 'nx_' + btoa(JSON.stringify(payload));
             
             // Hack para copiar al portapapeles en iOS/Web
@@ -2594,7 +2634,7 @@
             document.execCommand("copy");
             document.body.removeChild(temp);
             
-            alert("Token copiado al portapapeles:\n\n" + token.substring(0, 15) + "...\n\nEnvíalo a tu socio para que lo vincule en su app.");
+            alert("✅ Token copiado al portapapeles:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio. Tu socio debe presionar el botón morado (P2P) para vincular la cuenta.");
         }
         // --- FIN MOTOR P2P ---
 
