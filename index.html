@@ -3082,7 +3082,47 @@
             handleSubCategoryChange();
         }
 
-        function checkTxAccount() { const accId = $id('f-account').value; const acc = state.accounts.find(a => a.id === accId); const type = $id('f-type').value; const ccCont = $id('cc-term-container'); if(acc && acc.type === 'credit' && type === 'expense') { if(ccCont) ccCont.classList.remove('hidden'); } else { if(ccCont) ccCont.classList.add('hidden'); } }
+        // APEX FIX: Lógica Robusta de Auto-Ajuste de Cuenta e Interfaz
+        function checkTxAccount() { 
+            const accId = $id('f-account').value; 
+            const acc = state.accounts.find(a => a.id === accId); 
+            
+            // APEX FIX: Auto-ajuste de divisa según la bóveda seleccionada (Fricción Cero)
+            const curS = $id('f-currency');
+            const lbl = $id('f-currency-label');
+            if (acc) {
+                const c = acc.currency || state.settings.baseCurrency || 'COP';
+                if(curS) curS.value = c;
+                if(lbl) lbl.innerText = c;
+            }
+
+            const type = $id('f-type').value; 
+            const ccCont = $id('cc-term-container'); 
+            if(acc && acc.type === 'credit' && type === 'expense') { 
+                if(ccCont) ccCont.classList.remove('hidden'); 
+            } else { 
+                if(ccCont) ccCont.classList.add('hidden'); 
+            } 
+
+            // APEX FIX: Filtrar cuentas destino para Transferencias a la misma divisa de origen
+            const aSDest = $id('f-account-dest');
+            if (type === 'transfer' && aSDest && acc) {
+                const prevVal = aSDest.value;
+                aSDest.innerHTML = '';
+                const currentAccCurr = acc.currency || state.settings.baseCurrency || 'COP';
+                const sameCurAccs = state.accounts.filter(a => (a.currency || state.settings.baseCurrency || 'COP') === currentAccCurr);
+
+                sameCurAccs.forEach(a => { aSDest.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
+
+                // Retener selección previa si aún es válida, o asignar una distinta
+                if (sameCurAccs.some(a => a.id === prevVal)) {
+                    aSDest.value = prevVal;
+                } else if (sameCurAccs.length > 1) {
+                    const diff = sameCurAccs.find(a => a.id !== acc.id);
+                    if (diff) aSDest.value = diff.id;
+                }
+            }
+        }
         
         function handleCatChange() {
             const cS = $id('f-cat');
@@ -3149,23 +3189,28 @@
             } else {
                 if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = '';
                 if(aSDest) aSDest.innerHTML = '';
-                if(curS) curS.disabled = false;
-                const selectedCurr = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
-                if(lbl) lbl.innerText = selectedCurr;
-                const accs = (state.accounts || []).filter(a => a.currency === selectedCurr);
                 
-                // APEX FIX: Llenado de cuenta origen y destino
-                accs.forEach(a => { 
-                    aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; 
-                    if (aSDest) aSDest.innerHTML += `<option value="${a.id}">${a.name}</option>`; 
+                // APEX FIX: Mostrar TODAS las cuentas incondicionalmente (Incluyendo P2P)
+                if(curS) curS.disabled = true; // Se bloquea visualmente porque la cuenta dictará la divisa
+                const accs = state.accounts || [];
+                
+                // Agrupamos visualmente por divisa para fácil lectura en el Select
+                const groups = {};
+                accs.forEach(a => {
+                    const c = a.currency || state.settings.baseCurrency || 'COP';
+                    if (!groups[c]) groups[c] = [];
+                    groups[c].push(a);
                 });
 
-                // Prevenir colisiones: si hay más de una cuenta y es transferencia, elegimos una destino distinta a la origen
-                if (type === 'transfer' && accs.length > 1 && aSDest) {
-                    aSDest.selectedIndex = 1;
+                for (const curr in groups) {
+                    aS.innerHTML += `<optgroup label="--- Bóvedas en ${curr} ---">`;
+                    groups[curr].forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
+                    aS.innerHTML += `</optgroup>`;
                 }
+
+                // Disparamos la actualización asíncrona para sincronizar cuenta destino y labels
+                setTimeout(() => checkTxAccount(), 50);
             }
-            checkTxAccount();
         }
 
         function openForm(type, txId = null) { 
@@ -3211,26 +3256,15 @@
                 if(destCont) { destCont.classList.add('hidden'); destCont.style.display = 'none'; }
                 if(catMod) { catMod.classList.remove('hidden'); catMod.style.display = 'block'; catMod.style.order = '4'; }
                 
-                // APEX FIX: Revelar Afterpay y modificar Date
-                if (apFreqC) { 
-                    apFreqC.classList.remove('hidden'); 
-                    apFreqC.style.display = 'block'; 
-                }
-                if (dtCont) { 
-                    dtCont.style.order = '6'; 
-                }
-                if (dateLbl) { 
-                    dateLbl.innerText = 'Fecha de Compra'; 
-                    dateLbl.classList.replace('text-slate-400', 'text-teal-600');
-                }
+                if (apFreqC) { apFreqC.classList.remove('hidden'); apFreqC.style.display = 'block'; }
+                if (dtCont) { dtCont.style.order = '6'; }
+                if (dateLbl) { dateLbl.innerText = 'Fecha de Compra'; dateLbl.classList.replace('text-slate-400', 'text-teal-600'); }
                 
-                // APEX FIX: Reset a Primera Compra al abrir el form
                 if(typeof setApMode === 'function') setApMode('new');
                 
                 if(amtEl) amtEl.dataset.type = 'currency';
                 if(lblWrap) lblWrap.classList.remove('hidden');
                 
-                // Ocultar elementos no relevantes
                 const costMod = $id('cost-type-module'); if(costMod) { costMod.classList.add('hidden'); costMod.style.display = 'none'; }
                 const ccCont = $id('cc-term-container'); if(ccCont) { ccCont.classList.add('hidden'); ccCont.style.display = 'none'; }
                 const recCont = $id('recur-container'); if(recCont) { recCont.classList.add('hidden'); recCont.style.display = 'none'; }
@@ -3241,16 +3275,10 @@
                 if(destCont) { destCont.classList.remove('hidden'); destCont.style.display = 'block'; destCont.style.order = '4'; }
                 if(catMod) { catMod.classList.add('hidden'); catMod.style.display = 'none'; }
                 
-                // Ocultar Afterpay Failsafe
-                const apFreqC = $id('ap-freq-container'); 
                 if(apFreqC) { apFreqC.classList.add('hidden'); apFreqC.style.display = 'none'; }
                 
-                const dtCont = $id('datetime-container'); 
                 if(dtCont) { 
-                    dtCont.classList.remove('hidden'); 
-                    dtCont.style.display = 'grid'; 
-                    dtCont.style.order = '5'; 
-                    const dateLbl = $id('lbl-date-main');
+                    dtCont.classList.remove('hidden'); dtCont.style.display = 'grid'; dtCont.style.order = '5'; 
                     if(dateLbl) dateLbl.innerText = 'Fecha';
                 }
                 
@@ -3266,16 +3294,10 @@
                 if(destCont) { destCont.classList.add('hidden'); destCont.style.display = 'none'; }
                 if(catMod) { catMod.classList.remove('hidden'); catMod.style.display = 'block'; catMod.style.order = '4'; }
                 
-                // Ocultar Afterpay Failsafe
-                const apFreqC = $id('ap-freq-container'); 
                 if(apFreqC) { apFreqC.classList.add('hidden'); apFreqC.style.display = 'none'; }
                 
-                const dtCont = $id('datetime-container'); 
                 if(dtCont) { 
-                    dtCont.classList.remove('hidden'); 
-                    dtCont.style.display = 'grid'; 
-                    dtCont.style.order = '5'; 
-                    const dateLbl = $id('lbl-date-main');
+                    dtCont.classList.remove('hidden'); dtCont.style.display = 'grid'; dtCont.style.order = '5'; 
                     if(dateLbl) dateLbl.innerText = 'Fecha';
                 }
                 const recCont = $id('recur-container'); if(recCont) { recCont.classList.remove('hidden'); recCont.style.order = '8'; }
@@ -3285,7 +3307,6 @@
             const selP = $id('f-cat-parent-select'); 
             if (selP) { 
                 selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
-                // APEX FIX: Inicialización profunda de memoria global para evitar amnesia en UI
                 if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
                 const parents = state.catParents.global || []; 
                 parents.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
@@ -3326,11 +3347,11 @@
                 // APEX FIX: Restauración y limpieza estricta de modalidades de pago y amortizaciones para Nueva Compra
                 if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4;
                 if($id('f-ap-freq')) $id('f-ap-freq').value = 'weekly';
-                if($id('f-ap-paid')) $id('f-ap-paid').value = 1; // Default a 1 cuota pagada al iniciar contrato
+                if($id('f-ap-paid')) $id('f-ap-paid').value = 1; 
                 
                 if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
             } else {
-                // APEX FIX: RESTAURACIÓN ABSOLUTA DE LA LÓGICA DE EDICIÓN Y REPOBLACIÓN DE DATOS (INCLUYENDO AFTERPAY)
+                // APEX FIX: RESTAURACIÓN ABSOLUTA DE LA LÓGICA DE EDICIÓN Y REPOBLACIÓN DE DATOS
                 const oldTx = state.tx.find(t => t.id === txId);
                 if (oldTx) {
                     const amtEl = $id('f-amount');
@@ -3372,7 +3393,7 @@
                     if ($id('f-cost-type') && oldTx.costType) $id('f-cost-type').value = oldTx.costType;
                     
                     if (type === 'transfer' && oldTx.toAccId) {
-                        setTimeout(() => { const destEl = $id('f-account-dest'); if(destEl) destEl.value = oldTx.toAccId; }, 50);
+                        setTimeout(() => { const destEl = $id('f-account-dest'); if(destEl) destEl.value = oldTx.toAccId; }, 100);
                     }
                     
                     if (type === 'afterpay') {
@@ -3380,7 +3401,13 @@
                         if ($id('f-ap-quotas')) $id('f-ap-quotas').value = oldTx.apQuotas || 4;
                         if ($id('f-ap-paid')) $id('f-ap-paid').value = oldTx.apPaid || 0;
                     } else {
-                        setTimeout(() => { if ($id('f-account')) $id('f-account').value = oldTx.accId; }, 50);
+                        // APEX FIX: Asignar la cuenta guardada y LUÉGO disparar el auto-ajuste de Divisa
+                        setTimeout(() => { 
+                            if ($id('f-account')) {
+                                $id('f-account').value = oldTx.accId; 
+                                checkTxAccount(); 
+                            }
+                        }, 50);
                     }
                     
                     if ($id('f-is-recur')) {
@@ -3393,7 +3420,9 @@
                     }
                 }
             }
-            checkTxAccount();
+            
+            // Fallback si no hay edición (ya se dispara en populateFormAccounts)
+            if(!txId) setTimeout(() => checkTxAccount(), 80);
         }
 
         // APEX FIX: Restauración del Predictor Semántico (Autofill Inteligente)
