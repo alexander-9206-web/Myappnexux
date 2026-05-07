@@ -1920,8 +1920,35 @@
         }
 
         function getEnrichedTx() {
-            // APEX FIX: Purga absoluta de Lump Sums (Mother TXs). Solo las amortizaciones pasarán al SSoT/Auditoría para proteger el Cashflow.
-            let rawTx = [...getActiveTx()].filter(t => t.type !== 'afterpay' && !t.isCCPurchase); 
+            // APEX FIX: Purga absoluta de Lump Sums (Mother TXs). Solo las amortizaciones pasarán al SSoT/Auditoría.
+            // APEX FIX: Mapeo Avanzado de Aislamiento Patrimonial (Cuentas Compartidas y Terceros)
+            let rawTx = [...getActiveTx()].filter(t => t.type !== 'afterpay' && !t.isCCPurchase).map(t => {
+                const tx = {...t};
+                tx.renderType = tx.type; // Guardar el tipo original para iconos visuales
+
+                const accOrig = state.accounts.find(a => a.id === tx.accId);
+                const accDest = state.accounts.find(a => a.id === tx.toAccId);
+                const isOrigIso = accOrig && (accOrig.isShared || accOrig.type === 'terceros');
+                const isDestIso = accDest && (accDest.isShared || accDest.type === 'terceros');
+
+                // Lógica Estricta de Conversión de Flujo a Bóvedas Externas
+                if (tx.type === 'transfer') {
+                    if (!isOrigIso && isDestIso) {
+                        tx.type = 'expense'; // Enviar a Compartida/Tercero = Gasto Real
+                    } else if (isOrigIso && !isDestIso) {
+                        tx.type = 'income'; // Recibir de Compartida/Tercero = Ingreso Real
+                    } else if (isOrigIso && isDestIso) {
+                        tx.type = 'isolated'; // Flujo puramente externo (Tercero a Tercero)
+                    }
+                } else if (tx.type === 'expense' || tx.type === 'income') {
+                    // Los gastos/ingresos internos de la bóveda compartida no afectan tu caja SSoT personal
+                    if (isOrigIso) {
+                        tx.type = 'isolated';
+                    }
+                }
+                return tx;
+            }); 
+            
             const now = new Date(); now.setHours(0,0,0,0);
             const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
 
@@ -2156,7 +2183,10 @@
 
         function updateDashboard() {
             let uNW = 0; const bC = state.settings.baseCurrency; let totAssets = 0; let totLiab = 0;
-            (state.accounts || []).forEach(a => { let bal = a.type === 'credit' ? -a.balance : a.balance; uNW += convertCurrency(bal, a.currency, bC); if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); });
+            (state.accounts || []).forEach(a => { 
+                if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
+                let bal = a.type === 'credit' ? -a.balance : a.balance; uNW += convertCurrency(bal, a.currency, bC); if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+            });
             (state.loans || []).forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
             
             const netWorthEl = $id('net-worth'); const baseCurrLabel = $id('base-curr-label'); const scoreEl = $id('nexus-score'); const scoreModalVal = $id('score-modal-val');
@@ -2388,9 +2418,17 @@
 
         function renderPeriodList(cTx) { 
             const list = $id('period-list'); if(!list) return;
-            const fTx = cTx.filter(t => { if(t.type === 'afterpay') return false; if(state.periodFilter.type !== 'all' && t.type !== state.periodFilter.type) return false; if(state.periodFilter.cat !== 'all' && t.cat !== state.periodFilter.cat) return false; return true; }); 
+            const fTx = cTx.filter(t => { 
+                const rType = t.renderType || t.type;
+                if(rType === 'afterpay') return false; 
+                if(state.periodFilter.type !== 'all' && rType !== state.periodFilter.type) return false; 
+                if(state.periodFilter.cat !== 'all' && t.cat !== state.periodFilter.cat) return false; 
+                if(t.type === 'isolated') return false; // APEX FIX: Ocultar gastos internos de cuentas aisladas en el Dashboard
+                return true; 
+            }); 
             fTx.sort((a,b) => new Date(b.date) - new Date(a.date)); 
             list.innerHTML = fTx.map(t => {
+                const rType = t.renderType || t.type;
                 let projBadge = '';
                 if(t.isProjected) {
                     const isPast = new Date(t.date) <= new Date(); const bTxt = isPast ? (t.cat.includes('Afterpay') ? 'PENDIENTE' : 'AMORTIZADO') : 'PROY.';
@@ -2399,7 +2437,9 @@
                 }
                 const dDate = new Date(t.date);
                 const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                return `<div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 h-full"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${t.type==='income'?'bg-emerald-50 text-emerald-600':t.type==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}"><i class="fa-solid ${t.type==='income'?'fa-arrow-up':t.type==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text flex items-center">${t.cat.substring(2)} ${projBadge}</p><p class="text-[9px] font-bold opacity-40 theme-text">${dDate.toLocaleDateString()} ${timeStr}</p></div></div><p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</p></div>`;
+                
+                // APEX FIX: Inyecta visualmente el efecto contable real (Gasto o Ingreso)
+                return `<div onclick="${t.isProjected ? '' : `editTransaction('${t.id}')`}" class="${t.isProjected ? '' : 'cursor-pointer'} theme-card p-5 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 h-full"><div class="flex items-center gap-4"><div class="w-10 h-10 rounded-full flex items-center justify-center ${rType==='income'?'bg-emerald-50 text-emerald-600':rType==='expense'?'bg-red-50 text-red-600':'bg-indigo-50 text-indigo-600'}"><i class="fa-solid ${rType==='income'?'fa-arrow-up':rType==='expense'?'fa-arrow-down':'fa-right-left'} text-xs"></i></div><div><p class="text-xs font-black uppercase theme-text flex items-center">${t.cat.substring(2)} ${projBadge}</p><p class="text-[9px] font-bold opacity-40 theme-text">${dDate.toLocaleDateString()} ${timeStr}</p></div></div><p class="font-black text-sm ${t.type==='income'?'theme-val-inc':t.type==='expense'?'theme-val-exp':'text-indigo-500'}">${t.type==='expense'?'-':'+'}${fmt(t.amount, t.currency)}</p></div>`;
             }).join(''); 
             const sI = fTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0); const sE = fTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0); 
             const piEl = $id('period-sub-inc'); const peEl = $id('period-sub-exp'); const psEl = $id('period-subtotal');
@@ -2415,8 +2455,8 @@
             const bC = state.settings.baseCurrency || 'COP';
             
             (state.accounts || []).forEach(a => { 
-                // APEX FIX: Aislamiento contable estricto para cuentas de Terceros
-                if(a.type === 'terceros') return; 
+                // APEX FIX: Aislamiento contable estricto para cuentas de Terceros y Compartidas (P2P)
+                if(a.type === 'terceros' || a.isShared) return; 
 
                 const balInBase = convertCurrency(a.balance, a.currency, bC);
                 if(a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
@@ -3773,10 +3813,26 @@
             
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
-            // APEX FIX: Restaura visibilidad de contratos "madre" (deuda total) de AP en la Auditoría. Oculta TC.
+            // APEX FIX: Mapeo Aislado Dinámico SSoT
             let rawTxList = state.tx
                 .filter(t => !t.isCCPurchase)
-                .map(t => ({...t, original_amount: t.amount, original_currency: t.currency}));
+                .map(t => {
+                    const tx = {...t, original_amount: t.amount, original_currency: t.currency};
+                    tx.renderType = tx.type;
+                    const accOrig = state.accounts.find(a => a.id === tx.accId);
+                    const accDest = state.accounts.find(a => a.id === tx.toAccId);
+                    const isOrigIso = accOrig && (accOrig.isShared || accOrig.type === 'terceros');
+                    const isDestIso = accDest && (accDest.isShared || accDest.type === 'terceros');
+
+                    if (tx.type === 'transfer') {
+                        if (!isOrigIso && isDestIso) tx.type = 'expense';
+                        else if (isOrigIso && !isDestIso) tx.type = 'income';
+                        else if (isOrigIso && isDestIso) tx.type = 'isolated';
+                    } else if (tx.type === 'expense' || tx.type === 'income') {
+                        if (isOrigIso) tx.type = 'isolated';
+                    }
+                    return tx;
+                });
 
             // Extraemos las proyecciones (cuotas) haciendo bypass temporal de la divisa activa
             const tempCurr = state.activeCurrency;
@@ -3790,16 +3846,15 @@
             let fTx = combinedTxs.filter(t => { 
                 const d = new Date(t.date); 
                 if(d < st || d > en) return false; 
-                
-                // APEX FIX: Aplicación estricta del Buscador de Texto (Cliente / Descripción)
                 if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
 
-                // APEX FIX: Lógica profunda de intercepción para los nuevos filtros agregados
+                const rType = t.renderType || t.type; // APEX FIX: Filtramos según comportamiento visual para no confundir al usuario
+
                 if(tp !== 'all') {
                     if (tp === 'afterpay' && !(t.cat || '').includes('Afterpay')) return false;
                     else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
                     else if (tp === 'single_debt' && !(t.cat || '').includes('Pendiente Único')) return false;
-                    else if (['afterpay', 'debt', 'single_debt'].indexOf(tp) === -1 && t.type !== tp) return false;
+                    else if (['afterpay', 'debt', 'single_debt'].indexOf(tp) === -1 && rType !== tp) return false;
                 }
                 
                 if(ct !== 'all' && t.cat !== ct) return false; 
@@ -3814,13 +3869,9 @@
             
             const tV = fTx.reduce((s,t) => {
                 // APEX FIX: Control contable estricto
-                if (t.isProjected) return s; // Las proyecciones no son flujo real
-                if (t.type === 'transfer') return s; // Las transferencias son flujo neutro 0
-                if (t.type === 'afterpay') return s; // El contrato madre Afterpay es un pasivo, no deduce caja real
-                
-                // APEX FIX: Aislamiento del Flujo de Terceros en el motor de cálculo SSoT
-                const acc = state.accounts.find(a => a.id === t.accId);
-                if (acc && acc.type === 'terceros') return s; 
+                if (t.isProjected) return s; 
+                if (t.type === 'transfer' || t.type === 'isolated') return s; // Las transferencias neutrales y aisladas no suman al flujo SSoT global
+                if (t.renderType === 'afterpay') return s; // El contrato madre Afterpay es un pasivo, no deduce caja real
                 
                 const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
                 return t.type === 'income' ? s + amt : (t.type === 'expense' ? s - amt : s);
@@ -3867,11 +3918,12 @@
                 return; 
             } 
             
-            const dupTracker = {}; // APEX FIX: Tracker para transacciones pares en Auditoría
+            const dupTracker = {}; 
 
             lC.innerHTML = fTx.map(t => { 
                 const origCur = t.original_currency || t.currency;
                 const origAmt = t.original_amount || t.amount;
+                const rType = t.renderType || t.type; // APEX FIX: Extrae tipo visual base
                 
                 let isPar = false;
                 if (dbShowDuplicates) {
@@ -3881,13 +3933,13 @@
                 }
 
                 let cT = '', iB = '', iClass = '';
-                if (t.type === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
-                else if (t.type === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
-                else if (t.type === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
-                else if (t.type === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
+                if (rType === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
+                else if (rType === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
+                else if (rType === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
+                else if (rType === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
-                const iE = t.type === 'expense' || t.type === 'afterpay'; 
+                const iE = t.type === 'expense' || rType === 'afterpay'; // APEX FIX: Signo visual basado en impacto real de caja
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
@@ -4222,7 +4274,10 @@
             const cont = $id('finances-unified-content'); if (!cont) return;
             const bC = state.settings.baseCurrency; const now = new Date(); const enrichedTx = getEnrichedTx();
             let liquidAssets = 0, investmentAssets = 0, totalLiabilities = 0; const activeAccs = getActiveAccounts();
-            activeAccs.forEach(a => { if (a.type === 'liquid' || (a.type === 'virtual' && a.balance >= 0)) liquidAssets += a.balance; else if (a.type === 'investment') investmentAssets += a.balance; else if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(a.balance); });
+            activeAccs.forEach(a => { 
+                if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial Estricto
+                if (a.type === 'liquid' || (a.type === 'virtual' && a.balance >= 0)) liquidAssets += a.balance; else if (a.type === 'investment') investmentAssets += a.balance; else if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(a.balance); 
+            });
             let nonCurrentLiabilities = 0;
             getActiveLoans().forEach(l => { if (!l.isBNPL) { let P = l.total; const r = l.rate / 100; const n = l.term; const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1); let balance = P; const paid = l.paidQuotas || 0; for(let j=0; j<paid; j++) balance -= (A - (balance * r)); nonCurrentLiabilities += Math.max(0, balance); } });
             
@@ -4867,7 +4922,10 @@
         function renderReport() {
             const bC = state.settings.baseCurrency; const rb = $id('rep-base-curr'); if(rb) rb.innerText = bC;
             let totAssets = 0; let totLiab = 0;
-            (state.accounts||[]).forEach(a => { if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); });
+            (state.accounts||[]).forEach(a => { 
+                if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial Estricto
+                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+            });
             (state.loans||[]).forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
             const rA = $id('rep-assets'); if(rA) rA.innerText = fmt(totAssets, bC); 
             const rL = $id('rep-liabilities'); if(rL) rL.innerText = fmt(totLiab, bC);
