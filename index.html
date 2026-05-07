@@ -2314,14 +2314,40 @@
         function renderAccounts() {
             const cont = $id('accounts-container'); if(!cont) return;
             if(!state.accounts || state.accounts.length === 0) { cont.innerHTML = `<div class="text-center p-8 border border-slate-100 rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas</p></div>`; return; }
-            const groups = {}; state.accounts.forEach(a => { if(!groups[a.currency]) groups[a.currency] = []; groups[a.currency].push(a); });
+            
+            const groups = {}; const sharedGroups = {}; 
+            
+            state.accounts.forEach(a => { 
+                const curr = a.currency || state.settings.baseCurrency || 'COP'; // APEX FIX: Auto-Sanación de divisa
+                if(a.isShared) {
+                    if(!sharedGroups[curr]) sharedGroups[curr] = []; 
+                    sharedGroups[curr].push(a);
+                } else {
+                    if(!groups[curr]) groups[curr] = []; 
+                    groups[curr].push(a); 
+                }
+            });
+            
             let html = '';
+            
             for(let curr in groups) {
                 const accs = groups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
                 html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm mb-4"><div class="flex justify-between border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
                 accs.forEach(a => { const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-chart-line' : 'fa-chart-line'); const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2"><i class="fa-solid ${icon} text-[10px] text-slate-400 w-5"></i><p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; });
                 html += `</div></div>`;
-            } cont.innerHTML = html;
+            }
+            
+            // APEX FIX: Aislamiento para Cuentas Compartidas P2P en Dashboard
+            if(Object.keys(sharedGroups).length > 0) {
+                for(let curr in sharedGroups) {
+                    const accs = sharedGroups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm border-purple-100/50 bg-slate-50/50 mb-4"><div class="flex justify-between border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-purple-600"><i class="fa-solid fa-link mr-1"></i> Compartidas ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
+                    accs.forEach(a => { const icon = 'fa-link'; const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-white rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2"><i class="fa-solid ${icon} text-[10px] text-purple-400 w-5"></i><p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; });
+                    html += `</div></div>`;
+                }
+            }
+            
+            cont.innerHTML = html;
         }
 
         function render7DaysChart(aTx) { 
@@ -2407,17 +2433,22 @@
             const groups = {};
             const virtualGroups = {};
             const tercerosGroups = {}; // APEX FIX: Contenedor para Cuentas de Terceros
+            const sharedGroups = {}; // APEX FIX: Contenedor aislado para Cuentas Compartidas P2P
 
             state.accounts.forEach(a => {
-                if (a.type === 'virtual') {
-                    if(!virtualGroups[a.currency]) virtualGroups[a.currency] = [];
-                    virtualGroups[a.currency].push(a);
+                const curr = a.currency || state.settings.baseCurrency || 'COP'; // APEX FIX: Auto-Sanación de divisa
+                if (a.isShared) {
+                    if(!sharedGroups[curr]) sharedGroups[curr] = [];
+                    sharedGroups[curr].push(a);
+                } else if (a.type === 'virtual') {
+                    if(!virtualGroups[curr]) virtualGroups[curr] = [];
+                    virtualGroups[curr].push(a);
                 } else if (a.type === 'terceros') {
-                    if(!tercerosGroups[a.currency]) tercerosGroups[a.currency] = [];
-                    tercerosGroups[a.currency].push(a);
+                    if(!tercerosGroups[curr]) tercerosGroups[curr] = [];
+                    tercerosGroups[curr].push(a);
                 } else {
-                    if(!groups[a.currency]) groups[a.currency] = [];
-                    groups[a.currency].push(a);
+                    if(!groups[curr]) groups[curr] = [];
+                    groups[curr].push(a);
                 }
             });
 
@@ -2514,6 +2545,36 @@
                 }
             }
 
+            // APEX FIX: Aislamiento visual estricto para Cuentas Compartidas P2P
+            if (Object.keys(sharedGroups).length > 0) {
+                html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-4"><i class="fa-solid fa-link text-purple-500 mr-1"></i> Bóvedas Vinculadas (P2P)</h3></div>`;
+                for(let curr in sharedGroups) {
+                    grpId++;
+                    const accs = sharedGroups[curr];
+                    let subTotal = 0;
+                    accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
+                    
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('grp-shared-${grpId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center">Compartidas ${curr} <i id="icon-grp-shared-${grpId}" class="fa-solid fa-chevron-down ml-2 text-[10px] transition-transform"></i></h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div id="grp-shared-${grpId}" class="hidden space-y-3 pt-3 animate-slideUp">`;
+                    
+                    accs.forEach(a => {
+                        const icon = 'fa-link';
+                        const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                        const sign = a.type === 'credit' ? '-' : '';
+                        const detailText = `Conexión Activa | ID: ${a.remoteId || a.id}`;
+                        
+                        const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
+                        const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
+
+                        // Botón de copiado P2P (Siempre visible en compartidas)
+                        const p2pBtn = `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>`;
+
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-95" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-purple-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                    });
+                    
+                    html += `</div></div>`;
+                }
+            }
+
             listContainer.innerHTML = html;
         }
 
@@ -2551,8 +2612,11 @@
                     const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === id);
                     const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text');
                     const sign = isOutflow ? '-' : '+';
+                    
+                    // APEX FIX: Añadir trazabilidad de autor en mini-historial P2P
+                    const creatorStr = t.createdBy ? ` • <i class="fa-solid fa-user text-purple-400 mx-0.5"></i> ${t.createdBy.split(' ')[0]}` : '';
 
-                    return `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase">${dDate.toLocaleDateString()} ${timeStr}</span></div><span class="text-[10px] font-black ${colorCls}">${sign}${fmt(t.amount, t.currency)}</span></div>`;
+                    return `<div class="flex justify-between items-center py-1.5 border-b border-slate-50/50 last:border-0"><div class="flex flex-col"><span class="text-[9px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[7px] text-slate-400 font-bold uppercase flex items-center">${dDate.toLocaleDateString()} ${timeStr}${creatorStr}</span></div><span class="text-[10px] font-black ${colorCls}">${sign}${fmt(t.amount, t.currency)}</span></div>`;
                 }).join('');
             } else {
                 el.classList.add('hidden'); el.classList.remove('flex');
@@ -2576,7 +2640,11 @@
                 const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === currentHistAccId);
                 const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text'); const sign = isOutflow ? '-' : '+';
                 const iClass = isOutflow ? 'fa-arrow-down text-red-500 bg-red-50' : (isInflow ? 'fa-arrow-up text-emerald-500 bg-emerald-50' : 'fa-right-left text-indigo-500 bg-indigo-50');
-                return `<div class="theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5">${dDate.toLocaleDateString()} ${timeStr}</p></div></div><p class="font-black text-xs ${colorCls}">${sign}${fmt(t.amount, t.currency)}</p></div>`;
+                
+                // APEX FIX: Etiqueta de trazabilidad de autor P2P en el historial detallado
+                const creatorBadge = t.createdBy ? `<span class="bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md ml-1"><i class="fa-solid fa-user"></i> ${t.createdBy.split(' ')[0]}</span>` : '';
+
+                return `<div class="theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap">${dDate.toLocaleDateString()} ${timeStr} ${creatorBadge}</p></div></div><p class="font-black text-xs ${colorCls}">${sign}${fmt(t.amount, t.currency)}</p></div>`;
             }).join('');
         }
 
@@ -2854,6 +2922,10 @@
             const r = l.rate / 100; const quotaAmt = (l.rate === 0) ? (l.total / l.term) : (l.total * r) / (1 - Math.pow(1 + r, -l.term));
             l.paidQuotas = (l.paidQuotas || 0) + 1; acc.balance -= quotaAmt;
             const newTx = buildTransactionSchema({ type: 'expense', amount: quotaAmt, cat: l.isCC ? '💳 Abono TC' : '💳 Pago Deuda', accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${l.name} (${l.paidQuotas}/${l.term})`, currency: l.currency, costType: 'fixed' });
+            
+            // APEX FIX: Inyectar trazabilidad de autor
+            if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+            
             state.tx.push(newTx); saveCloudTx(newTx);
             saveState(); updateDashboard(); switchTab('loans'); alert(`✅ Cuota pagada correctamente.`);
         }
@@ -2931,8 +3003,10 @@
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
             const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
             card.balance += amount; 
-            // APEX FIX: Se añade flag isCCPurchase para excluir el total del cashflow general
+            // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
             const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
+            if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+            
             state.tx.push(newTx); saveCloudTx(newTx);
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
             saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
@@ -3844,6 +3918,9 @@
                 } else if (t.note && t.note.includes('[TC]')) {
                     pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">CUOTA TC</span>`;
                 }
+
+                // APEX FIX: Badge de creador para trazabilidad P2P
+                const pCreator = t.createdBy ? `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200 shadow-sm"><i class="fa-solid fa-user mr-1"></i>${t.createdBy.split(' ')[0]}</span>` : '';
                 
                 const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`; 
                 
@@ -3856,7 +3933,7 @@
                 const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
@@ -3916,6 +3993,9 @@
                     acc.balance += amount; 
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
+                    // APEX FIX: Añadir Trazabilidad
+                    if (userProfile && userProfile.name) ccTx.createdBy = userProfile.name;
+
                     state.tx.push(ccTx); saveCloudTx(ccTx);
                     
                     // APEX FIX: Extracción de Tasa Condicional (Aplica 0% o Tasa de Tarjeta)
@@ -3999,6 +4079,9 @@
                 const rawTx = { type, amount, cat, accId: type === 'afterpay' ? null : accId, toAccId: type === 'transfer' ? destAccId : null, date: new Date(`${date}T${time}`).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr, costType: costType }; 
                 const newTx = buildTransactionSchema(rawTx); 
                 
+                // APEX FIX: Inyectar trazabilidad de autor
+                if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+
                 let initialPaid = 0;
                 if (type === 'afterpay') { 
                     newTx.apFreq = $id('f-ap-freq').value; 
@@ -4020,6 +4103,10 @@
                             newTx.apPaid += 1;
                             apAcc.balance -= deductAmt;
                             const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: apAcc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${newTx.note || newTx.cat.substring(2)} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency });
+                            
+                            // APEX FIX: Inyectar trazabilidad
+                            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
+                            
                             state.tx.push(apPayTx); saveCloudTx(apPayTx);
                         }
                         saveCloudTx(newTx); // Actualiza contrato madre
@@ -5019,6 +5106,10 @@
             if(acc.currency !== tx.currency) deductAmt = convertCurrency(deductAmt, tx.currency, acc.currency);
             tx.apPaid = (tx.apPaid || 0) + 1; acc.balance -= deductAmt;
             const newTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: acc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${tx.note || tx.cat.substring(2)} (${tx.apPaid}/${quotas})`, currency: acc.currency });
+            
+            // APEX FIX: Trazabilidad P2P
+            if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+            
             state.tx.push(newTx); saveCloudTx(newTx); saveCloudTx(tx);
             saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); if(state.activeTab === 'database') renderDatabase(); alert(`✅ Cuota ${tx.apPaid}/${quotas} pagada.`);
         }
