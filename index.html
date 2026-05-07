@@ -1280,7 +1280,7 @@
         let isSyncing = false;
         let syncTimeout = null;
 
-        // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico)
+        // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado)
         function attachP2PListener() {
             if (!window.db) return;
             if (!window.sharedUnsubscribers) window.sharedUnsubscribers = {}; // Diccionario de Listeners
@@ -1293,7 +1293,7 @@
                     // Evitar duplicar listeners para la misma cuenta
                     if (window.sharedUnsubscribers[localAcc.remoteId]) return;
 
-                    // APEX FIX: Escuchar el documento ESPECÍFICO de la cuenta, no toda la colección global
+                    // Escuchar el documento ESPECÍFICO de la cuenta compartida
                     const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', localAcc.remoteId);
                     
                     window.sharedUnsubscribers[localAcc.remoteId] = onSnapshot(docRef, (docSnap) => {
@@ -1302,27 +1302,30 @@
                         const data = docSnap.data();
                         let hasSharedChanges = false;
                         
-                        // Candado de seguridad: Ya descargamos al menos una vez, ahora sí podemos subir cambios
+                        // Candado de seguridad: Ya conectamos, se habilita la subida
                         localAcc.syncedOnce = true; 
                         
-                        // 1. Espejo de Transacciones (Anti-Wipe & Upsert)
-                        if (data.txs && Array.isArray(data.txs)) {
-                            const incomingIds = data.txs.map(t => t.id);
-                            const localSharedTxs = state.tx.filter(t => t.accId === localAcc.id || t.toAccId === localAcc.id);
-                            
-                            // Si borraron algo en el otro celular, lo borramos aquí
-                            if (data.txs.length > 0) {
-                                const oldestIncomingDate = new Date(data.txs[data.txs.length - 1].date);
-                                localSharedTxs.forEach(lt => {
-                                    if (new Date(lt.date) >= oldestIncomingDate && !incomingIds.includes(lt.id)) {
-                                        state.tx = state.tx.filter(t => t.id !== lt.id);
-                                        hasSharedChanges = true;
-                                    }
-                                });
-                            }
+                        // 1. Purgar transacciones eliminadas remotamente (Anti-Ghosting Seguro)
+                        if (data.deletedTxs && Array.isArray(data.deletedTxs)) {
+                            if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                            data.deletedTxs.forEach(delId => {
+                                if (state.tx.some(t => t.id === delId)) {
+                                    state.tx = state.tx.filter(t => t.id !== delId);
+                                    hasSharedChanges = true;
+                                }
+                                // Registrar localmente para no olvidar que fue eliminada
+                                if (!state.deletedSharedTxs.includes(delId)) {
+                                    state.deletedSharedTxs.push(delId);
+                                }
+                            });
+                        }
 
-                            // Inyectar o actualizar transacciones nuevas del socio
+                        // 2. Inyectar o actualizar transacciones nuevas del socio
+                        if (data.txs && Array.isArray(data.txs)) {
                             data.txs.forEach(netTx => {
+                                // Ignorar la inyección si sabemos que la transacción ya fue eliminada por alguien
+                                if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
+
                                 const mappedTx = { ...netTx };
                                 // Mapeo de ID remoto a ID local para que la UI lo reconozca
                                 if (mappedTx.accId === localAcc.remoteId) mappedTx.accId = localAcc.id;
@@ -1332,21 +1335,25 @@
                                 if (idx === -1) {
                                     state.tx.push(mappedTx);
                                     hasSharedChanges = true;
-                                } else if (JSON.stringify(state.tx[idx]) !== JSON.stringify(mappedTx)) {
-                                    state.tx[idx] = mappedTx;
-                                    hasSharedChanges = true;
+                                } else {
+                                    const ex = state.tx[idx];
+                                    // Evitar loops infinitos: Solo actualizar si hay cambios reales en los datos
+                                    if (ex.amount !== mappedTx.amount || ex.note !== mappedTx.note || ex.cat !== mappedTx.cat || ex.date !== mappedTx.date) {
+                                        state.tx[idx] = mappedTx;
+                                        hasSharedChanges = true;
+                                    }
                                 }
                             });
                         }
 
-                        // 2. Espejo de Balance
+                        // 3. Espejo de Balance
                         if (data.balance !== undefined && localAcc.balance !== data.balance) {
                             localAcc.balance = data.balance;
                             hasSharedChanges = true;
                         }
 
                         if (hasSharedChanges) {
-                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup
+                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup final
                             if(currentUser) NexusIDB.saveState(currentUser, state);
                             if (sessionUnlocked) { 
                                 updateDashboard(); 
@@ -1562,7 +1569,7 @@
                         batch.set(txRef, { tx: txByYear[year] });
                     }
                     
-                    // APEX FIX: Sincronizar Saldos y el HISTORIAL de Transacciones P2P al endpoint público
+                    // APEX FIX: Sincronizar Saldos, HISTORIAL y PURGAS de Transacciones P2P al endpoint público
                     (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
                         const sharedTxs = (state.tx || [])
                             .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
@@ -1575,17 +1582,21 @@
                                 return netTx;
                             });
 
-                        // APEX FIREWALL: Si la cuenta acaba de ser vinculada y está vacía localmente, 
-                        // ABORTAMOS la subida para evitar borrar la data del otro usuario.
+                        // APEX FIREWALL: Bloqueo anti-wipe
                         if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) {
                             return; 
                         }
+                        
+                        // Limitar el array de eliminados para no saturar memoria en Firebase
+                        let deletedTxs = state.deletedSharedTxs || [];
+                        if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
                         const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
                         batch.set(sharedRef, { 
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txs: sharedTxs,
+                            deletedTxs: deletedTxs, // APEX FIX: Compartir registro de purgas
                             updatedAt: new Date().toISOString() 
                         }, { merge: true });
                     });
@@ -2102,30 +2113,73 @@
             if(state.context === 'day') { renderAccounts(); render7DaysChart(aTx); renderDashTasks(); } else { renderPeriodChart(cTx); renderPeriodList(cTx); }
         }
 
-        // APEX FIX: Dashboard Tasks Render
+        // APEX FIX: Variable global para rastrear el día seleccionado en la cuadrícula del Dashboard
+        let dashTaskSelectedDate = null;
+        function setDashTaskDate(dateStr) {
+            dashTaskSelectedDate = dateStr;
+            renderDashTasks();
+        }
+
+        // APEX FIX: Dashboard Tasks Render con Cuadrícula Semanal Interactiva
         function renderDashTasks() {
             const cont = $id('dash-tasks-container'); if(!cont) return;
             const now = new Date();
             const todayStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
             
-            const dayTasks = (state.tasks || []).filter(t => t.date === todayStr && !t.completed).sort((a,b) => {
+            const targetDateStr = dashTaskSelectedDate || todayStr;
+            
+            // Calcular inicio de la semana en curso (Lunes a Domingo)
+            const currentDay = now.getDay();
+            const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+            const monday = new Date(now);
+            monday.setDate(now.getDate() - distanceToMonday);
+
+            const dayNames = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+            let gridHtml = '<div class="grid grid-cols-7 gap-1 md:gap-2 mb-3">';
+            
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(monday);
+                d.setDate(monday.getDate() + i);
+                const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                const isSelected = dateStr === targetDateStr;
+                const isToday = dateStr === todayStr;
+                const hasTasks = state.tasks && state.tasks.some(t => t.date === dateStr && !t.completed);
+                
+                gridHtml += `
+                <div onclick="setDashTaskDate('${dateStr}')" class="flex flex-col items-center justify-center py-2 rounded-xl cursor-pointer transition-all ${isSelected ? 'bg-indigo-500 text-white shadow-md transform scale-105' : 'bg-slate-50 text-slate-400 hover:bg-indigo-50'} ${isToday && !isSelected ? 'border border-indigo-300' : 'border border-transparent'} relative">
+                    <span class="text-[8px] md:text-[9px] font-black uppercase tracking-tighter ${isSelected ? 'text-indigo-100' : 'text-slate-400'}">${dayNames[i]}</span>
+                    <span class="text-xs md:text-sm font-black mt-0.5">${d.getDate()}</span>
+                    ${hasTasks ? `<div class="absolute bottom-1 w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-indigo-400'}"></div>` : ''}
+                </div>`;
+            }
+            gridHtml += '</div>';
+
+            const dayTasks = (state.tasks || []).filter(t => t.date === targetDateStr && !t.completed).sort((a,b) => {
                 const pMap = { 'high': 3, 'medium': 2, 'low': 1 };
                 return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
             });
             
-            if(dayTasks.length > 0) {
-                let html = `<div class="theme-card p-5 rounded-[2rem] border shadow-sm space-y-3">
+            const displayDate = new Date(targetDateStr + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'});
+
+            let html = `<div class="theme-card p-4 md:p-5 rounded-[2rem] border shadow-sm space-y-3">
+                <div class="flex justify-between items-center mb-1">
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest"><i class="fa-solid fa-calendar-week text-indigo-400 mr-1"></i> Agenda Semanal</h3>
+                    <button onclick="switchTab('tasks')" type="button" class="text-[8px] bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 font-black uppercase shadow-sm active:scale-95 transition-transform">Ver Todas</button>
+                </div>
+                ${gridHtml}
+                <div class="border-t border-slate-100/50 pt-3">
                     <div class="flex justify-between items-center mb-2">
-                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest"><i class="fa-solid fa-list-check text-indigo-400 mr-1"></i> Pendientes de Hoy</h3>
-                        <button onclick="switchTab('tasks')" type="button" class="text-[8px] bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 font-black uppercase shadow-sm active:scale-95 transition-transform">Ver Todas</button>
+                        <h4 class="text-[9px] font-black uppercase text-slate-400">Tareas del ${displayDate}</h4>
                     </div>`;
+
+            if(dayTasks.length > 0) {
                 dayTasks.slice(0, 3).forEach(t => {
                     let pBg = '', pText = '';
                     if(t.priority === 'high') { pBg = 'bg-red-100'; pText = 'text-red-600 border-red-200'; }
                     else if(t.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; }
                     else { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; }
                     
-                    html += `<div class="flex items-center justify-between p-3 rounded-[1rem] bg-slate-50 border border-slate-100 cursor-pointer hover:border-indigo-200 transition-colors" onclick="switchTab('tasks')">
+                    html += `<div class="flex items-center justify-between p-3 rounded-[1rem] bg-slate-50 border border-slate-100 cursor-pointer hover:border-indigo-200 transition-colors mb-2" onclick="switchTab('tasks')">
                         <div class="flex items-center gap-3 overflow-hidden">
                             <button type="button" onclick="event.stopPropagation(); toggleTaskStatusDash('${t.id}')" class="w-5 h-5 shrink-0 rounded border-2 border-slate-300 flex items-center justify-center hover:border-indigo-400 transition-colors bg-white"></button>
                             <div class="flex flex-col truncate">
@@ -2137,25 +2191,19 @@
                     </div>`;
                 });
                 if(dayTasks.length > 3) html += `<p class="text-[9px] font-bold text-slate-400 text-center uppercase pt-1 cursor-pointer hover:text-indigo-500 transition-colors" onclick="switchTab('tasks')">+ ${dayTasks.length - 3} tareas más</p>`;
-                html += `</div>`;
-                cont.innerHTML = html;
-                cont.classList.remove('hidden');
-                cont.classList.add('animate-slideUp');
             } else {
-                // APEX FIX: Renderizado permanente de Estado Vacío (Empty State) para mantener UI consistente en el Dashboard
-                cont.innerHTML = `<div class="theme-card p-5 rounded-[2rem] border shadow-sm flex justify-between items-center bg-slate-50/50">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-indigo-50 text-indigo-400 flex items-center justify-center shadow-sm"><i class="fa-solid fa-check"></i></div>
-                        <div>
-                            <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Tareas del Día</p>
-                            <p class="text-[10px] font-bold text-slate-500">Todo al día. No hay pendientes.</p>
-                        </div>
+                html += `<div class="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-500 flex items-center justify-center"><i class="fa-solid fa-check text-[10px]"></i></div>
+                        <p class="text-[9px] font-bold text-slate-500 uppercase">Sin pendientes</p>
                     </div>
-                    <button type="button" onclick="openTaskForm()" class="w-8 h-8 bg-white border border-slate-200 text-slate-400 rounded-full flex items-center justify-center hover:text-indigo-500 shadow-sm active:scale-90 transition-transform" title="Añadir Tarea Rápida"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                    <button type="button" onclick="openTaskForm(null, '${targetDateStr}')" class="w-6 h-6 bg-white border border-slate-200 text-slate-400 rounded-full flex items-center justify-center hover:text-indigo-500 shadow-sm active:scale-90 transition-transform" title="Añadir Tarea"><i class="fa-solid fa-plus text-[8px]"></i></button>
                 </div>`;
-                cont.classList.remove('hidden');
-                cont.classList.add('animate-slideUp');
             }
+
+            html += `</div></div>`;
+            cont.innerHTML = html;
+            cont.classList.remove('hidden');
         }
 
         function toggleTaskStatusDash(id) {
@@ -3321,6 +3369,14 @@
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
             if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
+                
+                // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
+                const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
+                if (isSharedTx) {
+                    if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                    if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
+                }
+
                 // APEX FIX: Reversión contable precisa para Transferencias
                 if (tx.type === 'transfer') {
                     const oOrig = state.accounts.find(a => a.id === tx.accId);
