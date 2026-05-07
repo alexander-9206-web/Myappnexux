@@ -439,11 +439,6 @@
                 </div>
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4">Engine Global</h3>
-                    <div class="mb-4 bg-amber-50/50 p-4 rounded-2xl border border-amber-100">
-                        <label class="text-[10px] font-black text-amber-800 ml-1">Webhook Google Sheets API</label>
-                        <input type="text" id="set-gs-url" class="form-input text-xs mt-1 w-full border-amber-200 bg-white" placeholder="https://script.google.com/..." onchange="updateSettings()">
-                        <p class="text-[8px] font-bold text-amber-600/70 mt-2 tracking-widest uppercase">Conecta tu bóveda remota sin servidores.</p>
-                    </div>
                     <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
                     <div class="flex items-center justify-between pt-4 border-t border-slate-100"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo PIN</h4><p class="text-[8px] text-slate-400">Pedir al abrir o inactividad</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div></label></div>
                     <div class="pt-4 border-t border-slate-100">
@@ -1240,6 +1235,9 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
 
+        // APEX FIX: Variables globales de nube
+        let cloudDb = null, fsLib = null, cloudAppId = 'nexus';
+
         // ============================================================================
         // --- MOTOR DE PERSISTENCIA INDEXEDDB (APEX ARCHITECTURE) ---
         // ============================================================================
@@ -1287,21 +1285,43 @@
             try {
                 // Dynamic Imports para mantener compatibilidad Vanilla JS (Fricción Cero)
                 const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const { getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                // APEX FIX: Configuración Oficial de Firebase inyectada (Lista para GitHub Pages)
+                const firebaseConfig = {
+                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
+                    authDomain: "nexus-jr.firebaseapp.com",
+                    projectId: "nexus-jr",
+                    storageBucket: "nexus-jr.firebasestorage.app",
+                    messagingSenderId: "273022472068",
+                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
+                    measurementId: "G-LGT2X8EC0R"
+                };
+                
                 const app = initializeApp(firebaseConfig);
                 const auth = getAuth(app);
                 window.db = getFirestore(app);
-                window.appId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-ar-finance';
+                window.appId = 'nexus-jr'; // Enrutador SSoT nativo
+                
+                // Inicializar Analytics en segundo plano
+                import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
+                    .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
                     const initAuth = async () => {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token).catch(e => signInAnonymously(auth));
-                        } else {
+                        try {
+                            // Forzamos conexión anónima nativa
                             await signInAnonymously(auth);
+                        } catch (err) {
+                            if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+                                console.warn("[APEX SYS] Firebase Auth Anónimo apagado. Trabajando en modo Local (Offline).");
+                                setTimeout(() => {
+                                    alert("⚠️ FIREBASE NO CONFIGURADO:\n\nEl sistema detectó que la autenticación anónima está apagada.\n\n1. Ve a Firebase Console -> Authentication.\n2. Clic en 'Comenzar' (Get Started).\n3. Pestaña 'Sign-in method'.\n4. Activa 'Anónimo'.\n\nLa app funcionará en modo Local (Offline) sin perder tus datos hasta que lo actives.");
+                                }, 500);
+                            } else {
+                                console.error("Error Auth:", err);
+                            }
                         }
                     };
                     initAuth();
@@ -4786,7 +4806,6 @@
 
         // CONFIGURACIÓN
         function renderSettingsTab() {
-            const gsEl = $id('set-gs-url'); if(gsEl) gsEl.value = localStorage.getItem('nexus_gs_url') || defaultGsUrl;
             $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
             const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) apCurrEl.value = state.settings.apCurrency || 'AUD';
@@ -4811,7 +4830,6 @@
             updateLocalUsersList(); updateCatManageView(); 
         }
         function updateSettings() {
-            const gsEl = $id('set-gs-url'); if(gsEl) { localStorage.setItem('nexus_gs_url', gsEl.value.trim()); googleSheetUrl = gsEl.value.trim(); initCloud(); }
             state.settings.baseCurrency = $id('set-base-currency').value;
             const apLimEl = $id('set-ap-limit'); state.settings.apLimit = parseFloat(apLimEl.dataset.raw || 5000000);
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) state.settings.apCurrency = apCurrEl.value;
@@ -5441,37 +5459,10 @@
         }
 
         /* // ============================================================================
-        // --- APEX FIREWALL: RESOLUCIÓN DE FRICCIÓN DE MOTORES ---
+        // --- APEX FIREWALL: FIREBASE NATIVO ---
         // ============================================================================
-        // He purgado por completo el bloque del motor Firebase y el código duplicado 
-        // residual de la mitad inferior que estaba colisionando con el Webhook de Google Sheets.
-        // Al eliminar las funciones redundantes, aseguramos el SSoT.
-        // Todo el ecosistema ahora fluye exclusivamente a tu hoja de Google.
+        // Motor de Firebase consolidado en el Core de inicialización (initCloud).
         */
-    </script>
-    
-    <script type="module">
-      // Import the functions you need from the SDKs you need
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
-      import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-analytics.js";
-      // TODO: Add SDKs for Firebase products that you want to use
-      // https://firebase.google.com/docs/web/setup#available-libraries
-
-      // Your web app's Firebase configuration
-      // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-      const firebaseConfig = {
-        apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-        authDomain: "nexus-jr.firebaseapp.com",
-        projectId: "nexus-jr",
-        storageBucket: "nexus-jr.firebasestorage.app",
-        messagingSenderId: "273022472068",
-        appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-        measurementId: "G-LGT2X8EC0R"
-      };
-
-      // Initialize Firebase
-      const app = initializeApp(firebaseConfig);
-      const analytics = getAnalytics(app);
     </script>
 </body>
 </html>
