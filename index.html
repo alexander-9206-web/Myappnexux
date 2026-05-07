@@ -1280,6 +1280,85 @@
         let isSyncing = false;
         let syncTimeout = null;
 
+        // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico)
+        function attachP2PListener() {
+            if (!window.db) return;
+            if (!window.sharedUnsubscribers) window.sharedUnsubscribers = {}; // Diccionario de Listeners
+            
+            const sharedAccs = state.accounts ? state.accounts.filter(a => a.isShared && a.remoteId) : [];
+            if (sharedAccs.length === 0) return;
+
+            import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
+                sharedAccs.forEach(localAcc => {
+                    // Evitar duplicar listeners para la misma cuenta
+                    if (window.sharedUnsubscribers[localAcc.remoteId]) return;
+
+                    // APEX FIX: Escuchar el documento ESPECÍFICO de la cuenta, no toda la colección global
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', localAcc.remoteId);
+                    
+                    window.sharedUnsubscribers[localAcc.remoteId] = onSnapshot(docRef, (docSnap) => {
+                        if (!docSnap.exists()) return;
+                        
+                        const data = docSnap.data();
+                        let hasSharedChanges = false;
+                        
+                        // Candado de seguridad: Ya descargamos al menos una vez, ahora sí podemos subir cambios
+                        localAcc.syncedOnce = true; 
+                        
+                        // 1. Espejo de Transacciones (Anti-Wipe & Upsert)
+                        if (data.txs && Array.isArray(data.txs)) {
+                            const incomingIds = data.txs.map(t => t.id);
+                            const localSharedTxs = state.tx.filter(t => t.accId === localAcc.id || t.toAccId === localAcc.id);
+                            
+                            // Si borraron algo en el otro celular, lo borramos aquí
+                            if (data.txs.length > 0) {
+                                const oldestIncomingDate = new Date(data.txs[data.txs.length - 1].date);
+                                localSharedTxs.forEach(lt => {
+                                    if (new Date(lt.date) >= oldestIncomingDate && !incomingIds.includes(lt.id)) {
+                                        state.tx = state.tx.filter(t => t.id !== lt.id);
+                                        hasSharedChanges = true;
+                                    }
+                                });
+                            }
+
+                            // Inyectar o actualizar transacciones nuevas del socio
+                            data.txs.forEach(netTx => {
+                                const mappedTx = { ...netTx };
+                                // Mapeo de ID remoto a ID local para que la UI lo reconozca
+                                if (mappedTx.accId === localAcc.remoteId) mappedTx.accId = localAcc.id;
+                                if (mappedTx.toAccId === localAcc.remoteId) mappedTx.toAccId = localAcc.id;
+
+                                const idx = state.tx.findIndex(t => t.id === mappedTx.id);
+                                if (idx === -1) {
+                                    state.tx.push(mappedTx);
+                                    hasSharedChanges = true;
+                                } else if (JSON.stringify(state.tx[idx]) !== JSON.stringify(mappedTx)) {
+                                    state.tx[idx] = mappedTx;
+                                    hasSharedChanges = true;
+                                }
+                            });
+                        }
+
+                        // 2. Espejo de Balance
+                        if (data.balance !== undefined && localAcc.balance !== data.balance) {
+                            localAcc.balance = data.balance;
+                            hasSharedChanges = true;
+                        }
+
+                        if (hasSharedChanges) {
+                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup
+                            if(currentUser) NexusIDB.saveState(currentUser, state);
+                            if (sessionUnlocked) { 
+                                updateDashboard(); 
+                                if(state.activeTab === 'accounts') renderAccountsTab(); 
+                                if(state.activeTab === 'database') renderDatabase();
+                            }
+                        }
+                    }, (error) => console.error("[APEX P2P] Error de Snapshot Público", error));
+                });
+            });
+        }
+
         async function initCloud() {
             updateCloudBadge(false, true); // Animación de carga
             try {
@@ -1483,10 +1562,32 @@
                         batch.set(txRef, { tx: txByYear[year] });
                     }
                     
-                    // APEX FIX: Sincronizar saldos de Cuentas Compartidas P2P al endpoint público en el mismo Batch
+                    // APEX FIX: Sincronizar Saldos y el HISTORIAL de Transacciones P2P al endpoint público
                     (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
+                        const sharedTxs = (state.tx || [])
+                            .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
+                            .sort((a,b) => new Date(b.date) - new Date(a.date))
+                            .slice(0, 300) // Límite de seguridad
+                            .map(t => {
+                                const netTx = { ...t };
+                                if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId;
+                                if (netTx.toAccId === sharedAcc.id) netTx.toAccId = sharedAcc.remoteId;
+                                return netTx;
+                            });
+
+                        // APEX FIREWALL: Si la cuenta acaba de ser vinculada y está vacía localmente, 
+                        // ABORTAMOS la subida para evitar borrar la data del otro usuario.
+                        if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) {
+                            return; 
+                        }
+
                         const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
-                        batch.set(sharedRef, { balance: sharedAcc.balance, currency: sharedAcc.currency, updatedAt: new Date().toISOString() }, { merge: true });
+                        batch.set(sharedRef, { 
+                            balance: sharedAcc.balance, 
+                            currency: sharedAcc.currency, 
+                            txs: sharedTxs,
+                            updatedAt: new Date().toISOString() 
+                        }, { merge: true });
                     });
 
                     await batch.commit();
@@ -2358,7 +2459,49 @@
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
         }
         function toggleCreditFields() { const type = $id('fa-type').value; const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const lbl = $id('fa-balance-lbl'); if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden'); const lim = $id('fa-limit'); if(lim) lim.required = false; if(type === 'credit') { if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; if(lim) lim.required = true; } else if (type === 'virtual') { if(vFields) vFields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Balance (+ a favor, - deuda)'; } else { if(lbl) lbl.innerText = 'Balance Inicial'; } }
-        function saveAccount(e) { e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; let rId = null; if(isShared) { if(id) { const ext = state.accounts.find(a=>a.id===id); rId = ext ? (ext.remoteId||id) : id; } else { rId = 'acc_' + Date.now(); } } const newAcc = { id: id || 'acc_' + Date.now(), name, currency, balance, type, isShared, remoteId: rId, limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), rate: parseFloat($id('fa-rate').dataset.raw) || 0, platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null, color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null }; if (id) { const idx = state.accounts.findIndex(a => a.id === id); if (idx !== -1) state.accounts[idx] = newAcc; } else { state.accounts.push(newAcc); } if (newAcc.isShared && newAcc.remoteId && window.db) { import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, setDoc }) => { setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', newAcc.remoteId), { balance: newAcc.balance, currency: newAcc.currency, updatedAt: new Date().toISOString() }, {merge:true}).catch(err => console.error(err)); }); } saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); }
+        function saveAccount(e) { 
+            e.preventDefault(); const id = $id('fa-id').value; const name = $id('fa-name').value; const currency = $id('fa-currency').value; const balance = parseFloat($id('fa-balance').dataset.raw) || 0; const type = $id('fa-type').value; 
+            if($id('fa-balance').dataset.raw === "" || $id('fa-balance').dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); 
+            const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; 
+            let rId = null; 
+            if(isShared) { 
+                if(id) { 
+                    const ext = state.accounts.find(a=>a.id===id); 
+                    rId = ext ? (ext.remoteId||id) : id; 
+                } else { 
+                    rId = 'acc_' + Date.now(); 
+                } 
+            } 
+            
+            const newAcc = { 
+                id: id || 'acc_' + Date.now(), 
+                name, currency, balance, type, 
+                isShared, 
+                remoteId: rId, 
+                syncedOnce: isShared ? true : undefined, // APEX FIX: El creador está verificado para subir datos
+                limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
+                cutoffDay: parseInt($id('fa-cutoff').dataset.raw) || 0, 
+                payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday').dataset.raw) || 0) : (parseInt($id('fa-payday').dataset.raw) || 0), 
+                rate: parseFloat($id('fa-rate').dataset.raw) || 0, 
+                platform: type === 'virtual' ? $id('fa-virtual-platform').value : null, 
+                virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term').dataset.raw) || 0) : null, 
+                color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null 
+            }; 
+            
+            if (id) { 
+                const idx = state.accounts.findIndex(a => a.id === id); 
+                if (idx !== -1) state.accounts[idx] = newAcc; 
+            } else { 
+                state.accounts.push(newAcc); 
+            } 
+            
+            // APEX FIX: Despertar Listener P2P al crear la cuenta para mantener el túnel abierto
+            if (newAcc.isShared) {
+                if(typeof attachP2PListener === 'function') attachP2PListener();
+            }
+
+            saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); 
+        }
 
         function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
         function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
@@ -2594,6 +2737,11 @@
                 const shareData = JSON.parse(atob(b64));
                 if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
                 
+                // Evitar duplicar cuentas vinculadas
+                if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
+                    return alert("Esta bóveda ya está vinculada a tu cuenta.");
+                }
+
                 const newAcc = { 
                     id: 'acc_' + Date.now(), 
                     name: '👥 ' + shareData.name, 
@@ -2601,15 +2749,21 @@
                     balance: 0, 
                     type: 'liquid', 
                     isShared: true, 
-                    remoteId: shareData.vaultId 
+                    remoteId: shareData.vaultId,
+                    syncedOnce: false // APEX FIX: Bloqueo anti-wipe para el que se une, hasta que descargue.
                 };
                 state.accounts.push(newAcc);
-                saveState();
                 
-                alert("Bóveda compartida vinculada. El motor de sincronización remota se inicializará en la próxima recarga.");
+                // Guardado estrictamente local sin disparar triggerCloudSync() 
+                if(currentUser) NexusIDB.saveState(currentUser, state);
+                
+                // Llamamos a la función de escucha P2P de inmediato
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+                
+                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
                 closeLinkSharedModal();
                 updateDashboard();
-                renderAccountsTab();
+                if (state.activeTab === 'accounts') renderAccountsTab();
                 
             } catch(e) {
                 console.error("[APEX P2P] Error decodificando token:", e);
