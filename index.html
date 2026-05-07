@@ -1288,7 +1288,7 @@
                 const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const { getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                // APEX FIX: Configuración Oficial de Firebase inyectada (Lista para GitHub Pages)
+                // Configuración Oficial de Firebase inyectada
                 const firebaseConfig = {
                     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
                     authDomain: "nexus-jr.firebaseapp.com",
@@ -1311,17 +1311,10 @@
                 return new Promise((resolve) => {
                     const initAuth = async () => {
                         try {
-                            // Forzamos conexión anónima nativa
+                            // Conexión anónima nativa habilitada y funcional
                             await signInAnonymously(auth);
                         } catch (err) {
-                            if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
-                                console.warn("[APEX SYS] Firebase Auth Anónimo apagado. Trabajando en modo Local (Offline).");
-                                setTimeout(() => {
-                                    alert("⚠️ FIREBASE NO CONFIGURADO:\n\nEl sistema detectó que la autenticación anónima está apagada.\n\n1. Ve a Firebase Console -> Authentication.\n2. Clic en 'Comenzar' (Get Started).\n3. Pestaña 'Sign-in method'.\n4. Activa 'Anónimo'.\n\nLa app funcionará en modo Local (Offline) sin perder tus datos hasta que lo actives.");
-                                }, 500);
-                            } else {
-                                console.error("Error Auth:", err);
-                            }
+                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
                         }
                     };
                     initAuth();
@@ -1359,13 +1352,15 @@
         }
 
         async function fetchCloudState() {
-            if (!fbUser || !window.db) return;
+            if (!fbUser || !window.db || !currentUser) return;
             try {
                 // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
                 const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 updateCloudBadge(true, true);
                 
-                const colRef = collection(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data');
+                // APEX FIX: El SSoT ahora enlaza la base de datos a tu CORREO (currentUser), no al ID Anónimo temporal del dispositivo.
+                // Esto te permite abrir la app en cualquier celular/PC y ver tus datos intactos.
+                const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
                 
                 if (unsubscribeSnapshot) unsubscribeSnapshot();
                 
@@ -1422,7 +1417,7 @@
                                 }
                             });
                         }
-                        console.log(`[APEX SYS] Sincronización WebSockets Exitosa. Arquitectura: Sharding Anual (Free Tier Optimized).`);
+                        console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
                     }
                     updateCloudBadge(true, false);
                 }, (error) => {
@@ -1433,7 +1428,7 @@
         }
 
         function triggerCloudSync() {
-            if(!fbUser || !sessionUnlocked || !window.db) return;
+            if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(async () => {
                 if(isSyncing) return triggerCloudSync(); 
@@ -1448,7 +1443,9 @@
                     const coreState = { ...state };
                     delete coreState.tx; // Excluimos transacciones masivas del core
                     const cleanCore = JSON.parse(JSON.stringify(coreState));
-                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'core');
+                    
+                    // APEX FIX: Usando currentUser como ruta absoluta para asegurar persistencia multidispositivo
+                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
                     batch.set(coreRef, cleanCore);
 
                     // 2. Guardar Transacciones fragmentadas por Año (Evita el límite de 1MB por documento)
@@ -1460,12 +1457,12 @@
                     });
 
                     for (const year in txByYear) {
-                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', fbUser.uid, 'nexus_data', 'tx_' + year);
+                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
                         batch.set(txRef, { tx: txByYear[year] });
                     }
                     
                     await batch.commit();
-                    console.log(`[APEX SYS] Sincronización Batch Completada. Consumo: ${Object.keys(txByYear).length + 1} Writes.`);
+                    console.log(`[APEX SYS] Snapshot guardado en la nube. Total de escrituras: ${Object.keys(txByYear).length + 1}.`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
                 } finally {
