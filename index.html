@@ -1161,6 +1161,19 @@
         </div>
     </div>
 
+    <!-- APEX FIX: MODAL PARA NUEVA FASE DE PROYECTO (100% Compatible iOS WebKit) -->
+    <div id="phase-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase tracking-tighter text-cyan-500">Nueva Fase</h3><button type="button" onclick="closePhaseModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
+            <form onsubmit="saveProjectPhase(event)" class="space-y-4">
+                <input type="hidden" id="f-phase-proj-id">
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre de la Fase / Entregable</label><input type="text" id="f-phase-name" required class="form-input text-sm" placeholder="Ej: Cimientos"></div>
+                <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Costo Estimado (Opcional)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="f-phase-cost" class="form-input text-3xl font-black text-center text-cyan-500 cursor-pointer" placeholder="0"></div>
+                <button type="submit" class="w-full bg-cyan-500 text-white p-5 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Añadir Fase</button>
+            </form>
+        </div>
+    </div>
+
     <!-- APEX FIX: MODAL TAREAS / RECORDATORIOS (DISEÑO NATIVO IOS REMINDERS) -->
     <div id="task-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
         <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 md:p-10 space-y-6 animate-slideUp">
@@ -1334,6 +1347,9 @@
         let unsubscribeSnapshot = null;
         let isSyncing = false;
         let syncTimeout = null;
+        let syncPending = false; // APEX FIX: Flag de cola segura
+
+        let p2pRenderTimeout = null; // APEX FIX: Timer para debounce de UI
 
         // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
         function attachP2PListener() {
@@ -1341,6 +1357,16 @@
             if (!window.sharedUnsubscribers) window.sharedUnsubscribers = {}; // Diccionario de Listeners
             
             const sharedAccs = state.accounts ? state.accounts.filter(a => a.isShared && a.remoteId) : [];
+            const activeSharedIds = sharedAccs.map(a => a.remoteId);
+
+            // APEX OPTIMIZATION: Purga de Listeners Zombies (Memory Leak Fix)
+            for (const rId in window.sharedUnsubscribers) {
+                if (!activeSharedIds.includes(rId)) {
+                    window.sharedUnsubscribers[rId]();
+                    delete window.sharedUnsubscribers[rId];
+                }
+            }
+
             if (sharedAccs.length === 0) return;
 
             import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
@@ -1450,10 +1476,15 @@
                         if (hasSharedChanges) {
                             state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup final protector
                             if(currentUser) NexusIDB.saveState(currentUser, state);
+                            
+                            // APEX OPTIMIZATION: Batching (Debounce) de Renders para Fricción Cero en UI/CPU
                             if (sessionUnlocked) { 
-                                updateDashboard(); 
-                                if(state.activeTab === 'accounts') renderAccountsTab(); 
-                                if(state.activeTab === 'database') renderDatabase();
+                                clearTimeout(p2pRenderTimeout);
+                                p2pRenderTimeout = setTimeout(() => {
+                                    updateDashboard(); 
+                                    if(state.activeTab === 'accounts') renderAccountsTab(); 
+                                    if(state.activeTab === 'database') renderDatabase();
+                                }, 150);
                             }
                         }
                     }, (error) => console.error("[APEX P2P] Error de Snapshot Público", error));
@@ -1606,52 +1637,36 @@
                     updateCloudBadge(false);
                 });
 
-                // APEX FIX: Listener en tiempo real para Bóvedas Compartidas (P2P)
-                const sharedAccs = state.accounts ? state.accounts.filter(a => a.isShared && a.remoteId) : [];
-                if (sharedAccs.length > 0 && !window.unsubscribeSharedSnapshot) {
-                    const sharedRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults');
-                    window.unsubscribeSharedSnapshot = onSnapshot(sharedRef, (snap) => {
-                        let hasSharedChanges = false;
-                        snap.forEach(docSnap => {
-                            const data = docSnap.data();
-                            const localAcc = state.accounts.find(a => a.remoteId === docSnap.id);
-                            if (localAcc && localAcc.balance !== data.balance) {
-                                localAcc.balance = data.balance;
-                                hasSharedChanges = true;
-                            }
-                        });
-                        if (hasSharedChanges) {
-                            if(currentUser) NexusIDB.saveState(currentUser, state);
-                            if (sessionUnlocked) { updateDashboard(); if(state.activeTab === 'accounts') renderAccountsTab(); }
-                        }
-                    }, (error) => console.error("[APEX P2P] Error de Snapshot Público", error));
-                }
+                attachP2PListener();
 
             } catch(e) { console.error(e); }
         }
 
         function triggerCloudSync() {
             if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
+            
+            // APEX OPTIMIZATION: Prevención de Cola Infinita (Race Condition Fix)
+            if(isSyncing) {
+                syncPending = true;
+                return;
+            }
+            
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(async () => {
-                if(isSyncing) return triggerCloudSync(); 
                 isSyncing = true;
+                syncPending = false;
                 updateCloudBadge(true, true);
                 try {
-                    // APEX FIX: Uso de writeBatch para consolidar escrituras y evitar cobros extra en Firebase
                     const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const batch = writeBatch(window.db);
                     
-                    // 1. Guardar Core (Cuentas, Configuración, Presupuestos)
                     const coreState = { ...state };
-                    delete coreState.tx; // Excluimos transacciones masivas del core
+                    delete coreState.tx; 
                     const cleanCore = JSON.parse(JSON.stringify(coreState));
                     
-                    // APEX FIX: Usando currentUser como ruta absoluta para asegurar persistencia multidispositivo
                     const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
                     batch.set(coreRef, cleanCore);
 
-                    // 2. Guardar Transacciones fragmentadas por Año (Evita el límite de 1MB por documento)
                     const txByYear = {};
                     (state.tx || []).forEach(t => {
                         const year = new Date(t.date).getFullYear() || new Date().getFullYear();
@@ -1664,12 +1679,11 @@
                         batch.set(txRef, { tx: txByYear[year] });
                     }
                     
-                    // APEX FIX: Sincronizar Saldos, HISTORIAL y PURGAS de Transacciones P2P al endpoint público
                     (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
                         const sharedTxs = (state.tx || [])
                             .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
                             .sort((a,b) => new Date(b.date) - new Date(a.date))
-                            .slice(0, 300) // Límite de seguridad
+                            .slice(0, 300) 
                             .map(t => {
                                 const netTx = { ...t };
                                 if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId;
@@ -1677,12 +1691,10 @@
                                 return netTx;
                             });
 
-                        // APEX FIREWALL: Bloqueo anti-wipe
                         if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) {
                             return; 
                         }
                         
-                        // Limitar el array de eliminados para no saturar memoria en Firebase
                         let deletedTxs = state.deletedSharedTxs || [];
                         if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
@@ -1691,7 +1703,7 @@
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txs: sharedTxs,
-                            deletedTxs: deletedTxs, // APEX FIX: Compartir registro de purgas
+                            deletedTxs: deletedTxs, 
                             updatedAt: new Date().toISOString() 
                         }, { merge: true });
                     });
@@ -1700,11 +1712,14 @@
                     console.log(`[APEX SYS] Snapshot guardado en la nube. Total de escrituras: ${Object.keys(txByYear).length + 1}.`);
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
+                    syncPending = true; // Reprogramar en caso de fallo de red
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
+                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura
+                    if (syncPending) setTimeout(() => triggerCloudSync(), 1500);
                 }
-            }, 2500); // Aumentado el debounce a 2.5s para agrupar más transacciones rápidas en un solo batch
+            }, 1500); // APEX OPTIMIZATION: Latencia de subida reducida de 2.5s a 1.5s para sensación de tiempo real
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
@@ -1883,20 +1898,27 @@
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
             initNexus();
             
-            // APEX FIX: Disparador del resumen diario tras inicializar la app
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
-        // APEX FIX: Purga Estricta al salir para permitir cambio de usuario
+        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
         function logout() { 
             sessionUnlocked = false; 
+            
+            if(unsubscribeSnapshot) unsubscribeSnapshot();
+            if(window.sharedUnsubscribers) {
+                for (const rId in window.sharedUnsubscribers) {
+                    window.sharedUnsubscribers[rId]();
+                }
+                window.sharedUnsubscribers = {};
+            }
+            
             localStorage.removeItem('nexus_current_user'); 
             NexusIDB.saveSession(null);
             document.cookie = "nexus_current_user=; max-age=0; path=/";
             location.reload(); 
         }
         
-        // APEX FIX: Lógica del Toggle de Modalidad Afterpay
         function setApMode(mode) {
             const btnNew = $id('ap-mode-new');
             const btnRecon = $id('ap-mode-recon');
@@ -5205,14 +5227,33 @@
             }
         }
 
+        // APEX FIX: Lógica de Fases de Proyectos redirigida a Modales Nativos
         function addProjectPhase(id) {
             const p = state.projects.find(x => x.id === id); if(!p) return;
-            const name = prompt("Nombre de la fase o entregable:"); if(!name) return;
-            const costRaw = prompt("Costo estimado (opcional, en " + p.currency + "):", "0");
-            const cost = parseFloat(costRaw) || 0;
+            const mod = $id('phase-modal'); if(!mod) return;
+            $id('f-phase-proj-id').value = id;
+            $id('f-phase-name').value = '';
+            const costEl = $id('f-phase-cost');
+            if (costEl) { costEl.value = ''; costEl.dataset.raw = ''; }
+            mod.classList.remove('hidden');
+        }
+
+        function closePhaseModal() {
+            const mod = $id('phase-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function saveProjectPhase(e) {
+            e.preventDefault();
+            const projId = $id('f-phase-proj-id').value;
+            const name = $id('f-phase-name').value.trim();
+            const cost = parseFloat($id('f-phase-cost').dataset.raw) || 0;
+            if(!name) return;
+            const p = state.projects.find(x => x.id === projId); if(!p) return;
             if(!p.phases) p.phases = [];
             p.phases.push({ name, estimatedCost: cost, completed: false });
-            saveState(); showProjectDetail(id);
+            saveState(); closePhaseModal(); showProjectDetail(projId);
         }
 
         function toggleProjectPhase(projId, phaseIdx) {
