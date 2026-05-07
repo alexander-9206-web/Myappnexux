@@ -1269,6 +1269,24 @@
                     const req = tx.objectStore('states').get(userId);
                     req.onsuccess = () => resolve(req.result ? req.result.data : null);
                 });
+            },
+            // APEX FIX: Persistencia de Sesión Activa a prueba de fallos (Capa 2)
+            saveSession: async function(email) {
+                const db = await this.init();
+                return new Promise((resolve) => {
+                    const tx = db.transaction('states', 'readwrite');
+                    tx.objectStore('states').put({ userId: 'nexus_active_session', data: email });
+                    tx.oncomplete = () => resolve();
+                });
+            },
+            getSession: async function() {
+                const db = await this.init();
+                return new Promise((resolve) => {
+                    const tx = db.transaction('states', 'readonly');
+                    const req = tx.objectStore('states').get('nexus_active_session');
+                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
+                    req.onerror = () => resolve(null);
+                });
             }
         };
 
@@ -1280,7 +1298,7 @@
         let isSyncing = false;
         let syncTimeout = null;
 
-        // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado)
+        // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
         function attachP2PListener() {
             if (!window.db) return;
             if (!window.sharedUnsubscribers) window.sharedUnsubscribers = {}; // Diccionario de Listeners
@@ -1293,7 +1311,6 @@
                     // Evitar duplicar listeners para la misma cuenta
                     if (window.sharedUnsubscribers[localAcc.remoteId]) return;
 
-                    // Escuchar el documento ESPECÍFICO de la cuenta compartida
                     const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', localAcc.remoteId);
                     
                     window.sharedUnsubscribers[localAcc.remoteId] = onSnapshot(docRef, (docSnap) => {
@@ -1301,44 +1318,88 @@
                         
                         const data = docSnap.data();
                         let hasSharedChanges = false;
-                        
-                        // Candado de seguridad: Ya conectamos, se habilita la subida
-                        localAcc.syncedOnce = true; 
-                        
-                        // 1. Purgar transacciones eliminadas remotamente (Anti-Ghosting Seguro)
+
+                        // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras (Race Conditions).
+                        if (!localAcc.syncedOnce && data.balance !== undefined) {
+                            localAcc.balance = data.balance;
+                            hasSharedChanges = true;
+                        }
+
+                        // 1. Purgar transacciones eliminadas remotamente (Anti-Ghosting y Reversión Contable)
                         if (data.deletedTxs && Array.isArray(data.deletedTxs)) {
                             if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
                             data.deletedTxs.forEach(delId => {
-                                if (state.tx.some(t => t.id === delId)) {
+                                const exTx = state.tx.find(t => t.id === delId);
+                                if (exTx) {
                                     state.tx = state.tx.filter(t => t.id !== delId);
                                     hasSharedChanges = true;
+                                    
+                                    // Reversión contable local (solo si ya estábamos sincronizados)
+                                    if (localAcc.syncedOnce) {
+                                        if (exTx.type === 'transfer') {
+                                            const oOrig = state.accounts.find(a => a.id === exTx.accId);
+                                            const oDest = state.accounts.find(a => a.id === exTx.toAccId);
+                                            if(oOrig && oOrig.id === localAcc.id) { if(oOrig.type === 'credit') oOrig.balance -= exTx.amount; else oOrig.balance += exTx.amount; }
+                                            if(oDest && oDest.id === localAcc.id) { if(oDest.type === 'credit') oDest.balance += exTx.amount; else oDest.balance -= exTx.amount; }
+                                        } else if (exTx.accId === localAcc.id && exTx.type !== 'afterpay') {
+                                            if (exTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance += exTx.amount; else localAcc.balance -= exTx.amount; }
+                                            if (exTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance -= exTx.amount; else localAcc.balance += exTx.amount; }
+                                        }
+                                    }
                                 }
-                                // Registrar localmente para no olvidar que fue eliminada
-                                if (!state.deletedSharedTxs.includes(delId)) {
-                                    state.deletedSharedTxs.push(delId);
-                                }
+                                if (!state.deletedSharedTxs.includes(delId)) state.deletedSharedTxs.push(delId);
                             });
                         }
 
-                        // 2. Inyectar o actualizar transacciones nuevas del socio
+                        // 2. Inyectar o actualizar transacciones del socio y recalcular balance inteligentemente
                         if (data.txs && Array.isArray(data.txs)) {
                             data.txs.forEach(netTx => {
-                                // Ignorar la inyección si sabemos que la transacción ya fue eliminada por alguien
+                                // Ignoramos la entrada si ya sabemos que fue eliminada
                                 if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
 
                                 const mappedTx = { ...netTx };
-                                // Mapeo de ID remoto a ID local para que la UI lo reconozca
                                 if (mappedTx.accId === localAcc.remoteId) mappedTx.accId = localAcc.id;
                                 if (mappedTx.toAccId === localAcc.remoteId) mappedTx.toAccId = localAcc.id;
 
                                 const idx = state.tx.findIndex(t => t.id === mappedTx.id);
                                 if (idx === -1) {
+                                    // TRANSACCIÓN NUEVA DEL SOCIO
                                     state.tx.push(mappedTx);
                                     hasSharedChanges = true;
+                                    
+                                    // Sumar al balance local el delta de la nueva transacción (Event Sourcing)
+                                    if (localAcc.syncedOnce) {
+                                        if (mappedTx.type === 'transfer') {
+                                            if (mappedTx.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                            if (mappedTx.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
+                                        } else if (mappedTx.accId === localAcc.id && mappedTx.type !== 'afterpay') {
+                                            if (mappedTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
+                                            if (mappedTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                        }
+                                    }
                                 } else {
+                                    // ACTUALIZAR TRANSACCIÓN (Si el socio editó el valor)
                                     const ex = state.tx[idx];
-                                    // Evitar loops infinitos: Solo actualizar si hay cambios reales en los datos
-                                    if (ex.amount !== mappedTx.amount || ex.note !== mappedTx.note || ex.cat !== mappedTx.cat || ex.date !== mappedTx.date) {
+                                    if (ex.amount !== mappedTx.amount || ex.note !== mappedTx.note || ex.cat !== mappedTx.cat || ex.date !== mappedTx.date || ex.type !== mappedTx.type) {
+                                        
+                                        if (localAcc.syncedOnce) {
+                                            // Deshacer el viejo
+                                            if (ex.type === 'transfer') {
+                                                if (ex.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= ex.amount; else localAcc.balance += ex.amount; }
+                                                if (ex.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += ex.amount; else localAcc.balance -= ex.amount; }
+                                            } else if (ex.accId === localAcc.id && ex.type !== 'afterpay') {
+                                                if (ex.type === 'income') { if(localAcc.type === 'credit') localAcc.balance += ex.amount; else localAcc.balance -= ex.amount; }
+                                                if (ex.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance -= ex.amount; else localAcc.balance += ex.amount; }
+                                            }
+                                            // Aplicar el nuevo
+                                            if (mappedTx.type === 'transfer') {
+                                                if (mappedTx.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                                if (mappedTx.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
+                                            } else if (mappedTx.accId === localAcc.id && mappedTx.type !== 'afterpay') {
+                                                if (mappedTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
+                                                if (mappedTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                            }
+                                        }
                                         state.tx[idx] = mappedTx;
                                         hasSharedChanges = true;
                                     }
@@ -1346,14 +1407,11 @@
                             });
                         }
 
-                        // 3. Espejo de Balance
-                        if (data.balance !== undefined && localAcc.balance !== data.balance) {
-                            localAcc.balance = data.balance;
-                            hasSharedChanges = true;
-                        }
+                        // Candado de seguridad: Ya sincronizamos el historial de base, ahora podemos subir cambios sin riesgo de WIPE
+                        localAcc.syncedOnce = true;
 
                         if (hasSharedChanges) {
-                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup final
+                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup final protector
                             if(currentUser) NexusIDB.saveState(currentUser, state);
                             if (sessionUnlocked) { 
                                 updateDashboard(); 
@@ -1641,7 +1699,22 @@
                 }
             });
 
+            // APEX FIX: Recuperación profunda de sesión (LocalStorage + IndexedDB + Cookies)
             currentUser = localStorage.getItem('nexus_current_user');
+            
+            if (!currentUser) {
+                currentUser = await NexusIDB.getSession();
+                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+            }
+            
+            if (!currentUser) {
+                const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                if (match) {
+                    currentUser = match[2];
+                    localStorage.setItem('nexus_current_user', currentUser);
+                }
+            }
+
             if (!currentUser) {
                 initCloud(); // Inicializa nube visualmente
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
@@ -1668,7 +1741,13 @@
                 userProfile = { name, email, pin }; localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
                 if (typeof triggerCloudSync === 'function') triggerCloudSync();
             }
-            localStorage.setItem('nexus_current_user', email); currentUser = email; sessionUnlocked = true; 
+            
+            // APEX FIX: Guardado de sesión blindado en 3 capas
+            localStorage.setItem('nexus_current_user', email); 
+            await NexusIDB.saveSession(email);
+            document.cookie = "nexus_current_user=" + email + "; max-age=" + (60*60*24*365) + "; path=/";
+            
+            currentUser = email; sessionUnlocked = true; 
             
             // ARRANQUE LOCAL INSTANTÁNEO TRAS LOGIN
             const loginScreen = $id('login-screen');
@@ -1771,7 +1850,14 @@
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
-        function logout() { sessionUnlocked = false; localStorage.removeItem('nexus_current_user'); location.reload(); }
+        // APEX FIX: Purga Estricta al salir para permitir cambio de usuario
+        function logout() { 
+            sessionUnlocked = false; 
+            localStorage.removeItem('nexus_current_user'); 
+            NexusIDB.saveSession(null);
+            document.cookie = "nexus_current_user=; max-age=0; path=/";
+            location.reload(); 
+        }
         
         // APEX FIX: Lógica del Toggle de Modalidad Afterpay
         function setApMode(mode) {
