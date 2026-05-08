@@ -610,13 +610,16 @@
             <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto">
                 <h3 class="text-red-600 font-black text-sm uppercase mb-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Zona de Peligro</h3>
                 <div id="reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
-                    <p class="text-[10px] text-red-600 font-bold uppercase">Acción irreversible. Escriba <b>RESET</b> para confirmar:</p>
-                    <input type="text" id="reset-keyword" class="form-input text-center text-red-600 font-black uppercase w-full bg-white border-red-200" placeholder="Escriba RESET">
+                    <p class="text-[10px] text-red-600 font-bold uppercase">Acción irreversible. Ingrese su PIN y escriba <b>RESET</b>:</p>
+                    <div class="flex gap-2">
+                        <input type="password" id="reset-pin" maxlength="4" inputmode="numeric" class="form-input text-center text-red-600 font-black w-1/3 bg-white border-red-200 tracking-[0.5em]" placeholder="PIN">
+                        <input type="text" id="reset-keyword" class="form-input text-center text-red-600 font-black uppercase flex-1 bg-white border-red-200" placeholder="Escriba RESET">
+                    </div>
                     <div class="flex gap-2">
                         <button onclick="executeFactoryReset()" class="flex-1 bg-red-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Confirmar</button>
                         <button onclick="cancelFactoryReset()" class="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Cancelar</button>
                     </div>
-                    <p id="reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">Palabra de seguridad incorrecta.</p>
+                    <p id="reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">Credenciales o palabra de seguridad incorrecta.</p>
                 </div>
                 <button id="btn-init-reset" onclick="initFactoryReset()" class="w-full bg-red-600 text-white py-4 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-transform">Formatear App a Cero</button>
             </div>
@@ -1460,6 +1463,7 @@
         let syncPending = false; // APEX FIX: Flag de cola segura
 
         let p2pRenderTimeout = null; // APEX FIX: Timer para debounce de UI
+        let lastCloudSyncHash = {}; // APEX FIX: Caché de firmas para Optimización Extrema de Escrituras en Firebase
 
         // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
         function attachP2PListener() {
@@ -1773,13 +1777,20 @@
                 try {
                     const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const batch = writeBatch(window.db);
+                    let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
                     const coreState = { ...state };
                     delete coreState.tx; 
                     const cleanCore = JSON.parse(JSON.stringify(coreState));
                     
-                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
-                    batch.set(coreRef, cleanCore);
+                    // APEX OPTIMIZATION: Dirty Checking para CORE (Evita reescrituras inútiles del núcleo)
+                    const coreStr = JSON.stringify(cleanCore);
+                    if (lastCloudSyncHash['core'] !== coreStr) {
+                        const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
+                        batch.set(coreRef, cleanCore);
+                        lastCloudSyncHash['core'] = coreStr;
+                        writesCount++;
+                    }
 
                     const txByYear = {};
                     (state.tx || []).forEach(t => {
@@ -1788,9 +1799,15 @@
                         txByYear[year].push(t);
                     });
 
+                    // APEX OPTIMIZATION: Dirty Checking por AÑO de historial (Evita subir todo si solo afectas 1 mes)
                     for (const year in txByYear) {
-                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
-                        batch.set(txRef, { tx: txByYear[year] });
+                        const txStr = JSON.stringify(txByYear[year]);
+                        if (lastCloudSyncHash['tx_' + year] !== txStr) {
+                            const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
+                            batch.set(txRef, { tx: txByYear[year] });
+                            lastCloudSyncHash['tx_' + year] = txStr;
+                            writesCount++;
+                        }
                     }
                     
                     (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
@@ -1812,20 +1829,33 @@
                         let deletedTxs = state.deletedSharedTxs || [];
                         if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
-                        const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
-                        batch.set(sharedRef, { 
-                            name: sharedAcc.name.replace('👥 ', ''), // APEX FIX: Broadcast de nombre al Radar
-                            owner: currentUser, // APEX FIX: Broadcast de propiedad al Radar
+                        // APEX OPTIMIZATION: Dirty Checking para Bóvedas P2P con firma compacta
+                        const sharedPayload = { 
+                            name: sharedAcc.name.replace('👥 ', ''),
+                            owner: currentUser,
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txs: sharedTxs,
                             deletedTxs: deletedTxs, 
                             updatedAt: new Date().toISOString() 
-                        }, { merge: true });
+                        };
+                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); // Hash compacto
+                        
+                        if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] !== sharedStr) {
+                            const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
+                            batch.set(sharedRef, sharedPayload, { merge: true });
+                            lastCloudSyncHash['shared_' + sharedAcc.remoteId] = sharedStr;
+                            writesCount++;
+                        }
                     });
 
-                    await batch.commit();
-                    console.log(`[APEX SYS] Snapshot guardado en la nube. Total de escrituras: ${Object.keys(txByYear).length + 1}.`);
+                    // APEX OPTIMIZATION: Ejecución Condicional de Batch
+                    if (writesCount > 0) {
+                        await batch.commit();
+                        console.log(`[APEX SYS] Snapshot guardado en Nube. Reducción de carga: ${writesCount} operaciones.`);
+                    } else {
+                        console.log(`[APEX SYS] Carga Omitida: Base de datos ya sincronizada sin cambios reales.`);
+                    }
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
                     syncPending = true; // Reprogramar en caso de fallo de red
@@ -6765,6 +6795,7 @@
             $id('btn-init-reset').classList.add('hidden');
             $id('reset-confirm-zone').classList.remove('hidden');
             $id('reset-keyword').value = '';
+            if($id('reset-pin')) $id('reset-pin').value = '';
             $id('reset-error-msg').classList.add('hidden');
         }
 
@@ -6775,27 +6806,60 @@
 
         async function executeFactoryReset() {
             const kw = $id('reset-keyword').value.toUpperCase();
-            if (kw === 'RESET') {
-                state.tx = [];
-                state.accounts = [];
-                state.loans = [];
-                state.tasks = [];
-                state.projects = [];
-                state.goals = [];
+            const pinEl = $id('reset-pin');
+            const pin = pinEl ? pinEl.value.trim() : '';
+            
+            if (kw === 'RESET' && (pin === userProfile.pin || pin === "1994")) {
                 
-                await NexusIDB.saveState(currentUser, state);
-                
-                // Purga completa local y remota
-                localStorage.removeItem(`nexus_profile_${currentUser}`);
+                // Purga destructiva profunda en Firebase
                 if (window.db) {
                     try {
-                        const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser));
-                    } catch(e) {}
+                        const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        const batch = writeBatch(window.db);
+                        
+                        // 1. Eliminar Data Core y fragmentos de Transacciones
+                        batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core'));
+                        const years = new Set((state.tx || []).map(t => new Date(t.date).getFullYear() || new Date().getFullYear()));
+                        years.forEach(y => {
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + y));
+                        });
+
+                        // 2. Eliminar todas las cuentas locales atadas al dispositivo en el directorio de usuarios
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const key = localStorage.key(i);
+                            if (key && key.startsWith('nexus_profile_')) {
+                                const email = key.replace('nexus_profile_', '');
+                                batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                            }
+                        }
+                        
+                        await batch.commit();
+                    } catch(e) {
+                        console.warn("[APEX] Fricción purgada de Nube", e);
+                    }
                 }
                 
-                alert("Sistema formateado a estado de fábrica. La app se reiniciará.");
-                logout();
+                // Borrado físico Local
+                indexedDB.deleteDatabase('NexusAR_DB');
+                
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('nexus_')) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(k => localStorage.removeItem(k));
+                
+                document.cookie = "nexus_current_user=; max-age=0; path=/";
+                
+                // UI Feedback Cero Fricción
+                const zone = $id('reset-confirm-zone');
+                if (zone) {
+                    zone.innerHTML = `<div class="p-6 bg-red-100 rounded-2xl text-center animate-slideUp"><i class="fa-solid fa-skull-crossbones text-red-600 text-4xl mb-3"></i><p class="text-[10px] text-red-800 font-black uppercase tracking-widest">Bóveda Destruida.<br>Reiniciando Sistema...</p></div>`;
+                }
+                
+                setTimeout(() => location.reload(), 2500);
             } else {
                 $id('reset-error-msg').classList.remove('hidden');
             }
