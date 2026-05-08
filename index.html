@@ -1149,9 +1149,18 @@
                     </div>
                 </div>
 
-                <div class="flex items-center justify-between bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Color Distintivo</label>
-                    <input type="color" id="fa-color" value="#e2e8f0" class="w-10 h-10 rounded-lg cursor-pointer border-2 border-white shadow-sm p-0">
+                <div class="flex gap-4 pt-2">
+                    <div class="flex-1 bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col justify-center">
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-1 block">Link Entidad (Extrae Logo)</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="url" id="fa-bank-url" class="form-input text-xs w-full bg-white py-2" placeholder="Ej: bancolombia.com" onchange="updateBankLogoPreview()">
+                            <div id="fa-logo-preview" class="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-sm"><i class="fa-solid fa-link text-slate-300 text-[10px]"></i></div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center shrink-0 w-24">
+                        <label class="text-[9px] font-black uppercase text-slate-400 mb-1">Color</label>
+                        <input type="color" id="fa-color" value="#e2e8f0" class="w-8 h-8 rounded-lg cursor-pointer border-2 border-white shadow-sm p-0">
+                    </div>
                 </div>
 
                 <div class="flex flex-col gap-2 mt-4">
@@ -2300,6 +2309,21 @@
         function getContextTx(baseTx) { const now = new Date(); return baseTx.filter(t => { const d = new Date(t.date); if(state.context === 'day') return d.toDateString() === now.toDateString(); if(state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); return d.getFullYear() === now.getFullYear(); }); }
         function getNextPayDate(b, t) { let d = new Date(b); d.setHours(0,0,0,0); let c = d.getDay(); let x = t - c; if(x < 0) x += 7; d.setDate(d.getDate() + x); return d; }
 
+        function updateBankLogoPreview() {
+            const urlInput = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
+            const preview = $id('fa-logo-preview');
+            if (!preview) return;
+            if (urlInput) {
+                let domain = urlInput.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+                if (domain) {
+                    const logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+                    preview.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-cover">`;
+                    return;
+                }
+            }
+            preview.innerHTML = '<i class="fa-solid fa-link text-slate-300 text-[10px]"></i>';
+        }
+
         function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
         
         // APEX FIX: Motor de Recordatorios Push (JS Fallback Foreground)
@@ -2621,7 +2645,12 @@
             for(let curr in groups) {
                 const accs = groups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
                 html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm mb-4"><div class="flex justify-between border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
-                accs.forEach(a => { const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-chart-line' : 'fa-chart-line'); const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2"><i class="fa-solid ${icon} text-[10px] text-slate-400 w-5"></i><p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; });
+                accs.forEach(a => { 
+                    const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-chart-line' : 'fa-chart-line'); 
+                    const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
+                    const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm">` : `<i class="fa-solid ${icon} text-[10px] text-slate-400 w-5 text-center"></i>`;
+                    html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2">${iconHtml}<p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; 
+                });
                 html += `</div></div>`;
             }
             
@@ -2630,7 +2659,11 @@
                 for(let curr in sharedGroups) {
                     const accs = sharedGroups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
                     html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm border-purple-100/50 bg-slate-50/50 mb-4"><div class="flex justify-between border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-purple-600"><i class="fa-solid fa-link mr-1"></i> Compartidas ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
-                    accs.forEach(a => { const icon = 'fa-link'; const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-white rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2"><i class="fa-solid ${icon} text-[10px] text-purple-400 w-5"></i><p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; });
+                    accs.forEach(a => { 
+                        const icon = 'fa-link'; const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
+                        const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm border border-purple-200">` : `<i class="fa-solid ${icon} text-[10px] text-purple-400 w-5 text-center"></i>`;
+                        html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-white rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2">${iconHtml}<p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; 
+                    });
                     html += `</div></div>`;
                 }
             }
@@ -2781,14 +2814,15 @@
                                 const sign = a.type === 'credit' ? '-' : '';
                                 const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
                                 
-                                // APEX FIX: Coloración solo en borde de la tarjeta
+                                // APEX FIX: Coloración solo en borde de la tarjeta y soporte para Logo Bancario
                                 const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                                 const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f1f5f9; color: #64748b;';
-                                
+                                const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
+
                                 // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
                                 const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
 
-                                html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                                html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                             });
                         }
                     });
@@ -2813,14 +2847,13 @@
                         const sign = '';
                         const detailText = `App: ${a.platform ? a.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(a.limit||0, curr)}`;
                         
-                        // APEX FIX: Coloración solo en borde de la tarjeta
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
+                        const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
                         const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2844,14 +2877,13 @@
                         const sign = '';
                         const detailText = `Flujo Aislado | ID: ${a.id}`;
                         
-                        // APEX FIX: Coloración solo en borde de la tarjeta
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #fff7ed; color: #f97316;';
+                        const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
                         const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-90" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-90" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2877,11 +2909,11 @@
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
+                        const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm border border-purple-200">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        // Botón de copiado P2P (Siempre visible en compartidas)
                         const p2pBtn = `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>`;
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-95" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-purple-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 bg-white hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm opacity-95" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-purple-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
                     });
                     
                     html += `</div></div>`;
@@ -2973,6 +3005,8 @@
             const balEl = $id('fa-balance'); if(balEl) { balEl.value = ''; balEl.dataset.raw = ''; }
             if($id('fa-type')) $id('fa-type').value = 'liquid'; 
             if($id('fa-color')) $id('fa-color').value = '#e2e8f0'; 
+            if($id('fa-bank-url')) $id('fa-bank-url').value = '';
+            if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
             const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value=''; vLimEl.dataset.raw=''; } 
             const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value=''; vTerm.dataset.raw=''; } 
             const vPay = $id('fa-virtual-payday'); if(vPay) { vPay.value=''; vPay.dataset.raw=''; } 
@@ -2992,6 +3026,8 @@
             const balEl = $id('fa-balance'); if(balEl) { balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; } 
             if($id('fa-type')) $id('fa-type').value = acc.type; 
             if($id('fa-color')) $id('fa-color').value = acc.color || '#e2e8f0'; 
+            if($id('fa-bank-url')) $id('fa-bank-url').value = acc.bankUrl || '';
+            if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
             toggleCreditFields(); 
             if(acc.type === 'credit') { 
                 const limEl = $id('fa-limit'); if(limEl) { limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; }
@@ -3079,6 +3115,14 @@
             
             if(!balanceEl || balanceEl.dataset.raw === "" || balanceEl.dataset.raw === undefined) return alert("Por favor ingresa un balance inicial."); 
             
+            const color = ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null;
+            const bankUrl = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
+            let logoUrl = null;
+            if (bankUrl) {
+                let domain = bankUrl.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+                if (domain) logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+            }
+
             const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; 
             let rId = null; 
             if(isShared) { 
@@ -3102,7 +3146,9 @@
                 rate: parseFloat($id('fa-rate') ? $id('fa-rate').dataset.raw : 0) || 0, 
                 platform: type === 'virtual' ? ($id('fa-virtual-platform') ? $id('fa-virtual-platform').value : null) : null, 
                 virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term') ? $id('fa-virtual-term').dataset.raw : 0) || 0) : null, 
-                color: ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null 
+                color: color,
+                bankUrl: bankUrl,
+                logoUrl: logoUrl
             }; 
             
             if (id) { 
