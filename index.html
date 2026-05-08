@@ -481,6 +481,22 @@
                                 <p class="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-200/50 pb-2"><i class="fa-solid fa-users mr-1"></i> Cuentas de Usuario Registradas</p>
                                 <div id="network-users-list" class="space-y-2"></div>
                             </div>
+                            
+                            <!-- NUEVO MÓDULO: Indicador de Almacenamiento Firebase -->
+                            <div class="bg-blue-50/30 p-4 rounded-3xl border border-blue-100 shadow-sm">
+                                <div class="flex justify-between items-center mb-3">
+                                    <p class="text-[9px] font-black uppercase text-blue-600"><i class="fa-solid fa-database mr-1"></i> Cuota Almacenamiento Nube</p>
+                                    <span class="text-[7px] font-black bg-emerald-100 text-emerald-600 px-2 py-1 rounded-md shadow-sm uppercase border border-emerald-200">Plan Spark (Gratis)</span>
+                                </div>
+                                <div class="w-full bg-blue-100/50 h-2.5 rounded-full overflow-hidden mb-2 shadow-inner">
+                                    <div id="firebase-usage-bar" class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width: 0.1%"></div>
+                                </div>
+                                <div class="flex justify-between items-start">
+                                    <p class="text-[8px] font-bold text-slate-500 uppercase">Usado: <span id="firebase-usage-text" class="text-blue-600 font-black">-- KB</span></p>
+                                    <p class="text-[8px] font-bold text-slate-500 uppercase text-right">Límite Gratis: 1 GB<br><span class="text-[7px] text-slate-400 font-medium normal-case tracking-tight">(Soporta ~1 millón de registros)</span></p>
+                                </div>
+                            </div>
+                            
                         </div>
                     </div>
                 </div>
@@ -6417,7 +6433,44 @@
             }
 
             updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
+            if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
         }
+
+        // APEX FIX: Estimador de Uso de Firebase Firestore SSoT (Cero Alertas)
+        function updateCloudStorageIndicator() {
+            const usageBar = $id('firebase-usage-bar');
+            const usageText = $id('firebase-usage-text');
+            if (!usageBar || !usageText) return;
+
+            try {
+                // Estima el peso del archivo de datos SSoT en bytes
+                const stateString = JSON.stringify(state);
+                const bytes = new Blob([stateString]).size;
+                
+                // Límite del plan Spark en Firestore es 1 GB (1,073,741,824 bytes)
+                const limitBytes = 1073741824; 
+                
+                // Se asegura de mostrar al menos 0.1% visualmente aunque sea casi 0
+                const percentage = Math.max(0.1, (bytes / limitBytes) * 100); 
+
+                let displaySize = '';
+                if (bytes < 1024) displaySize = bytes + ' B';
+                else if (bytes < 1048576) displaySize = (bytes / 1024).toFixed(1) + ' KB';
+                else displaySize = (bytes / 1048576).toFixed(2) + ' MB';
+
+                usageBar.style.width = percentage + '%';
+                usageText.innerText = displaySize;
+
+                // Cambio de semáforo de color si el usuario llegara a escalar masivamente
+                if (percentage > 80) usageBar.className = 'h-full bg-red-500 rounded-full transition-all duration-500 shadow-sm';
+                else if (percentage > 50) usageBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-500 shadow-sm';
+                else usageBar.className = 'h-full bg-blue-500 rounded-full transition-all duration-500 shadow-sm';
+
+            } catch (e) {
+                console.warn("[APEX SYS] Fricción estimando la cuota de Firebase.", e);
+            }
+        }
+
         function updateSettings() {
             state.settings.baseCurrency = $id('set-base-currency').value;
             const apLimEl = $id('set-ap-limit'); state.settings.apLimit = parseFloat(apLimEl.dataset.raw || 5000000);
