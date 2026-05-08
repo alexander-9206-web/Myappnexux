@@ -1804,6 +1804,12 @@
                     const batch = writeBatch(window.db);
                     let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
+                    // APEX FIX: Registrar el peso en memoria del usuario en su perfil público para telemetría global
+                    const currentSizeBytes = new Blob([JSON.stringify(state)]).size;
+                    const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser);
+                    batch.set(userRef, { vaultSize: currentSizeBytes, lastSyncSize: Date.now() }, { merge: true });
+                    writesCount++; // Garantiza la actualización de métricas en la red
+                    
                     const coreState = { ...state };
                     delete coreState.tx; 
                     const cleanCore = JSON.parse(JSON.stringify(coreState));
@@ -6437,34 +6443,91 @@
         }
 
         // APEX FIX: Estimador de Uso de Firebase Firestore SSoT (Cero Alertas)
-        function updateCloudStorageIndicator() {
+        async function updateCloudStorageIndicator() {
             const usageBar = $id('firebase-usage-bar');
             const usageText = $id('firebase-usage-text');
             if (!usageBar || !usageText) return;
 
             try {
-                // Estima el peso del archivo de datos SSoT en bytes
-                const stateString = JSON.stringify(state);
-                const bytes = new Blob([stateString]).size;
-                
-                // Límite del plan Spark en Firestore es 1 GB (1,073,741,824 bytes)
-                const limitBytes = 1073741824; 
-                
-                // Se asegura de mostrar al menos 0.1% visualmente aunque sea casi 0
-                const percentage = Math.max(0.1, (bytes / limitBytes) * 100); 
+                let totalBytes = 0;
+                let localScanned = false;
 
-                let displaySize = '';
-                if (bytes < 1024) displaySize = bytes + ' B';
-                else if (bytes < 1048576) displaySize = (bytes / 1024).toFixed(1) + ' KB';
-                else displaySize = (bytes / 1048576).toFixed(2) + ' MB';
+                // 1. APEX FIX: Consultar en Nube el peso sumado de todos los usuarios (Telemetría Distribuida)
+                if (window.db && navigator.onLine) {
+                    try {
+                        const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        
+                        // Sumar peso de usuarios reportado en sus perfiles
+                        const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
+                        snap.forEach(doc => {
+                            const data = doc.data();
+                            if (data.email === currentUser) {
+                                // Para el usuario activo, la memoria viva es más exacta
+                                totalBytes += new Blob([JSON.stringify(state)]).size;
+                            } else if (data.vaultSize) {
+                                // Sumar el tamaño indexado del otro usuario
+                                totalBytes += data.vaultSize;
+                            }
+                        });
+                        
+                        // Sumar también las bóvedas P2P compartidas flotantes
+                        const p2pSnap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
+                        p2pSnap.forEach(doc => {
+                            totalBytes += new Blob([JSON.stringify(doc.data())]).size;
+                        });
 
-                usageBar.style.width = percentage + '%';
-                usageText.innerText = displaySize;
+                        localScanned = true;
+                        renderUsage(totalBytes);
+                    } catch (fbErr) {
+                        console.warn("[APEX] Fricción leyendo cuotas de Firebase, activando fallback local.", fbErr);
+                    }
+                }
 
-                // Cambio de semáforo de color si el usuario llegara a escalar masivamente
-                if (percentage > 80) usageBar.className = 'h-full bg-red-500 rounded-full transition-all duration-500 shadow-sm';
-                else if (percentage > 50) usageBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-500 shadow-sm';
-                else usageBar.className = 'h-full bg-blue-500 rounded-full transition-all duration-500 shadow-sm';
+                // 2. Fallback a IndexedDB si no hay red o Firebase falla
+                if (!localScanned) {
+                    totalBytes += new Blob([JSON.stringify(state)]).size; // Bóveda actual
+
+                    try {
+                        const db = await NexusIDB.init();
+                        const tx = db.transaction('states', 'readonly');
+                        const req = tx.objectStore('states').getAll();
+                        
+                        req.onsuccess = () => {
+                            if (req.result) {
+                                req.result.forEach(item => {
+                                    if (item.userId !== 'nexus_active_session' && item.userId !== currentUser) {
+                                         totalBytes += new Blob([JSON.stringify(item.data)]).size;
+                                    }
+                                });
+                            }
+                            renderUsage(totalBytes);
+                        };
+                        req.onerror = () => renderUsage(totalBytes);
+                    } catch (idbErr) {
+                        renderUsage(totalBytes); 
+                    }
+                }
+
+                function renderUsage(bytes) {
+                    // Límite del plan Spark en Firestore es 1 GB (1,073,741,824 bytes)
+                    const limitBytes = 1073741824; 
+                    
+                    // Se asegura de mostrar al menos 0.1% visualmente aunque sea casi 0
+                    const percentage = Math.max(0.1, (bytes / limitBytes) * 100); 
+
+                    let displaySize = '';
+                    if (bytes < 1024) displaySize = bytes + ' B';
+                    else if (bytes < 1048576) displaySize = (bytes / 1024).toFixed(1) + ' KB';
+                    else displaySize = (bytes / 1048576).toFixed(2) + ' MB';
+
+                    usageBar.style.width = percentage + '%';
+                    usageText.innerText = displaySize;
+
+                    // Cambio de semáforo de color si el usuario escalara masivamente
+                    if (percentage > 80) usageBar.className = 'h-full bg-red-500 rounded-full transition-all duration-500 shadow-sm';
+                    else if (percentage > 50) usageBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-500 shadow-sm';
+                    else usageBar.className = 'h-full bg-blue-500 rounded-full transition-all duration-500 shadow-sm';
+                }
 
             } catch (e) {
                 console.warn("[APEX SYS] Fricción estimando la cuota de Firebase.", e);
