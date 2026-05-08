@@ -2094,15 +2094,20 @@
             
             apTx.forEach(tx => { 
                 const quotas = tx.apQuotas || 4; 
-                const sD = getNextPayDate(getSafeDate(tx.date), payDay); 
+                const baseDate = getSafeDate(tx.date);
+                const sD = getNextPayDate(baseDate, payDay); 
                 const stD = tx.apFreq === 'fortnightly' ? 14 : 7; 
                 
                 const origIA = (tx.original_amount || tx.amount) / quotas;
                 const iA = convertCurrency(origIA, tx.original_currency || tx.currency, cDisplay);
                 
                 for(let i = (tx.apPaid || 0); i < quotas; i++) { 
-                    const d = new Date(sD.getTime()); 
-                    if (tx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); } else { d.setDate(d.getDate() + (i * stD)); }
+                    let d = new Date();
+                    if (i === 0) { d = new Date(baseDate.getTime()); } 
+                    else { 
+                        d = new Date(sD.getTime()); 
+                        if (tx.apFreq === 'monthly') { d.setMonth(d.getMonth() + (i - 1)); } else { d.setDate(d.getDate() + ((i - 1) * stD)); }
+                    }
                     d.setHours(12, 0, 0, 0); // APEX FIX: Fija a mediodía para evitar que el timezone brinque la fecha cronológica hacia atrás
                     const clearCat = tx.note || tx.cat.substring(2).trim(); 
                     const pId = 'proj_ap_'+tx.id+'_'+i;
@@ -3430,18 +3435,25 @@
             const payDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
             state.tx.forEach(tx => {
                 if (tx.type === 'afterpay' && (tx.apPaid || 0) < (tx.apQuotas || 4)) {
-                    const quotas = tx.apQuotas || 4; const sD = getNextPayDate(getSafeDate(tx.date), payDay); const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
+                    const quotas = tx.apQuotas || 4; 
+                    const baseDate = getSafeDate(tx.date);
+                    const sD = getNextPayDate(baseDate, payDay); 
+                    const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
                     let pastQuotas = 0;
                     for(let i = 0; i < quotas; i++) {
-                        const d = new Date(sD.getTime()); 
-                        if (tx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); } else { d.setDate(d.getDate() + (i * stD)); }
+                        let d = new Date();
+                        if (i === 0) { d = new Date(baseDate.getTime()); } 
+                        else { 
+                            d = new Date(sD.getTime());
+                            if (tx.apFreq === 'monthly') { d.setMonth(d.getMonth() + (i - 1)); } else { d.setDate(d.getDate() + ((i - 1) * stD)); }
+                        }
                         d.setHours(12, 0, 0, 0);
                         if (d < now) pastQuotas++;
                     }
                     if (pastQuotas > (tx.apPaid || 0)) { tx.apPaid = pastQuotas; saveCloudTx(tx); updated++; }
                 }
             });
-            if (updated > 0) { saveState(); updateDashboard(); if(state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay(); alert(`✅ Se conciliarion compras pasadas en ${updated} contrato(s).`); } else { alert("No hay cuotas pasadas pendientes de conciliar."); }
+            if (updated > 0) { saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); alert(`✅ Se conciliarion compras pasadas en ${updated} contrato(s).`); } else { alert("No hay cuotas pasadas pendientes de conciliar."); }
         }
 
         function populateFormAccounts() {
@@ -3988,9 +4000,9 @@
             
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
-            // APEX FIX: Mapeo Aislado Dinámico SSoT
+            // APEX FIX: Mapeo Aislado Dinámico SSoT (Se oculta el contrato madre Afterpay para ver solo el abono real inmediato y las 3 proyecciones)
             let rawTxList = state.tx
-                .filter(t => !t.isCCPurchase)
+                .filter(t => !t.isCCPurchase && t.type !== 'afterpay')
                 .map(t => {
                     const tx = {...t, original_amount: t.amount, original_currency: t.currency};
                     tx.renderType = tx.type;
@@ -4109,12 +4121,13 @@
 
                 let cT = '', iB = '', iClass = '';
                 if (rType === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
-                else if (rType === 'afterpay' || (t.cat && t.cat.includes('Afterpay'))) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-50 text-emerald-500'; iClass = 'fa-layer-group'; }
+                else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
+                else if (rType === 'expense' && t.cat && t.cat.includes('Afterpay')) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
                 else if (rType === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
                 else if (rType === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
-                const iE = t.type === 'expense' || rType === 'afterpay'; // APEX FIX: Signo visual basado en impacto real de caja
+                const sign = t.type === 'expense' ? '-' : (t.type === 'income' ? '+' : ''); // APEX FIX: Contrato madre neutro
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
@@ -4160,7 +4173,7 @@
                 const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${iE?'-':'+'}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink-0"><p class="font-black text-sm ${cT} text-right">${sign}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
@@ -5238,7 +5251,7 @@
                         <button onclick="toggleProjectPhase('${p.id}', ${idx})" class="w-5 h-5 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${ph.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-cyan-400 bg-white'}"><i class="fa-solid fa-check text-[10px]"></i></button>
                         <div><p class="text-[10px] font-black uppercase ${ph.completed ? 'text-slate-400 line-through' : 'theme-text'}">${ph.name}</p><p class="text-[8px] font-bold text-cyan-600 mt-0.5">EST: ${fmt(ph.estimatedCost || 0, p.currency)}</p></div>
                     </div>
-                    <button onclick="deleteProjectPhase('${p.id}', ${idx})" class="text-slate-300 hover:text-red-500 w-8 h-8 rounded-full hover:bg-red-50 flex items-center justify-center transition-colors"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    <button onclick="event.stopPropagation(); triggerUIDelete('phase', '${p.id}', ${idx})" class="text-slate-300 hover:text-red-500 w-8 h-8 rounded-full hover:bg-red-50 flex items-center justify-center transition-colors shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button>
                 </div>`;
             }).join('') || `<p class="text-[9px] text-center font-bold text-slate-400 uppercase py-6 border border-dashed rounded-xl">No hay fases o entregables definidos</p>`;
 
@@ -5248,7 +5261,7 @@
                         <button onclick="toggleTaskStatus('${t.id}'); setTimeout(()=>showProjectDetail('${p.id}'), 100);" class="w-5 h-5 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${t.completed ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400 bg-white'}"><i class="fa-solid fa-check text-[10px]"></i></button>
                         <div><p class="text-[10px] font-black uppercase ${t.completed ? 'text-slate-400 line-through' : 'theme-text'}">${t.title}</p><p class="text-[8px] font-bold text-indigo-400 mt-0.5">${t.date ? new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'}) : 'Sin fecha'} ${t.timeAlarm ? t.timeAlarm : ''}</p></div>
                     </div>
-                    <button type="button" onclick="executeTaskDeletion(event, '${t.id}'); setTimeout(()=>showProjectDetail('${p.id}'), 100);" title="Borrar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-300 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    <button type="button" onclick="event.stopPropagation(); triggerUIDelete('task', '${t.id}', '${p.id}');" title="Borrar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-300 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90 shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button>
                 </div>`;
             }).join('') || `<p class="text-[9px] text-center font-bold text-slate-400 uppercase py-6 border border-dashed rounded-xl">No hay tareas vinculadas</p>`;
 
@@ -5257,14 +5270,20 @@
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--';
                 return `<div class="flex justify-between items-center p-3 rounded-xl bg-slate-50 border border-slate-100 mb-2 cursor-pointer hover:border-cyan-300 transition-colors" onclick="editTransaction('${t.id}')">
                     <div class="flex flex-col"><span class="text-[10px] font-black uppercase theme-text">${t.note || t.cat.substring(2)}</span><span class="text-[8px] text-slate-400 font-bold uppercase mt-0.5">${dDate.toLocaleDateString()} • ${aN}</span></div>
-                    <span class="text-[10px] font-black theme-val-exp">-${fmt(t.amount, t.currency)}</span>
+                    <div class="flex items-center gap-3">
+                        <span class="text-[10px] font-black theme-val-exp">-${fmt(t.amount, t.currency)}</span>
+                        <button type="button" onclick="event.stopPropagation(); triggerUIDelete('tx', '${t.id}', '${p.id}')" class="text-slate-300 hover:text-red-500 w-8 h-8 rounded-full hover:bg-red-50 flex items-center justify-center transition-colors shadow-sm"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    </div>
                 </div>`;
             }).join('') || `<p class="text-[9px] text-center font-bold text-slate-400 uppercase py-6 border border-dashed rounded-xl">Sin recursos descontados</p>`;
 
             detailView.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center gap-4"><button onclick="renderProjectsTab()" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text hover:bg-slate-50 transition-colors active:scale-90"><i class="fa-solid fa-arrow-left text-cyan-600"></i></button><h2 class="text-xl font-black uppercase text-cyan-600 tracking-tighter truncate">${p.name}</h2></div>
-                    <button onclick="deleteProject('${p.id}')" class="w-10 h-10 bg-red-50 text-red-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-trash"></i></button>
+                    <div class="flex items-center gap-4"><button onclick="hideProjectDetail()" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text hover:bg-slate-50 transition-colors active:scale-90"><i class="fa-solid fa-arrow-left text-cyan-600"></i></button><h2 class="text-xl font-black uppercase text-cyan-600 tracking-tighter truncate">${p.name}</h2></div>
+                    <div class="flex gap-2">
+                        <button onclick="editProject('${p.id}')" type="button" class="w-10 h-10 bg-slate-100 text-slate-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="triggerUIDelete('project', '${p.id}')" type="button" class="w-10 h-10 bg-red-50 text-red-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-trash"></i></button>
+                    </div>
                 </div>
 
                 <div class="theme-card p-6 md:p-8 rounded-[2rem] border shadow-sm mb-6 relative overflow-hidden">
@@ -5313,16 +5332,87 @@
             `;
         }
 
-        function deleteProject(id) {
-            if(confirm("¿Eliminar este proyecto?\n\nLas transacciones y tareas vinculadas no se borrarán de la base de datos SSoT, pero perderán su enlace al proyecto de forma definitiva.")) {
-                state.projects = state.projects.filter(p => p.id !== id);
-                if(state.tx) state.tx.forEach(t => { if(t.projectId === id) delete t.projectId; });
-                if(state.tasks) state.tasks.forEach(t => { if(t.projectId === id) delete t.projectId; });
-                saveState(); renderProjectsTab();
+        function hideProjectDetail() {
+            const mainView = $id('projects-main-view'); const detailView = $id('projects-detail-view');
+            if(detailView) {
+                detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
+                setTimeout(() => {
+                    detailView.classList.add('hidden'); detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
+                    if(mainView) { mainView.classList.remove('hidden'); mainView.classList.add('animate-slideUp'); }
+                    renderProjectsTab();
+                }, 200);
             }
         }
 
-        // APEX FIX: Lógica de Fases de Proyectos redirigida a Modales Nativos
+        function editProject(id) {
+            const p = state.projects.find(x => x.id === id); if(!p) return;
+            openProjectModal();
+            $id('f-proj-id').value = p.id; $id('f-proj-name').value = p.name;
+            const bEl = $id('f-proj-budget'); bEl.value = fmt(p.budget, p.currency); bEl.dataset.raw = p.budget;
+            $id('f-proj-date').value = p.deadline; $id('f-proj-currency').value = p.currency;
+        }
+
+        function deleteProject(id) {
+            triggerUIDelete('project', id);
+        }
+
+        // APEX FIX: Lógica de UI Delete Modal (Fricción Cero) Unificada
+        function triggerUIDelete(type, id, aux = null) {
+            const mod = $id('ui-delete-modal');
+            const msgEl = $id('ui-delete-msg');
+            if(!mod || !msgEl) return;
+            
+            $id('ui-del-type').value = type;
+            $id('ui-del-id').value = id;
+            $id('ui-del-aux').value = aux !== null ? aux : '';
+
+            if(type === 'project') msgEl.innerText = "¿Eliminar este proyecto?\n\nLas transacciones y tareas no se borrarán de la base SSoT, pero perderán su enlace al proyecto.";
+            else if(type === 'phase') msgEl.innerText = "¿Eliminar esta fase o entregable del proyecto?";
+            else if(type === 'tx') msgEl.innerText = "¿Eliminar esta transacción permanentemente? Se reajustará el saldo de la bóveda asociada de inmediato.";
+            else if(type === 'task') msgEl.innerText = "¿Eliminar esta tarea permanentemente?";
+
+            mod.classList.remove('hidden');
+        }
+
+        function closeUIDeleteModal() {
+            const mod = $id('ui-delete-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function confirmUIDelete() {
+            const type = $id('ui-del-type').value;
+            const id = $id('ui-del-id').value;
+            const aux = $id('ui-del-aux').value;
+
+            if (type === 'project') {
+                state.projects = state.projects.filter(p => p.id !== id);
+                if(state.tx) state.tx.forEach(t => { if(t.projectId === id) delete t.projectId; });
+                if(state.tasks) state.tasks.forEach(t => { if(t.projectId === id) delete t.projectId; });
+                saveState(); renderProjectsTab(); hideProjectDetail();
+            } else if (type === 'phase') {
+                const projId = id; const phaseIdx = parseInt(aux);
+                const p = state.projects.find(x => x.id === projId);
+                if(p && p.phases) p.phases.splice(phaseIdx, 1);
+                saveState(); showProjectDetail(projId);
+            } else if (type === 'tx') {
+                const txId = id; const projId = aux;
+                deleteTx(null, txId, true); // true = bypass confirmation interna de SSoT
+                if (projId && $id('projects-detail-view') && !$id('projects-detail-view').classList.contains('hidden')) {
+                    showProjectDetail(projId);
+                    renderProjectsTab();
+                }
+            } else if (type === 'task') {
+                const taskId = id; const projId = aux;
+                executeTaskDeletion(null, taskId);
+                if (projId && $id('projects-detail-view') && !$id('projects-detail-view').classList.contains('hidden')) {
+                    showProjectDetail(projId);
+                    renderProjectsTab();
+                }
+            }
+            closeUIDeleteModal();
+        }
+
         function addProjectPhase(id) {
             const p = state.projects.find(x => x.id === id); if(!p) return;
             const mod = $id('phase-modal'); if(!mod) return;
@@ -5358,10 +5448,7 @@
         }
 
         function deleteProjectPhase(projId, phaseIdx) {
-            if(!confirm("¿Eliminar esta fase?")) return;
-            const p = state.projects.find(x => x.id === projId); if(!p || !p.phases) return;
-            p.phases.splice(phaseIdx, 1);
-            saveState(); showProjectDetail(projId);
+            triggerUIDelete('phase', projId, phaseIdx);
         }
 
         // REPORT
@@ -5506,29 +5593,34 @@
             let activeHtml = '';
             
             const dupTracker = {}; // APEX FIX: Tracker para transacciones pares
-
+            
             activeAp.forEach(t => {
                 const quotas = t.apQuotas || 4;
-                const pendingForThis = (t.amount / quotas) * (quotas - (t.apPaid || 0)); 
-                const pct = ((t.apPaid || 0) / quotas) * 100;
+                const paid = t.apPaid || 0;
+                const rem = quotas - paid;
+                const amt = t.original_amount || t.amount;
+                const qAmt = amt / quotas;
+                const pendingForThis = qAmt * rem;
+
                 const dDate = new Date(t.date);
                 const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                
-                // APEX FIX: Coloración de transacciones pares en modo duplicados
+                const pct = Math.min(100, (paid / quotas) * 100);
+
                 let isPar = false;
                 if (apShowDuplicates) {
                     const sig = `${t.note}|${t.cat}|${t.amount}|${t.date.split('T')[0]}`;
                     dupTracker[sig] = (dupTracker[sig] || 0) + 1;
                     if (dupTracker[sig] % 2 === 0) isPar = true;
                 }
-                
-                const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50';
+
+                const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50 hover:border-teal-300';
                 const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
-                const textAmtClass = isPar ? 'text-red-600' : 'theme-text';
-                const textSubClass = isPar ? 'text-red-400' : 'text-slate-400';
+                const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
+                const textAmtClass = isPar ? 'text-red-600' : 'text-teal-600';
 
                 activeHtml += `<div class="${cardBgClass} p-5 rounded-[1.5rem] border shadow-sm flex flex-col gap-3 transition-colors"><div class="flex justify-between items-start"><div><h4 class="text-xs font-black uppercase ${textTitleClass}">${t.note || t.cat.substring(2)}</h4><p class="text-[9px] font-bold ${textSubClass} uppercase mt-1">${dDate.toLocaleDateString('es-CO')} ${timeStr} • ${t.apFreq === 'fortnightly' ? 'Quincenal' : (t.apFreq === 'monthly' ? 'Mensual' : 'Semanal')}</p></div><div class="flex items-center gap-2"><button type="button" onclick="editTransaction('${t.id}')" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen text-[9px]"></i></button><button type="button" onclick="deleteDatabaseRecord('${t.id}')" title="Borrar Transacción" class="w-7 h-7 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-trash text-[9px]"></i></button><button onclick="payAfterpayQuota('${t.id}')" type="button" class="text-[9px] font-black bg-teal-100 text-teal-600 px-3 py-1.5 rounded-xl uppercase shadow-sm active:scale-95 transition-transform">Abonar</button></div></div><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-teal-400 rounded-full transition-all" style="width: ${pct}%"></div></div><div class="flex justify-between items-end"><p class="text-[9px] font-black ${textSubClass} uppercase">Pagado: ${t.apPaid || 0}/${quotas}</p><p class="text-sm font-black ${textAmtClass}">${fmt(pendingForThis, apCurr)}</p></div></div>`;
             });
+
             if (activeAp.length === 0) {
                 if (apShowDuplicates) {
                     activeHtml = `<div class="text-center p-6 border border-dashed border-rose-200 rounded-[1.5rem] bg-rose-50/30"><p class="text-[10px] font-bold text-rose-600/70 uppercase">No hay duplicados exactos</p></div>`;
