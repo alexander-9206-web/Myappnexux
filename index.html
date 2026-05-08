@@ -602,7 +602,7 @@
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 md:max-w-2xl md:mx-auto">
                 <button onclick="exportBackup()" class="w-full bg-black text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar</button>
                 <button onclick="document.getElementById('restore-backup-file-main').click()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-upload mr-1"></i> Importar</button>
-                <button onclick="forceAppUpdate()" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
+                <button onclick="forceAppUpdate()" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Buscar Actualizaciones</button>
                 <button onclick="logout()" class="w-full bg-slate-200 text-slate-700 p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-right-from-bracket mr-1"></i> Salir</button>
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
@@ -2133,17 +2133,9 @@
             }
         }
         
-        // APEX FIX: Forzar actualización de caché (Útil para contenedores nativos iOS y PWA)
+        // APEX FIX: Forzar actualización de caché y sistema (Integrado a UI Modal)
         function forceAppUpdate() {
-            if(confirm("¿Forzar actualización del sistema?\n\nEsto limpiará la caché local y descargará la última versión del código desde el servidor. Útil si has subido una nueva versión de la app web.")) {
-                if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                        for(let registration of registrations) { registration.unregister(); }
-                    });
-                }
-                // Añade un timestamp a la URL para forzar al navegador a ignorar la caché persistente
-                window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
-            }
+            triggerUIDelete('update_app', null);
         }
         
         function saveState() { 
@@ -5537,6 +5529,7 @@
             else if(type === 'cat_budget') msgEl.innerText = `¿Eliminar el límite de presupuesto para esta categoría?`;
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
+            else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
 
             mod.classList.remove('hidden');
         }
@@ -5586,6 +5579,14 @@
                 saveState(); renderBudgetTab();
             } else if (type === 'account_shared' || type === 'account_personal') {
                 executeAccountDeletion(id);
+            } else if (type === 'update_app') {
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                        for(let registration of registrations) { registration.unregister(); }
+                    });
+                }
+                window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
+                return;
             }
             closeUIDeleteModal();
         }
