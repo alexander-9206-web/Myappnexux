@@ -1921,6 +1921,8 @@
             // Firebase y la vista se recarguen de forma instantánea.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
+                    if (!sessionUnlocked || !state || !state.settings) return; // APEX FIX: Prevención de ejecución en estado zombie (Pantalla de login)
+                    
                     // APEX FIX: Retorno automático al Dashboard y Vista Global optimizado (60 segundos)
                     const lastActive = parseInt(localStorage.getItem('nexus_last_active')) || Date.now();
                     if (Date.now() - lastActive > 60000) {
@@ -2377,6 +2379,7 @@
         }
 
         function updateCurrencyLabels() {
+            if (!state || !state.settings) return; // APEX FIX: Protección SSoT anti-undefined
             const displayLabel = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
             $qAll('.currency-label').forEach(el => el.innerText = displayLabel); const rateBadge = $id('live-rate-badge');
             if(rateBadge) {
@@ -6514,6 +6517,7 @@
                     
                     // Se asegura de mostrar al menos 0.1% visualmente aunque sea casi 0
                     const percentage = Math.max(0.1, (bytes / limitBytes) * 100); 
+                    const actualPercentage = ((bytes / limitBytes) * 100).toFixed(2);
 
                     let displaySize = '';
                     if (bytes < 1024) displaySize = bytes + ' B';
@@ -6521,7 +6525,7 @@
                     else displaySize = (bytes / 1048576).toFixed(2) + ' MB';
 
                     usageBar.style.width = percentage + '%';
-                    usageText.innerText = displaySize;
+                    usageText.innerText = `${displaySize} (${actualPercentage}%)`;
 
                     // Cambio de semáforo de color si el usuario escalara masivamente
                     if (percentage > 80) usageBar.className = 'h-full bg-red-500 rounded-full transition-all duration-500 shadow-sm';
