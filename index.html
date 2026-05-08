@@ -1890,17 +1890,24 @@
             // Firebase y la vista se recarguen de forma instantánea.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
-                    // APEX FIX: Retorno automático al Dashboard y Vista Global tras 2 minutos de inactividad
+                    // APEX FIX: Retorno automático al Dashboard y Vista Global optimizado (60 segundos)
                     const lastActive = parseInt(localStorage.getItem('nexus_last_active')) || Date.now();
-                    if (Date.now() - lastActive > 120000) {
-                        state.activeCurrency = 'GLOBAL';
-                        switchTab('home');
+                    if (Date.now() - lastActive > 60000) {
+                        if (typeof changeGlobalCurrency === 'function') {
+                            changeGlobalCurrency('GLOBAL'); // Fuerza la recarga visual completa de etiquetas y tab
+                        } else {
+                            state.activeCurrency = 'GLOBAL';
+                            switchTab('home');
+                        }
                     }
                     
                     if (sessionUnlocked) {
                         if (fbUser && window.db) fetchCloudState(); 
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
+                } else if (document.visibilityState === "hidden") {
+                    // APEX FIX: Registrar el milisegundo exacto al bloquear el teléfono o cambiar de app
+                    localStorage.setItem('nexus_last_active', Date.now());
                 }
             });
 
@@ -2061,7 +2068,7 @@
                 state.categories.global = [...new Set([...(state.categories.income||[]), ...(state.categories.expense||[]), ...(state.categories.transfer||[])])];
             }
             if (state.catParents && !state.catParents.global) {
-                state.catParents.global = [...new Set([...(state.catParents.income||[]), ...(state.catParents.expense||[]), ...(state.catParents.transfer||[])])];
+            if(!state.catParents.global) state.catParents.global = [...new Set([...(state.catParents.income||[]), ...(state.catParents.expense||[]), ...(state.catParents.transfer||[])])];
             }
 
             // APEX FIX: Purga de Categorías Nativas para dejar únicamente las manuales
@@ -2072,9 +2079,9 @@
                 state.catParents.global = state.catParents.global.filter(p => !PURGE_PARENTS.includes(p));
             }
 
-            // APEX FIX: Forzar Dashboard y Vista Global en el arranque si pasaron más de 2 mins o es inicio en frío
+            // APEX FIX: Forzar Dashboard y Vista Global en el arranque si pasó 1 minuto o es inicio en frío
             const lastActive = parseInt(localStorage.getItem('nexus_last_active')) || Date.now();
-            if (Date.now() - lastActive > 120000 || !sessionStorage.getItem('nexus_session_active')) {
+            if (Date.now() - lastActive > 60000 || !sessionStorage.getItem('nexus_session_active')) {
                 state.activeTab = 'home';
                 state.activeCurrency = 'GLOBAL';
                 sessionStorage.setItem('nexus_session_active', 'true');
@@ -2763,20 +2770,35 @@
                     
                     html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100 mb-4"><div onclick="toggleAccGroup('grp-std-${grpId}')" class="flex justify-between items-center border-b border-slate-100/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-slate-500 flex items-center">Divisa ${curr} <i id="icon-grp-std-${grpId}" class="fa-solid fa-chevron-down ml-2 text-[10px] transition-transform"></i></h3><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}">${fmt(subTotal, curr)}</span></div><div id="grp-std-${grpId}" class="hidden space-y-3 pt-3 animate-slideUp">`;
                     
-                    accs.forEach(a => {
-                        const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
-                        const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
-                        const sign = a.type === 'credit' ? '-' : '';
-                        const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
-                        
-                        // APEX FIX: Coloración solo en borde de la tarjeta
-                        const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
-                        const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f1f5f9; color: #64748b;';
-                        
-                        // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
-                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+                    // APEX FIX: Agrupación interna por tipos de cuenta
+                    const accsByType = { liquid: [], credit: [], investment: [] };
+                    accs.forEach(a => { if(accsByType[a.type]) accsByType[a.type].push(a); else accsByType['liquid'].push(a); });
+                    
+                    const typeLabels = {
+                        liquid: '<i class="fa-solid fa-wallet mr-1 text-slate-400"></i> Efectivo / Débito',
+                        credit: '<i class="fa-solid fa-credit-card mr-1 text-red-400"></i> Tarjetas de Crédito',
+                        investment: '<i class="fa-solid fa-chart-line mr-1 text-emerald-400"></i> Inversiones'
+                    };
+                    
+                    ['liquid', 'credit', 'investment'].forEach(t => {
+                        if(accsByType[t].length > 0) {
+                            html += `<p class="text-[9px] font-black uppercase text-slate-400 mt-2 mb-1 tracking-widest pl-2">${typeLabels[t]}</p>`;
+                            accsByType[t].forEach(a => {
+                                const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
+                                const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                                const sign = a.type === 'credit' ? '-' : '';
+                                const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
+                                
+                                // APEX FIX: Coloración solo en borde de la tarjeta
+                                const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
+                                const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f1f5f9; color: #64748b;';
+                                
+                                // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
+                                const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
 
-                        html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                                html += `<div onclick="toggleAccountTx('${a.id}')" class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] cursor-pointer transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}"><i class="fa-solid ${icon} text-[14px]"></i></div><div><p class="text-xs font-black uppercase theme-text">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5">${detailText}</p></div></div><div class="flex items-center gap-3"><div class="text-right"><p class="text-sm font-black ${color}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-300 pl-3 ml-1">${p2pBtn}<button type="button" onclick="event.stopPropagation(); editAccount('${a.id}')" class="text-slate-400 hover:text-blue-600 transition-colors p-1"><i class="fa-solid fa-pen text-[10px]"></i></button><button type="button" onclick="event.stopPropagation(); openAccountHistory('${a.id}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-1"><i class="fa-solid fa-clock-rotate-left text-[10px]"></i></button></div></div></div><div id="acc-tx-${a.id}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[250px] overflow-y-auto hide-scrollbar"></div></div>`;
+                            });
+                        }
                     });
                     
                     html += `</div></div>`;
