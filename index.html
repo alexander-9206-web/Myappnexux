@@ -1797,12 +1797,36 @@
         async function handleLogin() {
             const email = $id('login-email').value.trim().toLowerCase(); if (!email) return alert("Ingresa tu ID de correo.");
             let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
-            if (existingProfile) { userProfile = JSON.parse(existingProfile); } 
-            else {
+            
+            // APEX FIX: Búsqueda cruzada en la Nube (Firebase) si no existe en local
+            if (!existingProfile && window.db) {
+                try {
+                    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const dSnap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                    if(dSnap.exists()) {
+                        userProfile = dSnap.data();
+                        localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+                        existingProfile = true;
+                    }
+                } catch(e) {}
+            }
+
+            if (existingProfile) { 
+                userProfile = typeof existingProfile === 'string' ? JSON.parse(existingProfile) : userProfile; 
+            } else {
                 const name = $id('login-name').value.trim(), pin = $id('login-pin').value.trim();
                 if (!name || pin.length !== 4) return alert("Nombre y PIN numérico de 4 dígitos.");
                 userProfile = { name, email, pin }; localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
                 if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            }
+            
+            // APEX FIX: Registrar/Sincronizar el usuario en el directorio global de Firebase
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    userProfile.lastSeen = Date.now();
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
             }
             
             // APEX FIX: Guardado de sesión blindado en 3 capas
@@ -5760,29 +5784,120 @@
             
             applyThemeCSS(); saveState(); updateDashboard();
         }
-        function updateLocalUsersList() {
-            const list = $id('local-users-list'); if(!list) return; let html = '';
+        
+        // APEX FIX: Directorio de Usuarios sincronizado con Firebase
+        async function updateLocalUsersList() {
+            const list = $id('local-users-list'); if(!list) return; 
+            list.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold mt-4"><i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando red...</p>';
+            
+            let usersMap = new Map();
+            
+            // 1. Cargar locales
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key.startsWith('nexus_profile_')) {
-                    const p = JSON.parse(localStorage.getItem(key)); const isCurrent = p.email === currentUser;
-                    html += `<div onclick="openUserEdit('${p.email}')" class="flex justify-between items-center p-4 rounded-[1.5rem] border cursor-pointer hover:border-blue-300 transition-colors ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'}"><div><p class="text-xs font-black uppercase text-slate-800">${p.name}</p><p class="text-[9px] font-bold text-slate-400 mt-1">${p.email}</p></div><div class="flex items-center gap-3">${isCurrent ? '<span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1 rounded shadow-sm">Activo</span>' : ''}<i class="fa-solid fa-chevron-right text-slate-300 text-[10px]"></i></div></div>`;
+                    const p = JSON.parse(localStorage.getItem(key));
+                    p.isLocal = true;
+                    usersMap.set(p.email, p);
                 }
-            } list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay otras bóvedas.</p>';
+            }
+
+            // 2. Extraer de la Nube (Directorio Global)
+            if (window.db) {
+                try {
+                    const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
+                    snap.forEach(doc => {
+                        const data = doc.data();
+                        if(usersMap.has(data.email)) {
+                            const existing = usersMap.get(data.email);
+                            existing.isCloud = true;
+                            existing.name = data.name; // Refrescar nombre
+                            existing.pin = data.pin; // Sincronizar PIN
+                        } else {
+                            data.isCloud = true;
+                            usersMap.set(data.email, data);
+                        }
+                    });
+                } catch(e) { console.warn("[APEX] Fallo buscando usuarios en nube", e); }
+            }
+
+            let html = '';
+            Array.from(usersMap.values()).forEach(p => {
+                const isCurrent = p.email === currentUser;
+                const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1" title="En Nube"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1" title="Solo Local"></i>';
+                html += `<div onclick="openUserEdit('${p.email}')" class="flex justify-between items-center p-4 rounded-[1.5rem] border cursor-pointer hover:border-blue-300 transition-colors ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'} mb-2"><div><p class="text-xs font-black uppercase text-slate-800">${p.name} ${cloudBadge}</p><p class="text-[9px] font-bold text-slate-400 mt-1">${p.email}</p></div><div class="flex items-center gap-3">${isCurrent ? '<span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1 rounded shadow-sm">Activo</span>' : ''}<i class="fa-solid fa-chevron-right text-slate-300 text-[10px]"></i></div></div>`;
+                
+                // Cachear en local
+                localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
+            });
+            
+            list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay otras bóvedas.</p>';
         }
+
         function openUserEdit(email) { const p = JSON.parse(localStorage.getItem('nexus_profile_' + email)); if(!p) return; $id('edit-user-panel').classList.remove('hidden'); $id('edit-user-original-email').value = email; $id('edit-user-name').value = p.name; $id('edit-user-pin').value = p.pin; }
         function closeUserEdit() { const pnl = $id('edit-user-panel'); if(pnl) pnl.classList.add('hidden'); }
-        function saveUserEdit() {
+        
+        async function saveUserEdit() {
             const email = $id('edit-user-original-email').value; const name = $id('edit-user-name').value.trim(); const pin = $id('edit-user-pin').value.trim();
             if(!name || pin.length !== 4) return alert("Nombre y PIN numérico de 4 dígitos.");
-            const key = 'nexus_profile_' + email; const p = JSON.parse(localStorage.getItem(key)); p.name = name; p.pin = pin; localStorage.setItem(key, JSON.stringify(p));
-            if(email === currentUser) { userProfile = p; $id('header-user-badge').innerText = p.name; } closeUserEdit(); updateLocalUsersList();
+            const key = 'nexus_profile_' + email; 
+            const p = JSON.parse(localStorage.getItem(key)) || { email }; 
+            p.name = name; p.pin = pin; p.lastSeen = Date.now();
+            localStorage.setItem(key, JSON.stringify(p));
+            
+            if(email === currentUser) { userProfile = p; $id('header-user-badge').innerText = p.name; } 
+            
+            // APEX FIX: Sincronizar edición en nube
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), p, { merge: true });
+                } catch(e) {}
+            }
+            
+            closeUserEdit(); updateLocalUsersList();
         }
-        function deleteUserVault() {
+
+        async function deleteUserVault() {
             const email = $id('edit-user-original-email').value;
-            if(confirm(`⚠ PELIGRO: ¿Borrar bóveda del usuario ${email}?`)) {
+            const profileData = localStorage.getItem(`nexus_profile_${email}`);
+            if(!profileData) return;
+            const p = JSON.parse(profileData);
+            
+            const token = prompt(`⚠ ALERTA DE SEGURIDAD\nPara autorizar la eliminación global de la bóveda de ${email}, ingresa el Token de Autorización (PIN de 4 dígitos):`);
+            if (token === null) return;
+            
+            if (token !== p.pin) {
+                return alert("Token de autorización inválido. Operación denegada.");
+            }
+            
+            if(confirm(`Token aceptado. ¿Confirmas la destrucción irreversible de la bóveda de ${email} en la Nube y en este dispositivo?`)) {
                 localStorage.removeItem(`nexus_profile_${email}`); localStorage.removeItem(`nexus_db_${email}`);
-                if(email === currentUser) { alert("Has eliminado tu propia bóveda activa."); logout(); } else { closeUserEdit(); updateLocalUsersList(); }
+                
+                // Limpieza profunda en la base de datos local SSoT
+                try {
+                    const db = await NexusIDB.init();
+                    const tx = db.transaction('states', 'readwrite');
+                    tx.objectStore('states').delete(email);
+                } catch(e) { console.error("Fallo al purgar IndexedDB del usuario", e); }
+
+                // APEX FIX: Eliminar del registro en Firebase
+                if (window.db) {
+                    try {
+                        const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                    } catch(e) { console.warn("Modo offline, no se borró de la nube inmediatamente.", e); }
+                }
+
+                if(email === currentUser) { 
+                    alert("Has eliminado tu propia bóveda activa."); 
+                    logout(); 
+                } else { 
+                    closeUserEdit(); 
+                    updateLocalUsersList(); 
+                    alert("Bóveda eliminada exitosamente de la red."); 
+                }
             }
         }
         
