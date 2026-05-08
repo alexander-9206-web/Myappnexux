@@ -1748,6 +1748,13 @@
             // Firebase y la vista se recarguen de forma instantánea.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
+                    // APEX FIX: Retorno automático al Dashboard y Vista Global tras 2 minutos de inactividad
+                    const lastActive = parseInt(localStorage.getItem('nexus_last_active')) || Date.now();
+                    if (Date.now() - lastActive > 120000) {
+                        state.activeCurrency = 'GLOBAL';
+                        switchTab('home');
+                    }
+                    
                     if (sessionUnlocked) {
                         if (fbUser && window.db) fetchCloudState(); 
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
@@ -1831,6 +1838,7 @@
 
         function setupInactivityLock() {
             const resetTimer = () => {
+                localStorage.setItem('nexus_last_active', Date.now()); // APEX FIX: Rastrear milisegundo del último toque/interacción
                 clearTimeout(inactivityTimer);
                 if (sessionUnlocked && state.settings && state.settings.requirePin) {
                     inactivityTimer = setTimeout(() => {
@@ -1870,12 +1878,14 @@
             const demoLoans = [];
             const demoTx = [];
 
-            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'COP', calendarFilter: 'week', goals: [] };
+            // APEX FIX: activeCurrency predeterminado a GLOBAL
+            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [] };
 
             state = savedState || defaultDemoData;
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
             if(!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
+            if(!state.projects) state.projects = [];
 
             // APEX FIX: Auto-Migración y Fusión de Categorías a Diccionario Global
             if (state.categories && !state.categories.global) {
@@ -1891,6 +1901,14 @@
             }
             if (state.catParents && state.catParents.global) {
                 state.catParents.global = state.catParents.global.filter(p => !PURGE_PARENTS.includes(p));
+            }
+
+            // APEX FIX: Forzar Dashboard y Vista Global en el arranque si pasaron más de 2 mins o es inicio en frío
+            const lastActive = parseInt(localStorage.getItem('nexus_last_active')) || Date.now();
+            if (Date.now() - lastActive > 120000 || !sessionStorage.getItem('nexus_session_active')) {
+                state.activeTab = 'home';
+                state.activeCurrency = 'GLOBAL';
+                sessionStorage.setItem('nexus_session_active', 'true');
             }
 
             setupInactivityLock(); 
@@ -2756,11 +2774,24 @@
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         function deleteAccount() {
             const id = $id('fa-id').value; if(!id) return; const acc = state.accounts.find(a => a.id === id); if(!acc) return;
-            if(!confirm(`⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar la bóveda "${acc.name}"?\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`)) return;
+            
+            // APEX FIX: Mensaje y lógica diferenciada para Desvincular Cuentas Compartidas vs Borrar Cuentas Personales
+            if (acc.isShared) {
+                if(!confirm(`¿Desvincular la bóveda compartida "${acc.name}"?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`)) return;
+            } else {
+                if(!confirm(`⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar la bóveda "${acc.name}"?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`)) return;
+            }
+            
             state.accounts = state.accounts.filter(a => a.id !== id);
-            state.tx.forEach(t => { if (t.accId === id) deleteCloudTx(t.id); });
-            state.tx = state.tx.filter(t => t.accId !== id);
+            state.tx.forEach(t => { if (t.accId === id || t.toAccId === id) deleteCloudTx(t.id); });
+            state.tx = state.tx.filter(t => t.accId !== id && t.toAccId !== id);
             state.loans = state.loans.filter(l => l.cardId !== id);
+            
+            // APEX FIX: Cerrar el túnel (Listener) P2P inmediatamente para evitar que vuelva a descargar los datos eliminados
+            if (acc.isShared && typeof attachP2PListener === 'function') {
+                setTimeout(() => attachP2PListener(), 50);
+            }
+            
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
         }
         function toggleCreditFields() { const type = $id('fa-type').value; const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const lbl = $id('fa-balance-lbl'); if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden'); const lim = $id('fa-limit'); if(lim) lim.required = false; if(type === 'credit') { if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; if(lim) lim.required = true; } else if (type === 'virtual') { if(vFields) vFields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Balance (+ a favor, - deuda)'; } else { if(lbl) lbl.innerText = 'Balance Inicial'; } }
@@ -2851,7 +2882,7 @@
                     priorityBadge = `<span class="${pBg} ${pText} px-2 py-0.5 rounded-md text-[8px] font-black uppercase border shadow-sm">Prioridad: ${pLbl}</span>`;
                 }
                 
-                const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan('${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4"><div><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Cuota Fija</p><p class="text-sm font-black theme-val-exp">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end"><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Saldo Actual</p><p class="text-lg font-black theme-val-exp">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div><button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
+                const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan(event, '${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4"><div><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Cuota Fija</p><p class="text-sm font-black theme-val-exp">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end"><p class="text-[8px] font-black uppercase text-slate-400 mb-1">Saldo Actual</p><p class="text-lg font-black theme-val-exp">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div><button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
                 if (remaining > 0) htmlPending += cardHtml; else htmlPaid += cardHtml;
             });
             listPending.innerHTML = htmlPending || `<p class="text-[10px] text-slate-400 font-bold uppercase col-span-2 text-center py-6 border border-dashed rounded-2xl">No hay deudas pendientes</p>`;
@@ -2919,7 +2950,14 @@
         }
 
         function hideLoanDetail() { const listView = $id('loans-view-list'); const detailView = $id('loans-view-detail'); if(detailView) { detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200'); setTimeout(() => { detailView.classList.add('hidden'); detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200'); if(listView) { listView.classList.remove('hidden'); listView.classList.add('animate-slideUp'); } }, 200); } }
-        function deleteLoan(id) { if (confirm('⚠ Purgar pasivo borrará el registro. ¿Continuar?')) { state.loans = state.loans.filter(l => l.id !== id); saveState(); renderLoansList(); updateDashboard(); } }
+        
+        function deleteLoan(e, id) { 
+            if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
+            state.loans = state.loans.filter(l => l.id !== id); 
+            saveState(); 
+            renderLoansList(); 
+            updateDashboard(); 
+        }
 
         function editLoan(id) {
             const l = state.loans.find(x => x.id === id); if(!l) return;
@@ -4793,26 +4831,25 @@
             const checkboxes = document.querySelectorAll('.task-select-cb:checked');
             if (checkboxes.length === 0) return;
             
-            if (confirm(`¿Eliminar ${checkboxes.length} tareas seleccionadas de forma permanente?`)) {
-                // 1. Agrupar todos los IDs a borrar en una sola lista (Eficiencia de Memoria)
-                const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
-                
-                // 2. Purga Atómica: Filtrar el estado una sola vez
-                state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.id));
-                
-                // 3. Destruir alarmas programadas en el SO Nativo
-                idsToDelete.forEach(id => {
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
-                    }
-                });
-                
-                // 4. Forzar el refresco de los motores y UI
-                saveState();
-                renderTasksTab();
-                updateDashboard();
-                if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
-            }
+            // APEX FIX: Borrado inmediato (Fricción Cero - Sin confirmación)
+            // 1. Agrupar todos los IDs a borrar en una sola lista (Eficiencia de Memoria)
+            const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+            
+            // 2. Purga Atómica: Filtrar el estado una sola vez
+            state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.id));
+            
+            // 3. Destruir alarmas programadas en el SO Nativo
+            idsToDelete.forEach(id => {
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                }
+            });
+            
+            // 4. Forzar el refresco de los motores y UI
+            saveState();
+            renderTasksTab();
+            updateDashboard();
+            if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
         }
 
         // APEX FIX: Modal simplificado al estilo iOS con control del botón de Eliminar
@@ -4922,18 +4959,17 @@
             }
         }
 
-        // APEX FIX: Función global de eliminación purificada y resistente a fallos de evento en iOS
+        // APEX FIX: Función global de eliminación purificada y resistente a fallos de evento en iOS (Fricción Cero)
         function executeTaskDeletion(e, id) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
-            if(confirm("¿Eliminar este recordatorio de forma permanente?")) {
-                state.tasks = state.tasks.filter(t => t.id !== id);
-                saveState(); renderTasksTab(); updateDashboard();
-                if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
-                
-                // Cancelar notificación nativa al eliminar
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
-                }
+            
+            state.tasks = state.tasks.filter(t => t.id !== id);
+            saveState(); renderTasksTab(); updateDashboard();
+            if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
+            
+            // Cancelar notificación nativa al eliminar
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
             }
         }
         
@@ -5960,7 +5996,6 @@
                 if (currentHHMM === targetHHMM && lastRun !== todayStr && sessionUnlocked) {
                     localStorage.setItem('nexus_last_autobackup', todayStr);
                     
-                    const folderName = state.settings.backupFolder || 'Nexus';
                     const fileName = `nexus_backup_${currentUser}_${todayStr}.json`;
                     const jsonData = JSON.stringify(state, null, 2);
                     
@@ -5969,41 +6004,39 @@
                         window.webkit.messageHandlers.saveBackupHandler.postMessage(jsonData);
                         console.log("[APEX SYS] Auto-Backup ejecutado y enviado al contenedor nativo de iOS.");
                     } else {
-                        // APEX HACK: Fallback para iOS Safari normal vía Atajos
-                        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-                        
-                        if (isIOS) {
-                            try {
-                                // 1. Inyectamos JSON pesado al portapapeles (Bypass límite de caracteres en URL)
-                                const tempTextArea = document.createElement("textarea");
-                                tempTextArea.value = jsonData;
-                                document.body.appendChild(tempTextArea);
-                                tempTextArea.select();
-                                document.execCommand("copy");
-                                document.body.removeChild(tempTextArea);
-                                
-                                // 2. Disparamos Atajo nativo pasándole la ruta deseada como Input
-                                const path = `${folderName}/${fileName}`;
-                                const shortcutUrl = `shortcuts://run-shortcut?name=NexusAutoSave&input=${encodeURIComponent(path)}`;
-                                window.location.href = shortcutUrl;
-                            } catch(e) {
-                                fallbackDownload(jsonData, fileName);
-                            }
-                        } else {
-                            // Fallback PWA estándar para Mac/PC (Requiere confirmación del navegador)
-                            fallbackDownload(jsonData, fileName);
-                        }
+                        // APEX FIX: Forzar la descarga directa del archivo real al dispositivo en Web/PWA
+                        // Se remueve la dependencia a atajos de iOS para asegurar de que cualquier dispositivo lo descargue en formato JSON universal.
+                        fallbackDownload(jsonData, fileName);
                     }
                 }
             }, 30000); // Check cada 30 segundos
         }
 
         function fallbackDownload(data, filename) {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(data); 
-            const node = document.createElement('a'); 
-            node.setAttribute("href", dataStr); 
-            node.setAttribute("download", filename); 
-            document.body.appendChild(node); node.click(); node.remove();
+            try {
+                // APEX FIX: Generar Blob (Archivo en Memoria) para soportar bases de datos masivas sin corromperse
+                const blob = new Blob([data], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const node = document.createElement('a');
+                node.setAttribute("href", url);
+                node.setAttribute("download", filename);
+                node.style.display = 'none';
+                document.body.appendChild(node);
+                node.click();
+                document.body.removeChild(node);
+                setTimeout(() => URL.revokeObjectURL(url), 2000); // Limpiar memoria de forma segura
+            } catch (e) {
+                console.error("[APEX SYS] Fallo al crear Blob, usando URI fallback", e);
+                // Si el motor Blob falla, usar URI de datos como último recurso
+                const dataStr = "data:application/json;charset=utf-8," + encodeURIComponent(data); 
+                const node = document.createElement('a'); 
+                node.setAttribute("href", dataStr); 
+                node.setAttribute("download", filename); 
+                node.style.display = 'none';
+                document.body.appendChild(node); 
+                node.click(); 
+                node.remove();
+            }
         }
 
         function importBackup(e) {
