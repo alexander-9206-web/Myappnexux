@@ -4427,11 +4427,13 @@
                 if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
 
                 let initialPaid = 0;
+                let isApReconMode = false;
                 if (type === 'afterpay') { 
                     newTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : 'weekly'; 
                     newTx.apQuotas = ($id('f-ap-quotas') && parseInt($id('f-ap-quotas').value)) ? parseInt($id('f-ap-quotas').value) : 4; 
                     initialPaid = ($id('f-ap-paid') && parseInt($id('f-ap-paid').value)) ? parseInt($id('f-ap-paid').value) : 1;
                     newTx.apPaid = 0; 
+                    isApReconMode = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
                 } 
                 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
@@ -4439,23 +4441,29 @@
 
                 // APEX FIX: Conciliación Estricta. Extrae el abono del balance de la cuenta seleccionada INMEDIATAMENTE
                 if (type === 'afterpay' && initialPaid > 0) {
-                    let apAcc = state.accounts.find(a => a.id === accId); 
-                    if (apAcc) {
-                        let deductAmt = newTx.amount / newTx.apQuotas;
-                        if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(deductAmt, newTx.currency, apAcc.currency);
-                        for(let i=0; i<initialPaid; i++) {
-                            newTx.apPaid += 1;
-                            if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                            const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: apAcc.id, date: newTx.date, note: `[Abono Realizado] ${newTx.note || newTx.cat.substring(2)} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
-                            
-                            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-                            
-                            state.tx.push(apPayTx); saveCloudTx(apPayTx);
-                        }
-                        saveCloudTx(newTx); 
-                    } else {
-                        newTx.apPaid = initialPaid; 
+                    if (isApReconMode) {
+                        // Modo Conciliación SSoT Base Cero: Solo avanza el tracker de amortización, sin inyectar historial ni descontar de caja real.
+                        newTx.apPaid = initialPaid;
                         saveCloudTx(newTx);
+                    } else {
+                        let apAcc = state.accounts.find(a => a.id === accId); 
+                        if (apAcc) {
+                            let deductAmt = newTx.amount / newTx.apQuotas;
+                            if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(deductAmt, newTx.currency, apAcc.currency);
+                            for(let i=0; i<initialPaid; i++) {
+                                newTx.apPaid += 1;
+                                if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
+                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: apAcc.id, date: newTx.date, note: `[Abono Realizado] ${newTx.note || newTx.cat.substring(2)} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
+                                
+                                if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
+                                
+                                state.tx.push(apPayTx); saveCloudTx(apPayTx);
+                            }
+                            saveCloudTx(newTx); 
+                        } else {
+                            newTx.apPaid = initialPaid; 
+                            saveCloudTx(newTx);
+                        }
                     }
                 }
             }
