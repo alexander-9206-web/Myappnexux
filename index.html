@@ -2226,10 +2226,10 @@
                     }
                     
                     d.setHours(12, 0, 0, 0); // APEX FIX: Fija a mediodía para evitar que el timezone brinque la fecha cronológica hacia atrás
-                    const clearCat = tx.note || tx.cat.substring(2).trim(); 
+                    const clearCat = tx.note ? tx.note : tx.cat.substring(2).trim(); 
                     const pId = 'proj_ap_'+tx.id+'_'+i;
                     if (!rawTx.some(rt => rt.id === pId)) {
-                        rawTx.push({ id: pId, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: '🛍️ Afterpay', accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: cDisplay }); 
+                        rawTx.push({ id: pId, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: cDisplay }); 
                     }
                 } 
             });
@@ -3872,7 +3872,7 @@
 
             if(!txId) { 
                 const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0');
-                if($id('f-cat-parent')) { const dCat = type === 'afterpay' ? '🛍️ Afterpay' : (type === 'transfer' ? '🔀 Entre Cuentas' : ''); $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
+                if($id('f-cat-parent')) { const dCat = type === 'transfer' ? '🔀 Entre Cuentas' : ''; $id('f-cat-parent').value = dCat; if(selP && dCat) selP.value = dCat; }
                 if($id('f-cat-sub')) $id('f-cat-sub').value = '';
                 if($id('f-cost-type')) $id('f-cost-type').value = 'variable';
                 const termEl = $id('f-cc-term'); if(termEl) { termEl.value = ''; termEl.dataset.raw = ''; } 
@@ -4291,7 +4291,7 @@
                 type = 'afterpay';
             }
 
-            if(type === 'afterpay' && !parent) cat = '🛍️ Afterpay';
+            if(type === 'afterpay' && !parent) cat = '🛍️ Gastos Varios';
             if(type === 'transfer') cat = '🔀 Entre Cuentas';
             if(type === 'income' && !cat) cat = '💰 Ingresos Varios';
             if(type === 'expense' && !cat) cat = '🛍️ Gastos Varios';
@@ -4380,7 +4380,7 @@
                                 for(let i=0; i<diff; i++) {
                                     oldTx.apPaid = (oldTx.apPaid || 0) + 1;
                                     if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                    const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: apAcc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${oldTx.note || oldTx.cat.substring(2)} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
+                                    const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: oldTx.cat, accId: apAcc.id, date: new Date().toISOString(), note: `[Abono] ${oldTx.note ? oldTx.note : oldTx.cat.substring(2).trim()} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
                                     if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
                                     state.tx.push(apPayTx); saveCloudTx(apPayTx);
                                 }
@@ -4445,7 +4445,7 @@
                             for(let i=0; i<initialPaid; i++) {
                                 newTx.apPaid += 1;
                                 if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: apAcc.id, date: newTx.date, note: `[Abono Realizado] ${newTx.note || newTx.cat.substring(2)} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
+                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `[Abono] ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
                                 
                                 if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
                                 
@@ -6063,7 +6063,7 @@
             let deductAmt = tx.amount / quotas;
             if(acc.currency !== tx.currency) deductAmt = convertCurrency(deductAmt, tx.currency, acc.currency);
             tx.apPaid = (tx.apPaid || 0) + 1; acc.balance -= deductAmt;
-            const newTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: '🛍️ Afterpay', accId: acc.id, date: new Date().toISOString(), note: `[Abono Realizado] ${tx.note || tx.cat.substring(2)} (${tx.apPaid}/${quotas})`, currency: acc.currency });
+            const newTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: tx.cat, accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${tx.note ? tx.note : tx.cat.substring(2).trim()} (${tx.apPaid}/${quotas})`, currency: acc.currency });
             
             // APEX FIX: Trazabilidad P2P
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
