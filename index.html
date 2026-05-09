@@ -4743,8 +4743,8 @@
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
 
-        function saveTransaction(e, forceOverdraft = false) { 
-            if(e && typeof e.preventDefault === 'function') e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
+        function saveTransaction(e) { 
+            e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
             const projectId = $id('f-proj-id') ? $id('f-proj-id').value : '';
             
             const parentSel = $id('f-cat-parent-select') ? $id('f-cat-parent-select').value : '';
@@ -4801,12 +4801,7 @@
                 const termStr = $id('f-cc-term').dataset.raw; const term = parseInt(termStr);
                 if (term && term > 1) {
                     const available = (acc.limit || 0) - acc.balance; 
-                    if(amount > available) { 
-                        if(!forceOverdraft) {
-                            triggerUIDelete('tx_overdraft', null);
-                            return;
-                        }
-                    } 
+                    if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`)) return; } 
                     acc.balance += amount; 
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
@@ -6191,12 +6186,12 @@
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
             else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
-            else if(type === 'cc_overdraft' || type === 'tx_overdraft') msgEl.innerText = `⚠️ El valor excede el cupo disponible de la Tarjeta.\n\n¿Estás seguro de registrar un sobregiro?`;
+            else if(type === 'cc_overdraft') msgEl.innerText = `⚠️ El valor excede el cupo disponible de la Tarjeta.\n\n¿Estás seguro de registrar un sobregiro?`;
             else if(type === 'reconcile_afterpay') msgEl.innerText = `¿Conciliar automáticamente cuotas pasadas?\n\nSe marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.`;
 
             const confirmBtn = mod.querySelector('button.bg-red-600');
             if (confirmBtn) {
-                confirmBtn.innerText = (type === 'cc_overdraft' || type === 'tx_overdraft') ? 'Sobregirar' : (type === 'reconcile_afterpay' ? 'Conciliar' : 'Eliminar');
+                confirmBtn.innerText = (type === 'cc_overdraft') ? 'Sobregirar' : (type === 'reconcile_afterpay' ? 'Conciliar' : 'Eliminar');
             }
 
             mod.classList.remove('hidden');
@@ -6267,8 +6262,6 @@
                 return;
             } else if (type === 'cc_overdraft') {
                 saveCCPurchase(null, true, id);
-            } else if (type === 'tx_overdraft') {
-                saveTransaction(null, true);
             } else if (type === 'reconcile_afterpay') {
                 reconcilePastAfterpay(true);
             }
