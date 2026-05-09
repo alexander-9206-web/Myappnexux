@@ -1290,6 +1290,31 @@
         </div>
     </div>
 
+    <!-- MODAL TOMAR CONTROL (TAKEOVER) -->
+    <div id="takeover-user-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
+            <div class="text-center">
+                <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm border border-amber-200">
+                    <i class="fa-solid fa-key text-2xl"></i>
+                </div>
+                <h3 class="text-xl font-black uppercase text-amber-600 tracking-tighter">Acceso Maestro</h3>
+                <p class="text-[10px] text-slate-500 mt-2 font-bold uppercase">Vas a tomar el control de la bóveda de <span id="takeover-user-target" class="text-slate-700 font-black"></span>.</p>
+                <p class="text-[8px] text-amber-500 mt-1 uppercase tracking-widest">Requiere PIN Administrador</p>
+            </div>
+            <div class="space-y-4">
+                <input type="hidden" id="takeover-user-email">
+                <input type="password" id="takeover-user-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] text-2xl w-full bg-slate-50 border-slate-200 focus:border-amber-500 transition-colors" inputmode="numeric">
+                
+                <p id="takeover-error-msg" class="text-[9px] text-red-500 font-bold hidden text-center uppercase tracking-widest">PIN de acceso denegado.</p>
+                
+                <div class="flex gap-2 mt-4">
+                    <button type="button" onclick="confirmTakeoverUserVault()" class="flex-1 bg-amber-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Acceder</button>
+                    <button type="button" onclick="closeTakeoverModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL ELIMINAR BÓVEDA USUARIO -->
         <div id="delete-user-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
@@ -7223,6 +7248,47 @@
             } catch(e) {
                 console.error("Error al actualizar permiso remoto", e);
                 alert("Error de red: No se pudo guardar el permiso en la base de datos de este usuario.");
+            }
+        }
+
+        // APEX FIX: Motor de Cálculo y Renderizado de Cuota de Almacenamiento en Nube
+        function updateCloudStorageIndicator() {
+            const usageBar = $id('firebase-usage-bar');
+            const usageText = $id('firebase-usage-text');
+            if (!usageBar || !usageText || !state) return;
+
+            // 1 GB de límite gratuito = 1,048,576 KB
+            const MAX_QUOTA_KB = 1048576; 
+            
+            try {
+                // Se calcula el peso exacto del estado local en memoria
+                const currentSizeBytes = new Blob([JSON.stringify(state)]).size;
+                const sizeKB = (currentSizeBytes / 1024).toFixed(2);
+                
+                let usagePct = (sizeKB / MAX_QUOTA_KB) * 100;
+                // Garantiza visibilidad mínima en UI si ya hay datos, topando en 100%
+                if (usagePct < 0.5 && sizeKB > 0) usagePct = 0.5; 
+                if (usagePct > 100) usagePct = 100;
+                
+                usageBar.style.width = usagePct + '%';
+                usageText.innerText = sizeKB + ' KB';
+                
+                // Semántica de color: Alerta si el almacenamiento supera niveles críticos
+                usageBar.classList.remove('bg-blue-500', 'bg-amber-500', 'bg-red-500');
+                usageText.classList.remove('text-blue-600', 'text-amber-600', 'text-red-600');
+                
+                if (usagePct >= 90) {
+                    usageBar.classList.add('bg-red-500');
+                    usageText.classList.add('text-red-600');
+                } else if (usagePct >= 75) {
+                    usageBar.classList.add('bg-amber-500');
+                    usageText.classList.add('text-amber-600');
+                } else {
+                    usageBar.classList.add('bg-blue-500');
+                    usageText.classList.add('text-blue-600');
+                }
+            } catch (e) {
+                usageText.innerText = 'Error calculando';
             }
         }
 
