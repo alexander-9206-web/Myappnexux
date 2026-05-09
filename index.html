@@ -666,7 +666,16 @@
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
 
-            <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto" id="danger-zone-container" style="display: none;">
+            <!-- BLOQUE ADMINISTRADOR GLOBAL (ROOT) -->
+            <div id="admin-users-block" class="theme-card p-6 md:p-8 rounded-[2rem] border shadow-sm md:col-span-2 hidden bg-red-50/20 border-red-200 md:max-w-2xl md:mx-auto mt-6">
+                <div class="flex justify-between items-center mb-4 border-b border-red-200/50 pb-3">
+                    <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest"><i class="fa-solid fa-user-shield mr-2"></i>Gestión Total de Usuarios (SSoT)</h3>
+                    <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
+                </div>
+                <div id="admin-global-users-list" class="space-y-2 max-h-64 overflow-y-auto hide-scrollbar"></div>
+            </div>
+
+            <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto mt-6" id="danger-zone-container" style="display: none;">
                 <h3 class="text-red-600 font-black text-sm uppercase mb-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Zona de Peligro (Root Admin)</h3>
                 <div id="reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
                     <p class="text-[10px] text-red-600 font-bold uppercase">Acción irreversible. Ingrese su PIN y escriba <b>RESET</b>:</p>
@@ -6758,6 +6767,16 @@
             updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
+            const adminBlock = $id('admin-users-block');
+            if(adminBlock) {
+                if(userProfile && userProfile.pin === "1234") {
+                    adminBlock.style.display = 'block';
+                    loadAdminGlobalUsers();
+                } else {
+                    adminBlock.style.display = 'none';
+                }
+            }
+
             const dz = $id('danger-zone-container');
             if(dz) {
                 if(userProfile && userProfile.pin === "1234") {
@@ -6768,96 +6787,44 @@
             }
         }
 
-        // APEX FIX: Estimador de Uso de Firebase Firestore SSoT (Cero Alertas)
-        async function updateCloudStorageIndicator() {
-            const usageBar = $id('firebase-usage-bar');
-            const usageText = $id('firebase-usage-text');
-            if (!usageBar || !usageText) return;
-
+        // APEX FIX: Motor de Carga Exclusivo para Administración Total SSoT
+        async function loadAdminGlobalUsers() {
+            const list = $id('admin-global-users-list');
+            if(!list || !window.db) return;
+            list.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Accediendo al Directorio Raíz de Firebase...</p>';
             try {
-                let totalBytes = 0;
-                let localScanned = false;
+                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
+                let html = '';
+                
+                // Convertir a array para ordenar
+                const users = [];
+                snap.forEach(doc => users.push(doc.data()));
+                users.sort((a,b) => new Date(b.lastSyncSize || 0) - new Date(a.lastSyncSize || 0));
 
-                // 1. APEX FIX: Consultar en Nube el peso sumado de todos los usuarios (Telemetría Distribuida)
-                if (window.db && navigator.onLine) {
-                    try {
-                        const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        
-                        // Sumar peso de usuarios reportado en sus perfiles
-                        const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
-                        snap.forEach(doc => {
-                            const data = doc.data();
-                            if (data.email === currentUser) {
-                                // Para el usuario activo, la memoria viva es más exacta
-                                totalBytes += new Blob([JSON.stringify(state)]).size;
-                            } else if (data.vaultSize) {
-                                // Sumar el tamaño indexado del otro usuario
-                                totalBytes += data.vaultSize;
-                            }
-                        });
-                        
-                        // Sumar también las bóvedas P2P compartidas flotantes
-                        const p2pSnap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
-                        p2pSnap.forEach(doc => {
-                            totalBytes += new Blob([JSON.stringify(doc.data())]).size;
-                        });
-
-                        localScanned = true;
-                        renderUsage(totalBytes);
-                    } catch (fbErr) {
-                        console.warn("[APEX] Fricción leyendo cuotas de Firebase, activando fallback local.", fbErr);
-                    }
-                }
-
-                // 2. Fallback a IndexedDB si no hay red o Firebase falla
-                if (!localScanned) {
-                    totalBytes += new Blob([JSON.stringify(state)]).size; // Bóveda actual
-
-                    try {
-                        const db = await NexusIDB.init();
-                        const tx = db.transaction('states', 'readonly');
-                        const req = tx.objectStore('states').getAll();
-                        
-                        req.onsuccess = () => {
-                            if (req.result) {
-                                req.result.forEach(item => {
-                                    if (item.userId !== 'nexus_active_session' && item.userId !== currentUser) {
-                                         totalBytes += new Blob([JSON.stringify(item.data)]).size;
-                                    }
-                                });
-                            }
-                            renderUsage(totalBytes);
-                        };
-                        req.onerror = () => renderUsage(totalBytes);
-                    } catch (idbErr) {
-                        renderUsage(totalBytes); 
-                    }
-                }
-
-                function renderUsage(bytes) {
-                    // Límite del plan Spark en Firestore es 1 GB (1,073,741,824 bytes)
-                    const limitBytes = 1073741824; 
+                users.forEach(data => {
+                    const isCurrent = data.email === currentUser;
+                    const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
+                    const lastSync = data.lastSyncSize ? new Date(data.lastSyncSize).toLocaleDateString('es-CO', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : 'N/A';
                     
-                    // Se asegura de mostrar al menos 0.1% visualmente aunque sea casi 0
-                    const percentage = Math.max(0.1, (bytes / limitBytes) * 100); 
-                    const actualPercentage = ((bytes / limitBytes) * 100).toFixed(2);
-
-                    let displaySize = '';
-                    if (bytes < 1024) displaySize = bytes + ' B';
-                    else if (bytes < 1048576) displaySize = (bytes / 1024).toFixed(1) + ' KB';
-                    else displaySize = (bytes / 1048576).toFixed(2) + ' MB';
-
-                    usageBar.style.width = percentage + '%';
-                    usageText.innerText = `${displaySize} (${actualPercentage}%)`;
-
-                    // Cambio de semáforo de color si el usuario escalara masivamente
-                    if (percentage > 80) usageBar.className = 'h-full bg-red-500 rounded-full transition-all duration-500 shadow-sm';
-                    else if (percentage > 50) usageBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-500 shadow-sm';
-                    else usageBar.className = 'h-full bg-blue-500 rounded-full transition-all duration-500 shadow-sm';
-                }
-
-            } catch (e) {
-                console.warn("[APEX SYS] Fricción estimando la cuota de Firebase.", e);
+                    html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full ${isCurrent ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0"><i class="fa-solid fa-user-shield text-[14px]"></i></div>
+                            <div class="flex flex-col">
+                                <p class="text-[11px] font-black uppercase text-slate-800">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
+                                <p class="text-[9px] font-bold text-slate-500 mt-0.5">${data.email}</p>
+                                <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5"><i class="fa-solid fa-database mr-1 text-blue-400"></i>${sizeKB} KB • Sync: ${lastSync}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${!isCurrent ? `<button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                            <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                        </div>
+                    </div>`;
+                });
+                list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay usuarios registrados en Firebase.</p>';
+            } catch(e) {
+                list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.</p>';
             }
         }
 
