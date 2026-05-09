@@ -3754,7 +3754,73 @@
             saveState(); updateDashboard(); switchTab('loans'); alert(`✅ Cuota pagada correctamente.`);
         }
 
-        // --- FIN MOTOR P2P BÁSICO (PURGADO POR REDUNDANCIA, MANTENIDO EN RADAR INFERIOR) ---
+        function openLinkSharedModal() { const m = $id('shared-account-modal'); if(m) m.classList.remove('hidden'); }
+        function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
+
+        function processSharedToken() {
+            const tokenInput = $id('shared-token-input');
+            if(!tokenInput) return;
+            const token = tokenInput.value.trim();
+            if(!token.startsWith('nx_')) return alert("Token inválido.");
+            try {
+                const b64 = token.substring(3);
+                const shareData = JSON.parse(atob(b64));
+                if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
+                
+                // Evitar duplicar cuentas vinculadas
+                if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
+                    return alert("Esta bóveda ya está vinculada a tu cuenta.");
+                }
+
+                const newAcc = { 
+                    id: 'acc_' + Date.now(), 
+                    name: '👥 ' + shareData.name, 
+                    currency: shareData.currency, 
+                    balance: 0, 
+                    type: 'liquid', 
+                    isShared: true, 
+                    remoteId: shareData.vaultId,
+                    syncedOnce: false // APEX FIX: Bloqueo anti-wipe para el que se une, hasta que descargue.
+                };
+                state.accounts.push(newAcc);
+                
+                // Guardado estrictamente local sin disparar triggerCloudSync() 
+                if(currentUser) NexusIDB.saveState(currentUser, state);
+                
+                // Llamamos a la función de escucha P2P de inmediato
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+                
+                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
+                closeLinkSharedModal();
+                updateDashboard();
+                if (state.activeTab === 'accounts') renderAccountsTab();
+                
+            } catch(e) {
+                console.error("[APEX P2P] Error decodificando token:", e);
+                alert("El token está corrupto o mal formado.");
+            }
+        }
+
+        function generateShareTokenForAccount(accId) {
+            const acc = state.accounts.find(a => a.id === accId);
+            if(!acc) return;
+            
+            // APEX FIX: Obtener el ID remoto correcto para que ambos celulares apunten al mismo archivo en Firebase
+            const targetRemoteId = acc.remoteId || acc.id; 
+            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency };
+            const token = 'nx_' + btoa(JSON.stringify(payload));
+            
+            // Hack para copiar al portapapeles en iOS/Web
+            const temp = document.createElement("textarea");
+            temp.value = token;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            document.body.removeChild(temp);
+            
+            alert("✅ Token copiado al portapapeles:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio. Tu socio debe presionar el botón morado (P2P) para vincular la cuenta.");
+        }
+        // --- FIN MOTOR P2P ---
 
         function saveCCPurchase(e, forceOverdraft = false, overdraftData = null) { 
             if(e && typeof e.preventDefault === 'function') e.preventDefault(); 
