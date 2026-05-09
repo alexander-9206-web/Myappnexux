@@ -2241,10 +2241,10 @@
                 const quotas = tx.apQuotas || 4; 
                 const baseDate = getSafeDate(tx.date);
                 const stD = tx.apFreq === 'fortnightly' ? 14 : 7; 
+                const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
                 
                 const origIA = (tx.original_amount || tx.amount) / quotas;
                 const iA = convertCurrency(origIA, tx.original_currency || tx.currency, cDisplay);
-                const targetDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
                 
                 for(let i = (tx.apPaid || 0); i < quotas; i++) { 
                     let d = new Date(baseDate.getTime());
@@ -2252,10 +2252,9 @@
                     
                     if (i > 0) {
                         let currentDay = d.getDay();
-                        let dayDiff = targetDay - currentDay;
-                        if (dayDiff > 3) dayDiff -= 7;
-                        else if (dayDiff < -3) dayDiff += 7;
-                        d.setDate(d.getDate() + dayDiff);
+                        let dist = apPayDay - currentDay;
+                        if (dist < 0) dist += 7;
+                        d.setDate(d.getDate() + dist);
                     }
                     
                     d.setHours(12, 0, 0, 0); // APEX FIX: Fija a mediodía para evitar que el timezone brinque la fecha cronológica hacia atrás
@@ -3710,7 +3709,8 @@
         function reconcilePastAfterpay() {
             if(!confirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.")) return;
             let updated = 0; const now = new Date(); now.setHours(0,0,0,0);
-            const targetDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+            const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+            
             state.tx.forEach(tx => {
                 if (tx.type === 'afterpay' && (tx.apPaid || 0) < (tx.apQuotas || 4)) {
                     const quotas = tx.apQuotas || 4; 
@@ -3723,10 +3723,9 @@
                         
                         if (i > 0) {
                             let currentDay = d.getDay();
-                            let dayDiff = targetDay - currentDay;
-                            if (dayDiff > 3) dayDiff -= 7;
-                            else if (dayDiff < -3) dayDiff += 7;
-                            d.setDate(d.getDate() + dayDiff);
+                            let dist = apPayDay - currentDay;
+                            if (dist < 0) dist += 7;
+                            d.setDate(d.getDate() + dist);
                         }
                         
                         d.setHours(12, 0, 0, 0);
@@ -4165,7 +4164,7 @@
             
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
-            // APEX FIX: Mapeo Aislado Dinámico SSoT (Se oculta el contrato madre Afterpay para ver solo el abono real inmediato y las 3 proyecciones)
+            // APEX FIX: Mapeo Aislado Dinámico SSoT (Contrato madre Afterpay oculto, solo se ven los abonos reales)
             let rawTxList = state.tx
                 .filter(t => !t.isCCPurchase && t.type !== 'afterpay')
                 .map(t => {
@@ -4203,7 +4202,10 @@
                 const rType = t.renderType || t.type; // APEX FIX: Filtramos según comportamiento visual para no confundir al usuario
 
                 if(tp !== 'all') {
-                    if (tp === 'afterpay' && !(t.cat || '').includes('Afterpay')) return false;
+                    if (tp === 'afterpay') {
+                        const isAp = rType === 'afterpay' || (t.cat || '').includes('Afterpay') || (t.note || '').includes('[Abono]') || (t.note || '').includes('[Pago Inicial]');
+                        if (!isAp) return false;
+                    }
                     else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
                     else if (tp === 'single_debt' && !(t.cat || '').includes('Pendiente Único')) return false;
                     else if (['afterpay', 'debt', 'single_debt'].indexOf(tp) === -1 && rType !== tp) return false;
@@ -4287,12 +4289,12 @@
                 let cT = '', iB = '', iClass = '';
                 if (rType === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
                 else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (rType === 'expense' && t.cat && t.cat.includes('Afterpay')) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+                else if (rType === 'expense' && ((t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
                 else if (rType === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
                 else if (rType === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
-                const sign = t.type === 'expense' ? '-' : (t.type === 'income' ? '+' : ''); // APEX FIX: Contrato madre neutro
+                const sign = (t.type === 'expense' || t.type === 'afterpay') ? '-' : (t.type === 'income' ? '+' : ''); // APEX FIX: Fuerza el signo negativo al contrato madre visualmente
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
@@ -4316,10 +4318,12 @@
                     }
                     
                     pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; 
-                } else if (t.type === 'afterpay') {
-                    pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">CONTRATO BNPL</span>`; 
+                } else if (rType === 'afterpay') {
+                    pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`; 
                 } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
-                    pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200">AMORTIZADO</span>`; 
+                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`; 
+                } else if (t.note && t.note.includes('[Pago Inicial]')) {
+                    pBadge = `<span class="text-[8px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full ml-2 border border-indigo-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>PAGO INICIAL</span>`;
                 } else if (t.note && t.note.includes('[TC]')) {
                     pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">CUOTA TC</span>`;
                 }
@@ -4446,12 +4450,13 @@
                             let diff = targetPaid - (oldTx.apPaid || 0);
                             let apAcc = state.accounts.find(a => a.id === accId); 
                             if (apAcc) {
-                                let deductAmt = oldTx.amount / oldTx.apQuotas;
-                                if(apAcc.currency !== oldTx.currency) deductAmt = convertCurrency(deductAmt, oldTx.currency, apAcc.currency);
+                                let rawDeductAmt = (oldTx.original_amount || oldTx.amount) / oldTx.apQuotas;
+                                let deductAmt = rawDeductAmt;
+                                if(apAcc.currency !== oldTx.currency) deductAmt = convertCurrency(rawDeductAmt, oldTx.currency, apAcc.currency);
                                 for(let i=0; i<diff; i++) {
                                     oldTx.apPaid = (oldTx.apPaid || 0) + 1;
                                     if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                    const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: oldTx.cat, accId: apAcc.id, date: new Date().toISOString(), note: `[Abono] ${oldTx.note ? oldTx.note : oldTx.cat.substring(2).trim()} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
+                                    const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: oldTx.cat, accId: apAcc.id, date: new Date().toISOString(), note: `[Abono] ${oldTx.note ? oldTx.note : oldTx.cat.substring(2).trim()} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: oldTx.currency, costType: 'fixed' });
                                     if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
                                     state.tx.push(apPayTx); saveCloudTx(apPayTx);
                                 }
@@ -4506,7 +4511,7 @@
                     const pDate = new Date(`${date}T12:00:00`);
                     
                     const stD = newTx.apFreq === 'fortnightly' ? 14 : 7;
-                    const targetDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+                    const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
 
                     for (let i = 0; i < 4; i++) {
                         let d = new Date(pDate.getTime());
@@ -4515,11 +4520,11 @@
                         
                         if (i > 0) {
                             let currentDay = d.getDay();
-                            let dayDiff = targetDay - currentDay;
-                            if (dayDiff > 3) dayDiff -= 7;
-                            else if (dayDiff < -3) dayDiff += 7;
-                            d.setDate(d.getDate() + dayDiff);
+                            let dist = apPayDay - currentDay;
+                            if (dist < 0) dist += 7;
+                            d.setDate(d.getDate() + dist);
                         }
+                        
                         d.setHours(0,0,0,0);
                         
                         if (d < todayD) {
@@ -4546,12 +4551,17 @@
                     } else if (movementsToGenerate > 0) {
                         let apAcc = state.accounts.find(a => a.id === accId); 
                         if (apAcc) {
-                            let deductAmt = newTx.amount / newTx.apQuotas;
-                            if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(deductAmt, newTx.currency, apAcc.currency);
+                            let rawDeductAmt = (newTx.original_amount || newTx.amount) / newTx.apQuotas;
+                            let deductAmt = rawDeductAmt;
+                            if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(rawDeductAmt, newTx.currency, apAcc.currency);
                             for(let i=0; i<movementsToGenerate; i++) {
                                 newTx.apPaid += 1;
                                 if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `[Abono] ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
+                                
+                                let isUpfront = (newTx.apPaid === 1 && new Date(newTx.date).toDateString() === new Date().toDateString());
+                                let prefix = isUpfront ? '[Pago Inicial]' : '[Abono]';
+                                
+                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `${prefix} ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: newTx.currency, costType: 'fixed' });
                                 
                                 if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
                                 
@@ -6107,7 +6117,7 @@
                 const targetDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
 
                 const baseNote = tx.note || tx.cat.substring(2);
-                let paidTxs = state.tx.filter(t => t.type === 'expense' && (t.cat||'').includes('Afterpay') && (t.note||'').includes('[Abono Realizado]') && (t.note||'').includes(baseNote)).sort((a,b) => new Date(a.date) - new Date(b.date));
+                let paidTxs = state.tx.filter(t => t.type === 'expense' && (t.cat||'').includes('Afterpay') && (t.note||'').match(/\[(Abono Realizado|Abono|Pago Inicial)\]/) && (t.note||'').includes(baseNote)).sort((a,b) => new Date(a.date) - new Date(b.date));
 
                 let html = '<h4 class="text-[9px] font-black uppercase text-slate-400 mt-2 mb-1 tracking-widest">Tabla de Amortización</h4><div class="space-y-2">';
                 
@@ -6133,12 +6143,11 @@
                         
                         if ((i - 1) > 0) {
                             let currentDay = d.getDay();
-                            let dayDiff = targetDay - currentDay;
-                            if (dayDiff > 3) dayDiff -= 7;
-                            else if (dayDiff < -3) dayDiff += 7;
-                            d.setDate(d.getDate() + dayDiff);
+                            let dist = targetDay - currentDay;
+                            if (dist < 0) dist += 7;
+                            d.setDate(d.getDate() + dist);
                         }
-
+                        
                         dateStr = d.toLocaleDateString('es-CO', {day:'numeric', month:'short', year:'numeric'}) + ' (Proy)';
                         accNameStr = 'Pendiente';
                     }
@@ -6167,10 +6176,15 @@
             let acc = state.accounts.find(a => a.type === 'liquid' && a.currency === tx.currency);
             if(!acc) acc = state.accounts.find(a => a.type === 'liquid');
             if(!acc) return alert("Necesitas una cuenta líquida con saldo para el pago.");
-            let deductAmt = tx.amount / quotas;
-            if(acc.currency !== tx.currency) deductAmt = convertCurrency(deductAmt, tx.currency, acc.currency);
-            tx.apPaid = (tx.apPaid || 0) + 1; acc.balance -= deductAmt;
-            const newTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: tx.cat, accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${tx.note ? tx.note : tx.cat.substring(2).trim()} (${tx.apPaid}/${quotas})`, currency: acc.currency });
+            
+            let rawDeductAmt = (tx.original_amount || tx.amount) / quotas;
+            let deductAmt = rawDeductAmt;
+            if(acc.currency !== tx.currency) deductAmt = convertCurrency(rawDeductAmt, tx.currency, acc.currency);
+            
+            tx.apPaid = (tx.apPaid || 0) + 1; 
+            if (acc.type === 'credit') acc.balance += deductAmt; else acc.balance -= deductAmt;
+            
+            const newTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: tx.cat, accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${tx.note ? tx.note : tx.cat.substring(2).trim()} (${tx.apPaid}/${quotas})`, currency: tx.currency, costType: 'fixed' });
             
             // APEX FIX: Trazabilidad P2P
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
@@ -6426,7 +6440,7 @@
 
         function generateFutureEvents() {
             const events = []; 
-            const enriched = getEnrichedTx().filter(t => t.isProjected || (t.type === 'expense' && t.cat && t.cat.includes('Afterpay') && t.note && t.note.includes('[Abono Realizado]')));
+            const enriched = getEnrichedTx().filter(t => t.isProjected || (t.type === 'expense' && t.cat && t.cat.includes('Afterpay') && t.note && t.note.match(/\[(Abono Realizado|Abono|Pago Inicial)\]/)));
             enriched.forEach(t => {
                 const isAp = t.cat.includes('Afterpay');
                 const isAmortized = !t.isProjected;
@@ -6602,6 +6616,9 @@
             }
             
             applyThemeCSS(); saveState(); updateDashboard();
+            if(state.activeTab === 'afterpay') renderAfterpay();
+            if(state.activeTab === 'calendar') renderCalendar();
+            if(state.activeTab === 'database') renderDatabase();
         }
         
         // APEX FIX: Directorio de Usuarios sincronizado con Firebase
