@@ -1402,6 +1402,26 @@
             </div>
         </div>
 
+        <!-- MODAL PROMPT GENERAL (Reemplazo window.prompt) -->
+        <div id="ui-prompt-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-indigo-500"><i class="fa-solid fa-pen mr-2"></i>Editar</h3>
+                    <button type="button" onclick="closeUIPromptModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="space-y-4 text-left">
+                    <p id="ui-prompt-msg" class="text-xs text-slate-500 font-bold leading-relaxed"></p>
+                    <input type="text" id="ui-prompt-input" class="form-input text-sm bg-slate-50 border-slate-200 mt-2 w-full outline-none focus:border-indigo-500 transition-colors">
+                    <input type="hidden" id="ui-prompt-action">
+                    <input type="hidden" id="ui-prompt-payload">
+                </div>
+                <div class="flex gap-2 mt-4">
+                    <button type="button" onclick="executeUIPrompt()" class="flex-1 bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Guardar</button>
+                    <button type="button" onclick="closeUIPromptModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL PROYECTOS -->
         <div id="new-project-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-lg md:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
@@ -1684,6 +1704,63 @@
                 else if(action === 'cc_purchase_overdraft') saveCCPurchase(null, true);
                 else if(action === 'delete_tx') deleteTx(null, payload, true);
             }, 300);
+        }
+
+        // APEX FIX: Sistema In-DOM de Prompts (Reemplazo Fricción Cero para window.prompt)
+        function triggerUIPrompt(msg, defaultVal, action, payload = '') {
+            const mod = $id('ui-prompt-modal');
+            const msgEl = $id('ui-prompt-msg');
+            const inputEl = $id('ui-prompt-input');
+            if(!mod || !msgEl || !inputEl) return;
+            msgEl.innerText = msg;
+            inputEl.value = defaultVal || '';
+            $id('ui-prompt-action').value = action;
+            $id('ui-prompt-payload').value = payload;
+            mod.classList.remove('hidden');
+            setTimeout(() => inputEl.focus(), 100);
+        }
+
+        function closeUIPromptModal() {
+            const mod = $id('ui-prompt-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function executeUIPrompt() {
+            const action = $id('ui-prompt-action').value;
+            const payload = $id('ui-prompt-payload').value;
+            const val = $id('ui-prompt-input').value.trim();
+            closeUIPromptModal();
+            setTimeout(() => {
+                if(action === 'edit_parent_cat') executeEditParentCat(payload, val);
+            }, 300);
+        }
+        
+        function executeEditParentCat(currentParent, newName) {
+            if(newName && newName !== currentParent) {
+                const type = $id('f-type').value;
+                if(state.catParents.global) {
+                    const idx = state.catParents.global.indexOf(currentParent);
+                    if(idx > -1) state.catParents.global[idx] = newName;
+                }
+                if(state.categories.global) {
+                    state.categories.global = state.categories.global.map(c => {
+                       const m = c.match(/\[(.*?)\]\s*(.*)/);
+                       if (m && m[1] === currentParent) return `[${newName}] ${m[2]||''}`.trim();
+                       if (c === currentParent) return newName;
+                       return c;
+                    });
+                }
+                state.tx.forEach(t => {
+                   if (!t.cat) return;
+                   const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
+                   if (m && m[1] === currentParent) t.cat = `[${newName}] ${m[2]||''}`.trim();
+                   else if (t.cat === currentParent) t.cat = newName;
+                });
+                saveState(); updateDashboard(); openForm(type, $id('f-id').value);
+                if(typeof updateCatManageView === 'function') updateCatManageView();
+                if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
+            }
         }
 
         // APEX FIX: Diccionarios Base en blanco para permitir únicamente categorías manuales
@@ -4039,33 +4116,10 @@
                 const parentSel = $id('f-cat-parent-select');
                 const currentParent = parentSel ? parentSel.value : '';
                 if(!currentParent || currentParent === 'ADD_NEW_CAT') return;
-                const newName = prompt(`Editar enlace/nombre de la Categoría Padre:`, currentParent);
-                if(newName && newName.trim() !== '' && newName !== currentParent) {
-                    const type = $id('f-type').value;
-                    if(state.catParents.global) {
-                        const idx = state.catParents.global.indexOf(currentParent);
-                        if(idx > -1) state.catParents.global[idx] = newName.trim();
-                    }
-                    if(state.categories.global) {
-                        state.categories.global = state.categories.global.map(c => {
-                           const m = c.match(/\[(.*?)\]\s*(.*)/);
-                           if (m && m[1] === currentParent) return `[${newName.trim()}] ${m[2]||''}`.trim();
-                           if (c === currentParent) return newName.trim();
-                           return c;
-                        });
-                    }
-                    state.tx.forEach(t => {
-                       const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
-                       if (m && m[1] === currentParent) t.cat = `[${newName.trim()}] ${m[2]||''}`.trim();
-                       else if (t.cat === currentParent) t.cat = newName.trim();
-                    });
-                    saveState(); updateDashboard(); openForm(type, $id('f-id').value);
-                    // APEX FIX: Sincronización en tiempo real con Configuración y Auditoría
-                    if(typeof updateCatManageView === 'function') updateCatManageView();
-                    if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
-                } else {
-                    sel.value = ''; inp.value = '';
-                }
+                
+                // APEX FIX: Prompt asíncrono In-DOM que previene el freeze en iOS
+                triggerUIPrompt(`Editar enlace/nombre de la Categoría Padre:`, currentParent, 'edit_parent_cat', currentParent);
+                sel.value = ''; // Reseteamos el selector para evitar bloqueos visuales
             } else {
                 newSubCont.classList.add('hidden');
             }
@@ -4164,29 +4218,9 @@
         
         function handleCatChange() {
             const cS = $id('f-cat');
-            if (cS.value === 'ADD_NEW_CAT') {
-                const type = $id('f-type').value;
-                const parent = prompt("Nombre de la Categoría Principal (Ej: Transporte):");
-                if (!parent) { cS.selectedIndex = 0; return; }
-                const sub = prompt(`Subcategoría para [${parent}] (Ej: Gasolina):`);
-                if (!sub) { cS.selectedIndex = 0; return; }
-                const emoji = prompt("Emoji para la categoría (Opcional, ej: 🚗):") || "";
-                const fullCatName = `${emoji} [${parent}] ${sub}`.trim();
-                
-                if(!state.categories.global) state.categories.global = [];
-                if(!state.categories.global.includes(fullCatName)) {
-                    state.categories.global.push(fullCatName);
-                    saveState();
-                    if(typeof populateFilters === 'function') populateFilters();
-                    if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
-                    if(typeof renderAdvancedCategories === 'function') renderAdvancedCategories();
-                }
-                
-                cS.innerHTML = '';
-                const cats = state.categories.global || [];
-                cats.forEach(c => { cS.innerHTML += `<option value="${c}">${c}</option>`; });
-                cS.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-purple-600">➕ Agregar nueva categoría...</option>`;
-                cS.value = fullCatName;
+            if (cS && cS.value === 'ADD_NEW_CAT') {
+                alert("Por favor usa el administrador inteligente de categorías para añadir o modificar elementos.");
+                cS.selectedIndex = 0;
             }
         }
 
