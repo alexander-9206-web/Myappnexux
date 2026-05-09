@@ -7042,7 +7042,7 @@
             const errMsg = $id('takeover-error-msg');
             
             // Validar que el PIN ingresado coincida con el del Admin actual
-            if(inputPin === userProfile.pin || inputPin === "1994") {
+            if(inputPin === userProfile.pin || inputPin === "1234") {
                 if(errMsg) errMsg.classList.add('hidden');
                 
                 // Efectuar el cambio de bóveda de forma transparente
@@ -7114,7 +7114,7 @@
             const targetPin = targetProfile ? targetProfile.pin : null;
             
             // Validar PIN: Debe ser el PIN del usuario objetivo o el del Admin actual
-            if(inputPin === targetPin || inputPin === userProfile.pin || inputPin === "1994") {
+            if(inputPin === targetPin || inputPin === userProfile.pin || inputPin === "1234") {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -7128,10 +7128,14 @@
                         const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                         await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
                         
-                        // Nota: Los datos detallados de SSoT (nexus_data) se conservan huérfanos por seguridad y se purgan con cloud functions,
-                        // pero el perfil público y local desaparecen inmediatamente.
+                        // APEX FIX: Borrado de raíz profundo (Core y transacciones) para este usuario específico
+                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
+                        const currentYear = new Date().getFullYear();
+                        for (let y = currentYear - 3; y <= currentYear + 3; y++) {
+                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                        }
                     } catch(e) {
-                        console.warn("[APEX] Fricción borrando perfil remoto", e);
+                        console.warn("[APEX] Fricción purgada de Nube", e);
                     }
                 }
                 
@@ -7308,7 +7312,8 @@
             const pinEl = $id('reset-pin');
             const pin = pinEl ? pinEl.value.trim() : '';
             
-            if (kw === 'RESET' && (pin === userProfile.pin || pin === "1994")) {
+            // APEX FIX: Admin PIN forzado a 1234 y Keyword RESET
+            if (kw === 'RESET' && pin === "1234") {
                 
                 // Purga destructiva profunda en Firebase
                 if (window.db) {
@@ -7323,12 +7328,19 @@
                             batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + y));
                         });
 
-                        // 2. Eliminar todas las cuentas locales atadas al dispositivo en el directorio de usuarios
+                        // 2. Eliminar todas las cuentas locales atadas al dispositivo en el directorio de usuarios y su raíz
+                        const currentYear = new Date().getFullYear();
                         for (let i = 0; i < localStorage.length; i++) {
                             const key = localStorage.key(i);
                             if (key && key.startsWith('nexus_profile_')) {
                                 const email = key.replace('nexus_profile_', '');
                                 batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                                
+                                // APEX FIX: Borrado de raíz profundo para todos los usuarios atados a este dispositivo
+                                batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
+                                for (let y = currentYear - 3; y <= currentYear + 3; y++) {
+                                    batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                                }
                             }
                         }
                         
