@@ -4491,29 +4491,64 @@
 
                 let initialPaid = 0;
                 let isApReconMode = false;
+                let movementsToGenerate = 0;
+
                 if (type === 'afterpay') { 
                     newTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : 'weekly'; 
-                    newTx.apQuotas = ($id('f-ap-quotas') && parseInt($id('f-ap-quotas').value)) ? parseInt($id('f-ap-quotas').value) : 4; 
-                    initialPaid = ($id('f-ap-paid') && parseInt($id('f-ap-paid').value)) ? parseInt($id('f-ap-paid').value) : 1;
-                    newTx.apPaid = 0; 
+                    newTx.apQuotas = 4; // Regla estricta: Todo nuevo Afterpay genera 4 pagos
                     isApReconMode = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
+
+                    /* LÓGICA DE AMORTIZACIÓN ESTRICTA AFTERPAY */
+                    let calcPaid = 0;
+                    let calcMoves = 0;
+                    const todayD = new Date();
+                    todayD.setHours(0,0,0,0);
+                    const pDate = new Date(`${date}T12:00:00`);
+                    
+                    const stD = newTx.apFreq === 'fortnightly' ? 14 : 7;
+                    const targetDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+
+                    for (let i = 0; i < 4; i++) {
+                        let d = new Date(pDate.getTime());
+                        if (newTx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); } 
+                        else { d.setDate(d.getDate() + (i * stD)); }
+                        
+                        if (i > 0) {
+                            let currentDay = d.getDay();
+                            let dayDiff = targetDay - currentDay;
+                            if (dayDiff > 3) dayDiff -= 7;
+                            else if (dayDiff < -3) dayDiff += 7;
+                            d.setDate(d.getDate() + dayDiff);
+                        }
+                        d.setHours(0,0,0,0);
+                        
+                        if (d < todayD) {
+                            calcPaid++; // Cuota vencida: histórico sin movimiento bancario
+                        } else if (d.getTime() === todayD.getTime()) {
+                            calcPaid++;
+                            calcMoves++; // Cuota de hoy: se debita de inmediato
+                        }
+                    }
+
+                    initialPaid = calcPaid;
+                    movementsToGenerate = isApReconMode ? 0 : calcMoves;
+                    newTx.apPaid = initialPaid - movementsToGenerate; // Asignamos histórico primero
                 } 
                 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 state.tx.push(newTx); saveCloudTx(newTx);
 
-                // APEX FIX: Conciliación Estricta. Extrae el abono del balance de la cuenta seleccionada INMEDIATAMENTE
+                // APEX FIX: Amortización Automática (Solo genera movimientos bancarios para cobros de hoy, el resto $0)
                 if (type === 'afterpay' && initialPaid > 0) {
                     if (isApReconMode) {
-                        // Modo Conciliación SSoT Base Cero: Solo avanza el tracker de amortización, sin inyectar historial ni descontar de caja real.
                         newTx.apPaid = initialPaid;
                         saveCloudTx(newTx);
-                    } else {
+                    } else if (movementsToGenerate > 0) {
                         let apAcc = state.accounts.find(a => a.id === accId); 
                         if (apAcc) {
                             let deductAmt = newTx.amount / newTx.apQuotas;
                             if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(deductAmt, newTx.currency, apAcc.currency);
-                            for(let i=0; i<initialPaid; i++) {
+                            for(let i=0; i<movementsToGenerate; i++) {
                                 newTx.apPaid += 1;
                                 if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
                                 const apPayTx = buildTransactionSchema({ type: 'expense', amount: deductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `[Abono] ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: apAcc.currency, costType: 'fixed' });
@@ -4524,7 +4559,7 @@
                             }
                             saveCloudTx(newTx); 
                         } else {
-                            newTx.apPaid = initialPaid; 
+                            newTx.apPaid += movementsToGenerate; 
                             saveCloudTx(newTx);
                         }
                     }
@@ -5977,8 +6012,8 @@
             totalPendingEl.innerText = fmt(totalPending, apCurr); 
             availableEl.innerText = fmt(limit - totalPending, apCurr);
             
-            // APEX FIX: Aislamiento del filtro de ordenamiento. El calendario de pagos siempre es cronológico ascendente.
-            const projAp = getEnrichedTx().filter(t => t.cat === '🛍️ Afterpay' && t.isProjected).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            // APEX FIX: Aislamiento del filtro de ordenamiento. El calendario de pagos siempre es cronológico ascendente y captura todos los contratos vía huella ID.
+            const projAp = getEnrichedTx().filter(t => t.id && t.id.startsWith('proj_ap_') && t.isProjected).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             
             const now = new Date(); now.setHours(0,0,0,0);
             
@@ -6015,8 +6050,9 @@
             const thisWeekCountEl = $id('ap-this-week-count'); if(thisWeekCountEl) thisWeekCountEl.innerText = `${thisWeekCount} Pago${thisWeekCount !== 1 ? 's' : ''}`;
             const nextWeekCountEl = $id('ap-next-week-count'); if(nextWeekCountEl) nextWeekCountEl.innerText = `${nextWeekCount} Pago${nextWeekCount !== 1 ? 's' : ''}`;
             
-            const twTitle = $id('ap-this-week-title'); if(twTitle) twTitle.innerText = 'Corte Actual';
-            const nwTitle = $id('ap-next-week-title'); if(nwTitle) nwTitle.innerText = 'Próximo Corte';
+            const cDays = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']; const cMons = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+            const twTitle = $id('ap-this-week-title'); if(twTitle) twTitle.innerText = `Corte Actual (${cDays[cutoff1.getDay()]} ${cutoff1.getDate()} ${cMons[cutoff1.getMonth()]})`;
+            const nwTitle = $id('ap-next-week-title'); if(nwTitle) nwTitle.innerText = `Próximo Corte (${cDays[cutoff2.getDay()]} ${cutoff2.getDate()} ${cMons[cutoff2.getMonth()]})`;
 
             if (projAp.length === 0) scheduleList.innerHTML = `<p class="text-center text-[10px] text-slate-400 font-bold p-4 uppercase tracking-widest">Libre de Deuda</p>`;
             else scheduleList.innerHTML = projAp.slice(0, 15).map(t => { 
