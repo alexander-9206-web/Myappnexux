@@ -1363,6 +1363,25 @@
             </div>
         </div>
 
+        <!-- MODAL CONFIRMACION GENERAL (Reemplazo window.confirm) -->
+        <div id="ui-confirm-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-amber-100 shadow-2xl">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-amber-500"><i class="fa-solid fa-circle-question mr-2"></i>Confirmar</h3>
+                    <button type="button" onclick="closeUIConfirmModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="space-y-4 text-center">
+                    <p id="ui-confirm-msg" class="text-xs text-slate-500 font-bold leading-relaxed"></p>
+                    <input type="hidden" id="ui-confirm-action">
+                    <input type="hidden" id="ui-confirm-payload">
+                </div>
+                <div class="flex gap-2 mt-4">
+                    <button type="button" onclick="executeUIConfirm()" class="flex-1 bg-amber-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Continuar</button>
+                    <button type="button" onclick="closeUIConfirmModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL CONFIRMACION ELIMINACION NATIVA (FRICCION CERO) -->
         <div id="ui-delete-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-red-100 shadow-2xl">
@@ -1637,6 +1656,35 @@
             }, 4000);
         };
         // ==========================================
+
+        // APEX FIX: Sistema In-DOM de Confirmaciones (Reemplazo Fricción Cero para window.confirm en iOS)
+        function triggerUIConfirm(msg, action, payload = '') {
+            const mod = $id('ui-confirm-modal');
+            const msgEl = $id('ui-confirm-msg');
+            if(!mod || !msgEl) return;
+            msgEl.innerText = msg;
+            $id('ui-confirm-action').value = action;
+            $id('ui-confirm-payload').value = payload;
+            mod.classList.remove('hidden');
+        }
+
+        function closeUIConfirmModal() {
+            const mod = $id('ui-confirm-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function executeUIConfirm() {
+            const action = $id('ui-confirm-action').value;
+            const payload = $id('ui-confirm-payload').value;
+            closeUIConfirmModal();
+            setTimeout(() => {
+                if(action === 'reconcile_afterpay') reconcilePastAfterpay(true);
+                else if(action === 'tx_overdraft') saveTransaction(null, true);
+                else if(action === 'cc_purchase_overdraft') saveCCPurchase(null, true);
+                else if(action === 'delete_tx') deleteTx(null, payload, true);
+            }, 300);
+        }
 
         // APEX FIX: Diccionarios Base en blanco para permitir únicamente categorías manuales
         const DEFAULT_CATEGORIES = { global: [] };
@@ -3910,10 +3958,14 @@
         }
         // --- FIN MOTOR P2P ---
 
-        function saveCCPurchase(e) { 
-            e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
+        function saveCCPurchase(e, forceOverdraft = false) { 
+            if(e && typeof e.preventDefault === 'function') e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
-            const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
+            const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; 
+            if(amount > available && !forceOverdraft) { 
+                triggerUIConfirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`, 'cc_purchase_overdraft'); 
+                return; 
+            } 
             card.balance += amount; 
             // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
             const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
@@ -4140,8 +4192,11 @@
 
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
-        function reconcilePastAfterpay() {
-            if(!confirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.")) return;
+        function reconcilePastAfterpay(forceConfirmed = false) {
+            if(!forceConfirmed) {
+                triggerUIConfirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.", 'reconcile_afterpay');
+                return;
+            }
             let updated = 0; const now = new Date(); now.setHours(0,0,0,0);
             const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
             
@@ -4498,38 +4553,40 @@
 
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
-            if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
+            if(!force) { 
+                triggerUIConfirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.", 'delete_tx', id);
+                return;
+            }
                 
-                // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
-                const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
-                if (isSharedTx) {
-                    if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
-                    if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
-                }
+            // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
+            const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
+            if (isSharedTx) {
+                if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
+            }
 
-                // APEX FIX: Reversión contable precisa para Transferencias
-                if (tx.type === 'transfer') {
-                    const oOrig = state.accounts.find(a => a.id === tx.accId);
-                    const oDest = state.accounts.find(a => a.id === tx.toAccId);
-                    if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
-                    if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
-                } else {
-                    const acc = state.accounts.find(a => a.id === tx.accId); 
-                    if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
-                }
-                state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
-                
-                // APEX FIX: Refresco dinámico transversal
-                saveState(); updateDashboard(); 
-                if(state.activeTab === 'database') renderDatabase(); 
-                else if(state.activeTab === 'afterpay') renderAfterpay();
-                else if(state.activeTab === 'analysis') renderAnalysis();
-                else if(state.activeTab === 'report') renderReport();
-                else if(state.activeTab === 'finances') renderFinancesUnified();
-                else if(state.activeTab === 'budget') renderBudgetTab();
-                else if(state.activeTab === 'calendar') renderCalendar();
-                else if(state.activeTab === 'accounts') renderAccountsTab();
-            } 
+            // APEX FIX: Reversión contable precisa para Transferencias
+            if (tx.type === 'transfer') {
+                const oOrig = state.accounts.find(a => a.id === tx.accId);
+                const oDest = state.accounts.find(a => a.id === tx.toAccId);
+                if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
+                if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
+            } else {
+                const acc = state.accounts.find(a => a.id === tx.accId); 
+                if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
+            }
+            state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
+            
+            // APEX FIX: Refresco dinámico transversal
+            saveState(); updateDashboard(); 
+            if(state.activeTab === 'database') renderDatabase(); 
+            else if(state.activeTab === 'afterpay') renderAfterpay();
+            else if(state.activeTab === 'analysis') renderAnalysis();
+            else if(state.activeTab === 'report') renderReport();
+            else if(state.activeTab === 'finances') renderFinancesUnified();
+            else if(state.activeTab === 'budget') renderBudgetTab();
+            else if(state.activeTab === 'calendar') renderCalendar();
+            else if(state.activeTab === 'accounts') renderAccountsTab();
         }
 
         // AUDITORÍA
@@ -4790,8 +4847,8 @@
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
 
-        function saveTransaction(e) { 
-            e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
+        function saveTransaction(e, forceOverdraft = false) { 
+            if(e && typeof e.preventDefault === 'function') e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
             const projectId = $id('f-proj-id') ? $id('f-proj-id').value : '';
             
             const parentSel = $id('f-cat-parent-select') ? $id('f-cat-parent-select').value : '';
@@ -4848,7 +4905,10 @@
                 const termStr = $id('f-cc-term').dataset.raw; const term = parseInt(termStr);
                 if (term && term > 1) {
                     const available = (acc.limit || 0) - acc.balance; 
-                    if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`)) return; } 
+                    if(amount > available && !forceOverdraft) { 
+                        triggerUIConfirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`, 'tx_overdraft'); 
+                        return; 
+                    } 
                     acc.balance += amount; 
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
