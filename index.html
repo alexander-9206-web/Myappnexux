@@ -896,6 +896,25 @@
             <!-- APEX FIX: Indicadores de Tareas (KPIs) -->
             <div id="tasks-kpi-container" class="grid grid-cols-3 gap-3 mb-2"></div>
 
+            <!-- APEX FIX: Módulo de Pagos de Servicios (PSE) Integrado -->
+            <div class="mt-4 mb-4">
+                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-solid fa-building-columns mr-1 text-emerald-500"></i> Centro de Pagos Rápido (PSE)</h3>
+                <div class="flex gap-3 overflow-x-auto hide-scrollbar px-2 pb-2 snap-x">
+                    <button onclick="redirigirPago('celsia')" type="button" title="Pago PSE Celsia" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-amber-300 transition-colors active:scale-95 snap-center">
+                        <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center shadow-sm"><i class="fa-solid fa-bolt text-[12px]"></i></div>
+                        <span class="text-[8px] font-black uppercase text-slate-600">Energía (Celsia)</span>
+                    </button>
+                    <button onclick="redirigirPago('internet')" type="button" title="Pago PSE Internet" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-blue-300 transition-colors active:scale-95 snap-center">
+                        <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center shadow-sm"><i class="fa-solid fa-wifi text-[12px]"></i></div>
+                        <span class="text-[8px] font-black uppercase text-slate-600">Internet (Claro)</span>
+                    </button>
+                    <button onclick="redirigirPago('dian')" type="button" title="Pago PSE DIAN" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-emerald-300 transition-colors active:scale-95 snap-center">
+                        <div class="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-sm"><i class="fa-solid fa-file-invoice-dollar text-[12px]"></i></div>
+                        <span class="text-[8px] font-black uppercase text-slate-600">Impuestos DIAN</span>
+                    </button>
+                </div>
+            </div>
+
             <!-- APEX FIX: Diario Semanal (Lunes a Domingo) Reubicado arriba del Calendario -->
             <div>
                 <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-solid fa-calendar-week mr-1 text-indigo-400"></i> Agenda Semanal</h3>
@@ -2580,10 +2599,15 @@
             const preview = $id('fa-logo-preview');
             if (!preview) return;
             if (urlInput) {
-                let domain = urlInput.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
-                if (domain) {
-                    const logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
-                    preview.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-cover">`;
+                let logoUrl = urlInput;
+                const lowerUrl = urlInput.toLowerCase();
+                // APEX FIX: Detección inteligente de activos (Imágenes directas o Firebase) vs Dominios
+                if (!(lowerUrl.match(/\.(jpeg|jpg|gif|png|svg|webp)(\?.*)?$/) || lowerUrl.includes('firebasestorage') || lowerUrl.includes('drive.google') || lowerUrl.includes('image'))) {
+                    let domain = urlInput.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+                    if (domain) logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+                }
+                if (logoUrl) {
+                    preview.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<i class=\\'fa-solid fa-link text-slate-300 text-[10px]\\'></i>';">`;
                     return;
                 }
             }
@@ -3234,8 +3258,8 @@
             if(el.classList.contains('hidden')) {
                 el.classList.remove('hidden'); el.classList.add('flex');
                 
-                // APEX FIX: Interceptar Transferencias como Entradas (toAccId) o Salidas (accId)
-                const txs = state.tx.filter(t => t.accId === id || (t.type === 'transfer' && t.toAccId === id)).sort((a,b) => new Date(b.date) - new Date(a.date));
+                // APEX FIX: Interceptar Transferencias como Entradas (toAccId) o Salidas (accId) y ocultar el contrato madre Afterpay
+                const txs = state.tx.filter(t => (t.accId === id || (t.type === 'transfer' && t.toAccId === id)) && t.type !== 'afterpay').sort((a,b) => new Date(b.date) - new Date(a.date));
                 
                 if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
                 
@@ -3265,7 +3289,8 @@
         function setHistFilter(period) { currentHistPeriod = period; $qAll('#account-history-modal .filter-chip').forEach(b => b.classList.remove('active')); const btn = $id('hf-' + period); if(btn) btn.classList.add('active'); renderHistAccList(); }
         function renderHistAccList() {
             const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return; const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
-            let txs = state.tx.filter(t => t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId));
+            // APEX FIX: Ocultar el contrato madre de Afterpay en el historial detallado de la cuenta
+            let txs = state.tx.filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
             const now = new Date();
             if(currentHistPeriod === '30d') { const past30 = new Date(now.getTime() - 30 * 86400000); txs = txs.filter(t => new Date(t.date) >= past30); } else if(currentHistPeriod === 'month') { txs = txs.filter(t => new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()); } else if(currentHistPeriod === 'year') { txs = txs.filter(t => new Date(t.date).getFullYear() === now.getFullYear()); }
             txs.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -3410,8 +3435,14 @@
             const bankUrl = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
             let logoUrl = null;
             if (bankUrl) {
-                let domain = bankUrl.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
-                if (domain) logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+                const lowerUrl = bankUrl.toLowerCase();
+                // APEX FIX: Guarda la URL estática sin destruirla si es un vínculo directo
+                if (lowerUrl.match(/\.(jpeg|jpg|gif|png|svg|webp)(\?.*)?$/) || lowerUrl.includes('firebasestorage') || lowerUrl.includes('drive.google') || lowerUrl.includes('image')) {
+                    logoUrl = bankUrl;
+                } else {
+                    let domain = bankUrl.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+                    if (domain) logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+                }
             }
 
             const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; 
@@ -5193,6 +5224,23 @@
         let taskCalMonthOffset = 0;
         let taskCalSelectedDate = null;
         let taskPriorityFilter = 'all'; // APEX FIX: Estado del fichero de prioridades
+
+        // --- MÓDULO DE PAGOS PSE ---
+        const enlacesPagosPSE = {
+            'celsia': 'https://www.zonapagos.com/t_celsia/pagos.asp',
+            'internet': 'https://mi.claro.com.co/pagos',
+            'dian': 'https://muisca.dian.gov.co/WebRutMuisca/DefLogin.faces'
+        };
+
+        function redirigirPago(servicio) {
+            const url = enlacesPagosPSE[servicio];
+            if (url) {
+                window.open(url, '_blank');
+            } else {
+                console.error("[APEX PSE] Servicio no configurado");
+            }
+        }
+        // ---------------------------
 
         function setTaskPriorityFilter(priority) {
             taskPriorityFilter = priority;
