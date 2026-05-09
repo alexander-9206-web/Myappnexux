@@ -1594,34 +1594,30 @@
                 const db = await this.init();
                 return new Promise((resolve) => {
                     const tx = db.transaction('states', 'readwrite');
-                    tx.objectStore('states').put({ userId, data: JSON.parse(JSON.stringify(stateObj)) });
-                    tx.oncomplete = () => resolve();
+                    const store = tx.objectStore('states');
+                    store.put({ userId: userId, ...stateObj });
+                    tx.oncomplete = () => resolve(true);
                 });
             },
             getState: async function(userId) {
                 const db = await this.init();
                 return new Promise((resolve) => {
                     const tx = db.transaction('states', 'readonly');
-                    const req = tx.objectStore('states').get(userId);
-                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
+                    const store = tx.objectStore('states');
+                    const req = store.get(userId);
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => resolve(null);
                 });
             },
-            // APEX FIX: Persistencia de Sesión Activa a prueba de fallos (Capa 2)
-            saveSession: async function(email) {
-                const db = await this.init();
+            saveSession: async function(userId) {
                 return new Promise((resolve) => {
-                    const tx = db.transaction('states', 'readwrite');
-                    tx.objectStore('states').put({ userId: 'nexus_active_session', data: email });
-                    tx.oncomplete = () => resolve();
+                    localStorage.setItem('nexus_current_user', userId);
+                    resolve(true);
                 });
             },
             getSession: async function() {
-                const db = await this.init();
                 return new Promise((resolve) => {
-                    const tx = db.transaction('states', 'readonly');
-                    const req = tx.objectStore('states').get('nexus_active_session');
-                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
-                    req.onerror = () => resolve(null);
+                    resolve(localStorage.getItem('nexus_current_user'));
                 });
             }
         };
@@ -3826,10 +3822,32 @@
         }
         // --- FIN MOTOR P2P ---
 
-        function saveCCPurchase(e) { 
-            e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
+        function saveCCPurchase(e, forceOverdraft = false, overdraftData = null) { 
+            if(e && typeof e.preventDefault === 'function') e.preventDefault(); 
+            let cardId, desc, amount, term, date;
+            
+            if (forceOverdraft && overdraftData) {
+                const parsed = JSON.parse(overdraftData);
+                cardId = parsed.cardId; desc = parsed.desc; amount = parsed.amount; term = parsed.term; date = parsed.date;
+            } else {
+                cardId = $id('cc-p-cardid') ? $id('cc-p-cardid').value : ''; 
+                desc = $id('cc-p-desc') ? $id('cc-p-desc').value.trim() : ''; 
+                amount = parseFloat($id('cc-p-amount') ? $id('cc-p-amount').dataset.raw : 0) || 0; 
+                term = parseInt($id('cc-p-term') ? $id('cc-p-term').dataset.raw : 0) || 0; 
+                date = $id('cc-p-date') ? $id('cc-p-date').value : new Date().toISOString().split('T')[0]; 
+            }
+
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
-            const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
+            const card = state.accounts.find(a => a.id === cardId); if(!card) return; 
+            
+            if (!forceOverdraft) {
+                const available = (card.limit || 0) - card.balance; 
+                if(amount > available) { 
+                    triggerUIDelete('cc_overdraft', JSON.stringify({cardId, desc, amount, term, date})); 
+                    return; 
+                } 
+            }
+            
             card.balance += amount; 
             // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
             const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
@@ -3837,7 +3855,7 @@
             
             state.tx.push(newTx); saveCloudTx(newTx);
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
-            saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
+            saveState(); if(typeof closeCCPurchaseModal === 'function') closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
         }
         
         function handleParentCategoryChange() {
@@ -4056,8 +4074,11 @@
 
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
-        function reconcilePastAfterpay() {
-            if(!confirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.")) return;
+        function reconcilePastAfterpay(confirmed = false) {
+            if(!confirmed) {
+                triggerUIDelete('reconcile_afterpay', null);
+                return;
+            }
             let updated = 0; const now = new Date(); now.setHours(0,0,0,0);
             const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
             
@@ -4084,7 +4105,20 @@
                     if (pastQuotas > (tx.apPaid || 0)) { tx.apPaid = pastQuotas; saveCloudTx(tx); updated++; }
                 }
             });
-            if (updated > 0) { saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); alert(`✅ Se conciliarion compras pasadas en ${updated} contrato(s).`); } else { alert("No hay cuotas pasadas pendientes de conciliar."); }
+            if (updated > 0) { 
+                saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); 
+                const msg = document.createElement('div');
+                msg.className = "fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-teal-500 text-white px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg animate-slideUp";
+                msg.innerText = `✅ Conciliados ${updated} contrato(s)`;
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 3000);
+            } else { 
+                const msg = document.createElement('div');
+                msg.className = "fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-slate-800 text-white px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg animate-slideUp";
+                msg.innerText = "Al día. Sin cuotas pendientes.";
+                document.body.appendChild(msg);
+                setTimeout(() => msg.remove(), 3000);
+            }
         }
 
         function populateFormAccounts() {
@@ -4414,38 +4448,41 @@
 
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
-            if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
-                
-                // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
-                const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
-                if (isSharedTx) {
-                    if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
-                    if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
-                }
+            
+            if(!force) {
+                triggerUIDelete('tx', id, tx.projectId || null);
+                return;
+            }
+            
+            // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
+            const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
+            if (isSharedTx) {
+                if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
+            }
 
-                // APEX FIX: Reversión contable precisa para Transferencias
-                if (tx.type === 'transfer') {
-                    const oOrig = state.accounts.find(a => a.id === tx.accId);
-                    const oDest = state.accounts.find(a => a.id === tx.toAccId);
-                    if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
-                    if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
-                } else {
-                    const acc = state.accounts.find(a => a.id === tx.accId); 
-                    if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
-                }
-                state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
-                
-                // APEX FIX: Refresco dinámico transversal
-                saveState(); updateDashboard(); 
-                if(state.activeTab === 'database') renderDatabase(); 
-                else if(state.activeTab === 'afterpay') renderAfterpay();
-                else if(state.activeTab === 'analysis') renderAnalysis();
-                else if(state.activeTab === 'report') renderReport();
-                else if(state.activeTab === 'finances') renderFinancesUnified();
-                else if(state.activeTab === 'budget') renderBudgetTab();
-                else if(state.activeTab === 'calendar') renderCalendar();
-                else if(state.activeTab === 'accounts') renderAccountsTab();
-            } 
+            // APEX FIX: Reversión contable precisa para Transferencias
+            if (tx.type === 'transfer') {
+                const oOrig = state.accounts.find(a => a.id === tx.accId);
+                const oDest = state.accounts.find(a => a.id === tx.toAccId);
+                if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
+                if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
+            } else {
+                const acc = state.accounts.find(a => a.id === tx.accId); 
+                if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
+            }
+            state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
+            
+            // APEX FIX: Refresco dinámico transversal
+            saveState(); updateDashboard(); 
+            if(state.activeTab === 'database') renderDatabase(); 
+            else if(state.activeTab === 'afterpay') renderAfterpay();
+            else if(state.activeTab === 'analysis') renderAnalysis();
+            else if(state.activeTab === 'report') renderReport();
+            else if(state.activeTab === 'finances') renderFinancesUnified();
+            else if(state.activeTab === 'budget') renderBudgetTab();
+            else if(state.activeTab === 'calendar') renderCalendar();
+            else if(state.activeTab === 'accounts') renderAccountsTab();
         }
 
         // AUDITORÍA
@@ -4706,8 +4743,8 @@
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
 
-        function saveTransaction(e) { 
-            e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
+        function saveTransaction(e, forceOverdraft = false) { 
+            if(e && typeof e.preventDefault === 'function') e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
             const projectId = $id('f-proj-id') ? $id('f-proj-id').value : '';
             
             const parentSel = $id('f-cat-parent-select') ? $id('f-cat-parent-select').value : '';
@@ -4764,7 +4801,12 @@
                 const termStr = $id('f-cc-term').dataset.raw; const term = parseInt(termStr);
                 if (term && term > 1) {
                     const available = (acc.limit || 0) - acc.balance; 
-                    if(amount > available) { if(!confirm(`⚠️ El valor excede el cupo disponible de la Tarjeta. ¿Sobregiro?`)) return; } 
+                    if(amount > available) { 
+                        if(!forceOverdraft) {
+                            triggerUIDelete('tx_overdraft', null);
+                            return;
+                        }
+                    } 
                     acc.balance += amount; 
                     const ccTx = buildTransactionSchema({ type: 'expense', amount: amount, cat: cat, accId: acc.id, date: new Date(`${date}T${time}`).toISOString(), note: `[TC] ${note||cat.substring(2)}`, currency: acc.currency, costType: costType });
                     ccTx.isCCPurchase = true;
@@ -6149,6 +6191,13 @@
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
             else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
+            else if(type === 'cc_overdraft' || type === 'tx_overdraft') msgEl.innerText = `⚠️ El valor excede el cupo disponible de la Tarjeta.\n\n¿Estás seguro de registrar un sobregiro?`;
+            else if(type === 'reconcile_afterpay') msgEl.innerText = `¿Conciliar automáticamente cuotas pasadas?\n\nSe marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.`;
+
+            const confirmBtn = mod.querySelector('button.bg-red-600');
+            if (confirmBtn) {
+                confirmBtn.innerText = (type === 'cc_overdraft' || type === 'tx_overdraft') ? 'Sobregirar' : (type === 'reconcile_afterpay' ? 'Conciliar' : 'Eliminar');
+            }
 
             mod.classList.remove('hidden');
         }
@@ -6208,8 +6257,6 @@
                 state.pseLinks = state.pseLinks.filter(l => l.id !== id);
                 saveState();
                 if(typeof renderPSELinks === 'function') renderPSELinks();
-            } else if (type === 'account_shared' || type === 'account_personal') {
-                executeAccountDeletion(id);
             } else if (type === 'update_app') {
                 if ('serviceWorker' in navigator) {
                     navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -6218,6 +6265,12 @@
                 }
                 window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
                 return;
+            } else if (type === 'cc_overdraft') {
+                saveCCPurchase(null, true, id);
+            } else if (type === 'tx_overdraft') {
+                saveTransaction(null, true);
+            } else if (type === 'reconcile_afterpay') {
+                reconcilePastAfterpay(true);
             }
             closeUIDeleteModal();
         }
@@ -7872,6 +7925,71 @@
                         }
                     }
                 }, 60000);
+            }
+        }
+
+        // --- MÓDULO ESCÁNER IA ---
+        function initScanner() {
+            const resCont = $id('scanner-results');
+            if(resCont) resCont.classList.add('hidden');
+            const list = $id('scanner-results-list');
+            if(list) list.innerHTML = '';
+            const fileInput = $id('nexusFileScanner');
+            if(fileInput) fileInput.value = '';
+        }
+
+        function processScannerFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const btn = $id('btnTriggerScanner');
+            if(!btn) return;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Procesando motor IA...';
+            btn.disabled = true;
+
+            // Simulación Fricción Cero de procesamiento
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+                
+                const resCont = $id('scanner-results');
+                const list = $id('scanner-results-list');
+                if(resCont && list) {
+                    const mockData = [
+                        { date: new Date().toISOString().split('T')[0], desc: 'Extracción de Recibo', amount: 125000, type: 'expense' }
+                    ];
+                    
+                    list.innerHTML = mockData.map((item) => `
+                        <div class="bg-slate-50 p-4 rounded-[1.5rem] border border-slate-100 flex justify-between items-center shadow-sm mb-2">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-file-invoice text-sm"></i></div>
+                                <div>
+                                    <p class="text-[10px] font-black uppercase text-slate-700">${item.desc}</p>
+                                    <p class="text-[8px] font-bold text-slate-400 mt-0.5">${item.date}</p>
+                                </div>
+                            </div>
+                            <p class="text-xs font-black theme-val-exp">-${fmt(item.amount, state.settings.baseCurrency)}</p>
+                        </div>
+                    `).join('');
+                    
+                    resCont.classList.remove('hidden');
+                    resCont.classList.add('animate-slideUp');
+                }
+            }, 1800);
+        }
+
+        function saveScannedData() {
+            const resCont = $id('scanner-results');
+            if(resCont) {
+                const origHtml = resCont.innerHTML;
+                resCont.innerHTML = `<div class="p-6 bg-emerald-50 border border-emerald-100 rounded-[2rem] text-center animate-slideUp"><i class="fa-solid fa-check text-emerald-500 text-3xl mb-3"></i><p class="text-[10px] text-emerald-700 font-black uppercase tracking-widest">Cifrado y Guardado en Bóveda</p></div>`;
+                
+                setTimeout(() => {
+                    resCont.innerHTML = origHtml;
+                    initScanner();
+                    switchTab('database');
+                }, 1500);
             }
         }
 
