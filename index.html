@@ -668,6 +668,12 @@
                     <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
                 </div>
                 <div id="admin-global-users-list" class="space-y-2 max-h-64 overflow-y-auto hide-scrollbar"></div>
+
+                <!-- NUEVO: Módulo de Feature Flags (Encendido/Apagado de Apps) -->
+                <div class="mt-6 pt-5 border-t border-red-200/50">
+                    <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest mb-4"><i class="fa-solid fa-toggle-on mr-2"></i>Control de Módulos (App)</h3>
+                    <div id="admin-modules-list" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+                </div>
             </div>
 
             <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto mt-6" id="danger-zone-container" style="display: none;">
@@ -2615,9 +2621,33 @@
         function changeGlobalCurrency(curr) { state.activeCurrency = curr; saveState(); updateCurrencyLabels(); updateModuleVisibility(); setContext(state.context); switchTab(state.activeTab); }
 
         function updateModuleVisibility() {
-            const isAfterpayAllowed = true;
-            $qAll('button').forEach(btn => { const txt = btn.innerText.toLowerCase(); const isApBtn = txt.includes('afterpay') || (btn.getAttribute('onclick') || '').includes('afterpay'); if (isApBtn && !btn.id.includes('db-filter')) { if (isAfterpayAllowed) btn.classList.remove('hidden'); else btn.classList.add('hidden'); } });
-            if (state.activeTab === 'afterpay' && !isAfterpayAllowed) switchTab('home');
+            const disabledMods = (state.settings && state.settings.disabledModules) || [];
+            
+            // Ocultar/Mostrar botones de Dashboard
+            $qAll('#view-day .glass-btn').forEach(btn => {
+                const onclickAttr = btn.getAttribute('onclick') || '';
+                const match = onclickAttr.match(/switchTab\('([^']+)'\)/);
+                if (match && match[1]) {
+                    const modId = match[1];
+                    if (disabledMods.includes(modId)) {
+                        btn.style.display = 'none';
+                    } else {
+                        btn.style.display = ''; 
+                    }
+                }
+            });
+            
+            // Ocultar botones FAB específicos condicionados
+            $qAll('#fab-menu button').forEach(btn => {
+                const onclickAttr = btn.getAttribute('onclick') || '';
+                if (onclickAttr.includes("openForm('afterpay')")) {
+                    if (disabledMods.includes('afterpay')) btn.classList.add('hidden');
+                    else btn.classList.remove('hidden');
+                }
+            });
+            
+            // Si está en un módulo deshabilitado, forzar regreso al Home
+            if (disabledMods.includes(state.activeTab)) switchTab('home');
         }
 
         function setContext(ctx) {
@@ -6767,6 +6797,7 @@
                 if(userProfile && userProfile.pin === "1234") {
                     adminBlock.style.display = 'block';
                     loadAdminGlobalUsers();
+                    if(typeof renderAdminModules === 'function') renderAdminModules();
                 } else {
                     adminBlock.style.display = 'none';
                 }
@@ -6821,6 +6852,52 @@
             } catch(e) {
                 list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.</p>';
             }
+        }
+
+        const SYSTEM_MODULES = [
+            {id:'accounts', icon:'fa-building-columns', name:'Cuentas'},
+            {id:'projects', icon:'fa-diagram-project', name:'Proyectos'},
+            {id:'loans', icon:'fa-landmark', name:'Deudas'},
+            {id:'afterpay', icon:'fa-layer-group', name:'Afterpay'},
+            {id:'database', icon:'fa-database', name:'Auditoría'},
+            {id:'calendar', icon:'fa-calendar-days', name:'Agenda'},
+            {id:'analysis', icon:'fa-chart-pie', name:'Analítica'},
+            {id:'report', icon:'fa-briefcase', name:'Directiva'},
+            {id:'finances', icon:'fa-file-invoice-dollar', name:'Finanzas'},
+            {id:'budget', icon:'fa-bullseye', name:'Presupuestos'},
+            {id:'tasks', icon:'fa-list-check', name:'Tareas'},
+            {id:'scanner', icon:'fa-camera', name:'Escáner'},
+            {id:'taxes', icon:'fa-file-invoice', name:'Impuestos'}
+        ];
+
+        function renderAdminModules() {
+            const cont = $id('admin-modules-list');
+            if(!cont) return;
+            if(!state.settings.disabledModules) state.settings.disabledModules = [];
+            
+            cont.innerHTML = SYSTEM_MODULES.map(m => {
+                const isEnabled = !state.settings.disabledModules.includes(m.id);
+                return `<div class="flex items-center justify-between bg-white p-3 rounded-xl border border-red-100 shadow-sm">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid ${m.icon} text-[10px] text-slate-400"></i>
+                        <span class="text-[9px] font-black uppercase text-slate-700">${m.name}</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" ${isEnabled ? 'checked' : ''} onchange="toggleAppModule('${m.id}')">
+                        <div class="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-500"></div>
+                    </label>
+                </div>`;
+            }).join('');
+        }
+
+        function toggleAppModule(modId) {
+            if(!state.settings.disabledModules) state.settings.disabledModules = [];
+            const idx = state.settings.disabledModules.indexOf(modId);
+            if(idx > -1) state.settings.disabledModules.splice(idx, 1);
+            else state.settings.disabledModules.push(modId);
+            
+            saveState();
+            updateModuleVisibility();
         }
 
         function updateSettings() {
