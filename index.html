@@ -685,7 +685,7 @@
                 <!-- NUEVO: Módulo de Feature Flags (Encendido/Apagado de Apps) -->
                 <div class="mt-6 pt-5 border-t border-red-200/50">
                     <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest mb-1"><i class="fa-solid fa-toggle-on mr-2"></i>Control de Módulos (App)</h3>
-                    <p class="text-[9px] text-slate-500 font-bold mb-4 leading-relaxed">Activa o desactiva módulos para la bóveda en curso. Para editar los permisos de otra persona, usa el botón <i class="fa-solid fa-key text-amber-500 mx-1"></i> <b>Tomar Control</b> en su perfil arriba y ajusta estos switches desde adentro.</p>
+                    <p class="text-[9px] text-slate-500 font-bold mb-4 leading-relaxed">Activa o desactiva módulos para la bóveda en curso. Para editar los permisos de otra persona, usa el botón <i class="fa-solid fa-toggle-on text-indigo-500 mx-1"></i> <b>Gestionar Permisos</b> en la lista de usuarios arriba (Edición en tiempo real).</p>
                     <div id="admin-modules-list" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
                 </div>
 
@@ -1289,24 +1289,19 @@
             </div>
         </div>
 
-        <!-- MODAL TOMAR CONTROL (ADMIN BYPASS) -->
-        <div id="takeover-user-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
-            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
-                <div class="text-center">
-                    <div class="w-16 h-16 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-3 text-3xl"><i class="fa-solid fa-key"></i></div>
-                    <h3 class="text-xl font-black uppercase text-amber-600 tracking-tighter">Modo Administrador</h3>
-                    <p class="text-[10px] text-slate-500 mt-2 font-bold uppercase">Tomarás el control de la bóveda de <span id="takeover-user-target" class="text-slate-700 font-black"></span>.</p>
-                    <p class="text-[8px] text-amber-500 mt-1 uppercase tracking-widest">Requiere tu PIN (Cuenta Actual)</p>
-                </div>
-                <div class="space-y-4">
-                    <input type="hidden" id="takeover-user-email">
-                    <input type="password" id="takeover-user-pin" maxlength="4" placeholder="Tu PIN de Admin" class="form-input text-center tracking-[1em] text-lg w-full bg-slate-50 border-slate-200" inputmode="numeric" pattern="[0-9]*">
-                    <p id="takeover-error-msg" class="text-[9px] text-red-500 font-bold hidden text-center uppercase">PIN Incorrecto / Acceso Denegado</p>
-                    <div class="flex gap-2 mt-4">
-                        <button type="button" onclick="confirmTakeoverUserVault()" class="flex-1 bg-amber-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Acceder</button>
-                        <button type="button" onclick="closeTakeoverModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
+        <!-- MODAL PERMISOS DE USUARIO REMOTO -->
+        <div id="remote-permissions-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
+                <div class="flex justify-between items-center mb-2">
+                    <div>
+                        <h3 class="text-xl font-black uppercase tracking-tighter text-indigo-600"><i class="fa-solid fa-toggle-on mr-2"></i>Permisos Módulos</h3>
+                        <p class="text-[10px] text-slate-500 font-bold uppercase mt-1">Bóveda: <span id="rp-user-name" class="text-slate-700"></span></p>
                     </div>
+                    <button type="button" onclick="closeRemotePermissions()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+                <div id="rp-loading" class="text-center py-8 hidden"><i class="fa-solid fa-circle-notch fa-spin text-indigo-500 text-2xl"></i><p class="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-widest">Leyendo la nube...</p></div>
+                <div id="rp-content" class="space-y-3 max-h-[50vh] overflow-y-auto hide-scrollbar"></div>
+                <input type="hidden" id="rp-user-email">
             </div>
         </div>
 
@@ -6872,7 +6867,6 @@
                     const isCurrent = data.email === currentUser;
                     const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
                     const lastSync = data.lastSyncSize ? new Date(data.lastSyncSize).toLocaleDateString('es-CO', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : 'N/A';
-                    
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full ${isCurrent ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0"><i class="fa-solid fa-user-shield text-[14px]"></i></div>
@@ -6883,7 +6877,8 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            ${!isCurrent ? `<button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                            ${!isCurrent ? `<button onclick="openRemotePermissions('${data.email}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
+                            <button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
                             <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
                         </div>
                     </div>`;
@@ -6938,6 +6933,85 @@
             
             saveState();
             updateModuleVisibility();
+        }
+
+        async function openRemotePermissions(email, name) {
+            const mod = $id('remote-permissions-modal');
+            if(!mod) return;
+            $id('rp-user-name').innerText = name;
+            $id('rp-user-email').value = email;
+            $id('rp-loading').classList.remove('hidden');
+            $id('rp-content').innerHTML = '';
+            mod.classList.remove('hidden');
+
+            try {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const coreRef = doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core');
+                const coreSnap = await getDoc(coreRef);
+                
+                let disabledMods = [];
+                if(coreSnap.exists()) {
+                    const data = coreSnap.data();
+                    if(data.settings && data.settings.disabledModules) {
+                        disabledMods = data.settings.disabledModules;
+                    }
+                }
+
+                $id('rp-content').innerHTML = SYSTEM_MODULES.map(m => {
+                    const isEnabled = !disabledMods.includes(m.id);
+                    return `<div class="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-white text-indigo-500 flex items-center justify-center shadow-sm"><i class="fa-solid ${m.icon} text-[10px]"></i></div>
+                            <span class="text-[10px] font-black uppercase text-slate-700">${m.name}</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="sr-only peer" ${isEnabled ? 'checked' : ''} onchange="toggleRemoteUserModule('${email}', '${m.id}', this.checked)">
+                            <div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                        </label>
+                    </div>`;
+                }).join('');
+                
+            } catch(e) {
+                console.error(e);
+                $id('rp-content').innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error conectando con la base de datos de este usuario.</p>';
+            } finally {
+                $id('rp-loading').classList.add('hidden');
+            }
+        }
+
+        function closeRemotePermissions() {
+            const mod = $id('remote-permissions-modal');
+            if(mod) {
+                mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+            }
+        }
+
+        async function toggleRemoteUserModule(email, modId, isEnabled) {
+            try {
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const coreRef = doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core');
+                const coreSnap = await getDoc(coreRef);
+                
+                let currentData = coreSnap.exists() ? coreSnap.data() : { settings: {} };
+                if(!currentData.settings) currentData.settings = {};
+                if(!currentData.settings.disabledModules) currentData.settings.disabledModules = [];
+                
+                let disabledMods = currentData.settings.disabledModules;
+                if (isEnabled) {
+                    disabledMods = disabledMods.filter(m => m !== modId);
+                } else {
+                    if(!disabledMods.includes(modId)) disabledMods.push(modId);
+                }
+                currentData.settings.disabledModules = disabledMods;
+                
+                await setDoc(coreRef, { settings: { disabledModules: disabledMods } }, { merge: true });
+                console.log(`[APEX] Permiso de ${modId} actualizado para ${email} en Firebase`);
+                
+            } catch(e) {
+                console.error("Error al actualizar permiso remoto", e);
+                alert("Error de red: No se pudo guardar el permiso en la base de datos de este usuario.");
+            }
         }
 
         function updateSettings() {
