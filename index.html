@@ -4074,11 +4074,8 @@
 
         function toggleRecurFields() { const isR = $id('f-is-recur').checked; const flds = $id('recur-fields'); if(isR) flds.classList.remove('hidden'); else flds.classList.add('hidden'); }
 
-        function reconcilePastAfterpay(confirmed = false) {
-            if(!confirmed) {
-                triggerUIDelete('reconcile_afterpay', null);
-                return;
-            }
+        function reconcilePastAfterpay() {
+            if(!confirm("¿Conciliar automáticamente cuotas pasadas? Se marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.")) return;
             let updated = 0; const now = new Date(); now.setHours(0,0,0,0);
             const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
             
@@ -4105,20 +4102,7 @@
                     if (pastQuotas > (tx.apPaid || 0)) { tx.apPaid = pastQuotas; saveCloudTx(tx); updated++; }
                 }
             });
-            if (updated > 0) { 
-                saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); 
-                const msg = document.createElement('div');
-                msg.className = "fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-teal-500 text-white px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg animate-slideUp";
-                msg.innerText = `✅ Conciliados ${updated} contrato(s)`;
-                document.body.appendChild(msg);
-                setTimeout(() => msg.remove(), 3000);
-            } else { 
-                const msg = document.createElement('div');
-                msg.className = "fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-slate-800 text-white px-4 py-2 rounded-full font-black text-[10px] uppercase tracking-widest shadow-lg animate-slideUp";
-                msg.innerText = "Al día. Sin cuotas pendientes.";
-                document.body.appendChild(msg);
-                setTimeout(() => msg.remove(), 3000);
-            }
+            if (updated > 0) { saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); alert(`✅ Se conciliarion compras pasadas en ${updated} contrato(s).`); } else { alert("No hay cuotas pasadas pendientes de conciliar."); }
         }
 
         function populateFormAccounts() {
@@ -4448,41 +4432,38 @@
 
         function deleteTx(e, id, force = false) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation(); const tx = state.tx.find(t => t.id === id); if(!tx) return; 
-            
-            if(!force) {
-                triggerUIDelete('tx', id, tx.projectId || null);
-                return;
-            }
-            
-            // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
-            const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
-            if (isSharedTx) {
-                if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
-                if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
-            }
+            if(force || confirm("¿Eliminar registro de la DB SSoT? Esto reajustará el saldo de su bóveda asociada.")) { 
+                
+                // APEX FIX: Registrar ID eliminado para sincronización P2P cruzada
+                const isSharedTx = state.accounts.some(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
+                if (isSharedTx) {
+                    if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                    if (!state.deletedSharedTxs.includes(id)) state.deletedSharedTxs.push(id);
+                }
 
-            // APEX FIX: Reversión contable precisa para Transferencias
-            if (tx.type === 'transfer') {
-                const oOrig = state.accounts.find(a => a.id === tx.accId);
-                const oDest = state.accounts.find(a => a.id === tx.toAccId);
-                if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
-                if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
-            } else {
-                const acc = state.accounts.find(a => a.id === tx.accId); 
-                if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
-            }
-            state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
-            
-            // APEX FIX: Refresco dinámico transversal
-            saveState(); updateDashboard(); 
-            if(state.activeTab === 'database') renderDatabase(); 
-            else if(state.activeTab === 'afterpay') renderAfterpay();
-            else if(state.activeTab === 'analysis') renderAnalysis();
-            else if(state.activeTab === 'report') renderReport();
-            else if(state.activeTab === 'finances') renderFinancesUnified();
-            else if(state.activeTab === 'budget') renderBudgetTab();
-            else if(state.activeTab === 'calendar') renderCalendar();
-            else if(state.activeTab === 'accounts') renderAccountsTab();
+                // APEX FIX: Reversión contable precisa para Transferencias
+                if (tx.type === 'transfer') {
+                    const oOrig = state.accounts.find(a => a.id === tx.accId);
+                    const oDest = state.accounts.find(a => a.id === tx.toAccId);
+                    if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
+                    if(oDest) { if(oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
+                } else {
+                    const acc = state.accounts.find(a => a.id === tx.accId); 
+                    if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
+                }
+                state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
+                
+                // APEX FIX: Refresco dinámico transversal
+                saveState(); updateDashboard(); 
+                if(state.activeTab === 'database') renderDatabase(); 
+                else if(state.activeTab === 'afterpay') renderAfterpay();
+                else if(state.activeTab === 'analysis') renderAnalysis();
+                else if(state.activeTab === 'report') renderReport();
+                else if(state.activeTab === 'finances') renderFinancesUnified();
+                else if(state.activeTab === 'budget') renderBudgetTab();
+                else if(state.activeTab === 'calendar') renderCalendar();
+                else if(state.activeTab === 'accounts') renderAccountsTab();
+            } 
         }
 
         // AUDITORÍA
@@ -6187,11 +6168,10 @@
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
             else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
             else if(type === 'cc_overdraft') msgEl.innerText = `⚠️ El valor excede el cupo disponible de la Tarjeta.\n\n¿Estás seguro de registrar un sobregiro?`;
-            else if(type === 'reconcile_afterpay') msgEl.innerText = `¿Conciliar automáticamente cuotas pasadas?\n\nSe marcarán como pagadas a cero (históricas) sin afectar tu liquidez actual.`;
 
             const confirmBtn = mod.querySelector('button.bg-red-600');
             if (confirmBtn) {
-                confirmBtn.innerText = (type === 'cc_overdraft') ? 'Sobregirar' : (type === 'reconcile_afterpay' ? 'Conciliar' : 'Eliminar');
+                confirmBtn.innerText = (type === 'cc_overdraft') ? 'Sobregirar' : 'Eliminar';
             }
 
             mod.classList.remove('hidden');
@@ -6262,8 +6242,6 @@
                 return;
             } else if (type === 'cc_overdraft') {
                 saveCCPurchase(null, true, id);
-            } else if (type === 'reconcile_afterpay') {
-                reconcilePastAfterpay(true);
             }
             closeUIDeleteModal();
         }
