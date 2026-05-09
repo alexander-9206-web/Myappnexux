@@ -46,20 +46,37 @@
         <div class="w-full max-w-sm md:max-w-md space-y-6 animate-slideUp bg-slate-800 p-8 rounded-[2.5rem] shadow-2xl border border-slate-700">
             <div class="text-center space-y-2"><div class="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><i class="fa-solid fa-shield-halved"></i></div><h1 class="text-2xl font-black uppercase tracking-tighter">Nexus <span class="text-indigo-400">Identity</span></h1><p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p></div>
             
-            <!-- Selector de Usuarios -->
-            <div id="login-user-selection" class="space-y-3 pt-2">
-                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center mb-2">Selecciona tu cuenta</p>
-                <div id="login-users-list" class="space-y-2 max-h-40 overflow-y-auto hide-scrollbar">
-                    <p class="text-xs text-center text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando bóvedas...</p>
+            <!-- Elección Inicial (NUEVO) -->
+            <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-slate-700">
+                <button onclick="showExistingUsers()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-users"></i> Ingresar a Bóveda
+                </button>
+                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-700 transition-colors active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-plus"></i> Crear Nueva Bóveda
+                </button>
+            </div>
+
+            <!-- Selector de Usuarios (MODIFICADO) -->
+            <div id="login-user-selection" class="space-y-3 pt-4 border-t border-slate-700 hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Selecciona tu cuenta</p>
+                    <button onclick="showInitialLoginChoice()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
                 </div>
-                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-400 hover:text-white p-3 rounded-xl font-bold text-[10px] uppercase tracking-widest border border-slate-700 transition-colors mt-2"><i class="fa-solid fa-plus mr-1"></i> Crear Nueva Bóveda</button>
+                <!-- Buscador Dinámico -->
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
+                    <input type="text" id="login-search-user" oninput="filterLoginUsers()" placeholder="Buscar correo o nombre..." class="w-full bg-slate-900 border border-slate-700 text-white text-xs p-3 pl-8 rounded-xl outline-none focus:border-indigo-500 transition-colors">
+                </div>
+                <div id="login-users-list" class="space-y-2 max-h-48 overflow-y-auto hide-scrollbar">
+                    <p class="text-xs text-center text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando bóvedas locales...</p>
+                </div>
             </div>
 
             <!-- Ingreso de PIN para usuario existente -->
             <div id="login-pin-section" class="space-y-4 hidden pt-4 border-t border-slate-700">
                 <div class="flex justify-between items-center mb-2">
                     <p id="login-active-email" class="text-xs font-bold text-indigo-400 truncate pr-2"></p>
-                    <button onclick="cancelUserSelection()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-xmark"></i> Cancelar</button>
+                    <button onclick="cancelUserSelection()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
                 </div>
                 <div><label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Ingresa tu PIN</label><input type="password" id="login-existing-pin" maxlength="4" pattern="[0-9]*" inputmode="numeric" class="w-full bg-slate-900 text-white p-4 rounded-2xl mt-1 outline-none font-bold text-sm text-center tracking-[1em]"></div>
                 <button onclick="handleLoginExisting()" type="button" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">Acceder <i class="fa-solid fa-unlock"></i></button>
@@ -1989,13 +2006,10 @@
             if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 
-                // APEX FIX: Renderizado instantáneo de la caché local a 0ms (Fricción Cero)
-                fetchLoginUsers();
+                // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
+                fetchLoginUsers(false);
                 
-                initCloud().finally(() => {
-                    // Refresco silencioso con los datos actualizados de la nube
-                    fetchLoginUsers();
-                });
+                // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
             } else {
                 // ARRANQUE LOCAL-FIRST
                 await bootApp(); 
@@ -2009,7 +2023,7 @@
 
         let loginSelectedEmail = null;
 
-        async function fetchLoginUsers() {
+        async function fetchLoginUsers(scanCloud = false) {
             const list = $id('login-users-list');
             if(!list) return;
             
@@ -2030,24 +2044,26 @@
                 let html = '';
                 Array.from(usersMap.values()).forEach(p => {
                     const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
-                    html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
-                        <div class="flex items-center gap-3">
+                    html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
+                        <div class="flex items-center gap-3 overflow-hidden">
                             <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
-                            <div><p class="text-[10px] font-black uppercase text-slate-200">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5">${p.email}</p></div>
+                            <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
                         </div>
-                        <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
+                        <i class="fa-solid fa-chevron-right text-slate-600 text-[10px] shrink-0 ml-2"></i>
                     </div>`;
                     localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
                 });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
+                if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
+                else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
                 list.innerHTML = html;
+                filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
             };
 
             // Ejecutar pintado a latencia cero
             renderList();
 
-            // 3. Consulta en segundo plano a la Nube (Sin bloquear la pantalla)
-            if (window.db) {
+            // 3. Consulta en segundo plano a la Nube (Solo a petición)
+            if (scanCloud && window.db) {
                 try {
                     const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
@@ -2070,9 +2086,8 @@
                         }
                     });
                     
-                    // Solo repintar si Firebase trajo cuentas nuevas o cambios de PIN/Nombre
                     if (hasChanges) renderList();
-                    else if (usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No se encontraron bóvedas locales o en la red.</p>';
+                    else if (usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No se encontraron bóvedas en la red.</p>';
                     
                 } catch(e) { 
                     console.warn("[APEX] Fallo leyendo usuarios en login", e); 
@@ -2081,8 +2096,44 @@
             }
         }
 
+        // APEX FIX: Lógica de navegación del bloque de Login
+        function showInitialLoginChoice() {
+            $id('login-initial-choice').classList.remove('hidden');
+            $id('login-user-selection').classList.add('hidden');
+            $id('login-pin-section').classList.add('hidden');
+            $id('login-new-section').classList.add('hidden');
+        }
+
+        function showExistingUsers() {
+            $id('login-initial-choice').classList.add('hidden');
+            $id('login-user-selection').classList.remove('hidden');
+            $id('login-pin-section').classList.add('hidden');
+            $id('login-new-section').classList.add('hidden');
+            
+            const list = $id('login-users-list');
+            if(list && !window.db) {
+                list.innerHTML += '<p id="cloud-scan-msg" class="text-[10px] text-center text-indigo-400 font-bold py-2 animate-pulse"><i class="fa-solid fa-satellite-dish mr-1"></i> Conectando al satélite...</p>';
+            }
+            
+            // Encendido y escaneo de Firebase a petición
+            initCloud().finally(() => {
+                fetchLoginUsers(true);
+            });
+        }
+
+        function filterLoginUsers() {
+            const query = $id('login-search-user') ? $id('login-search-user').value.toLowerCase() : '';
+            const items = $qAll('#login-users-list .user-item');
+            items.forEach(item => {
+                const text = item.innerText.toLowerCase();
+                if (text.includes(query)) item.classList.remove('hidden');
+                else item.classList.add('hidden');
+            });
+        }
+
         function selectUserForLogin(email, name) {
             loginSelectedEmail = email;
+            $id('login-initial-choice').classList.add('hidden');
             $id('login-user-selection').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
             $id('login-pin-section').classList.remove('hidden');
@@ -2099,12 +2150,12 @@
 
         function toggleNewUserForm(show) {
             if(show) {
+                $id('login-initial-choice').classList.add('hidden');
                 $id('login-user-selection').classList.add('hidden');
                 $id('login-pin-section').classList.add('hidden');
                 $id('login-new-section').classList.remove('hidden');
             } else {
-                $id('login-new-section').classList.add('hidden');
-                $id('login-user-selection').classList.remove('hidden');
+                showInitialLoginChoice();
             }
         }
 
