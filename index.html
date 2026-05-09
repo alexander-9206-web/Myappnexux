@@ -896,13 +896,18 @@
             <!-- APEX FIX: Indicadores de Tareas (KPIs) -->
             <div id="tasks-kpi-container" class="grid grid-cols-3 gap-3 mb-2"></div>
 
-            <!-- APEX FIX: Módulo de Pagos de Servicios (PSE) Integrado en Interfaz -->
+            <!-- APEX FIX: Módulo de Pagos de Servicios (PSE) Botón Único -->
             <div class="mt-4 mb-6">
-                <div class="flex justify-between items-center ml-2 mb-3">
-                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest"><i class="fa-solid fa-bolt mr-1 text-emerald-500"></i> Pagos Rápidos (PSE)</h3>
-                    <button type="button" onclick="openNewPSEForm()" class="text-[9px] font-black bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 active:scale-95 shadow-sm uppercase"><i class="fa-solid fa-plus mr-1"></i>Añadir</button>
-                </div>
-                <div id="pse-inline-list" class="space-y-3"></div>
+                <button onclick="openPSEHub()" class="w-full bg-emerald-50 p-4 rounded-2xl border border-emerald-100 shadow-sm active:scale-95 transition-transform flex items-center justify-between group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-white text-emerald-500 flex items-center justify-center shadow-sm"><i class="fa-solid fa-bolt text-lg group-hover:animate-pulse"></i></div>
+                        <div class="text-left">
+                            <h3 class="text-xs font-black uppercase text-emerald-700 tracking-widest">Centro de Pagos PSE</h3>
+                            <p class="text-[9px] text-emerald-600/70 font-bold mt-0.5">Gestionar y pagar servicios recurrentes</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-emerald-300"></i>
+                </button>
             </div>
 
             <!-- APEX FIX: Diario Semanal (Lunes a Domingo) Reubicado arriba del Calendario -->
@@ -1488,11 +1493,23 @@
             </div>
         </div>
 
-        <!-- MODAL NUEVO ENLACE PSE -->
+        <!-- MODAL HUB DE PAGOS PSE -->
+        <div id="pse-hub-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-emerald-100 shadow-2xl">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-emerald-600"><i class="fa-solid fa-bolt mr-2"></i>Pagos PSE</h3>
+                    <button type="button" onclick="closePSEHub()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="pse-hub-list" class="space-y-3 max-h-[50vh] overflow-y-auto hide-scrollbar"></div>
+                <button type="button" onclick="openNewPSEForm()" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-xs mt-2 shadow-lg active:scale-95 transition-transform"><i class="fa-solid fa-plus mr-1"></i> Añadir Nuevo Enlace</button>
+            </div>
+        </div>
+
+        <!-- MODAL NUEVO/EDITAR ENLACE PSE -->
         <div id="new-pse-modal" class="fixed inset-0 z-[110] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
                 <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-xl font-black uppercase tracking-tighter text-emerald-600">Nuevo Enlace</h3>
+                    <h3 id="pse-form-title" class="text-xl font-black uppercase tracking-tighter text-emerald-600">Nuevo Enlace</h3>
                     <button type="button" onclick="closeNewPSEForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <form onsubmit="savePSELink(event)" class="space-y-4">
@@ -5255,8 +5272,20 @@
             document.body.removeChild(a);
         }
 
+        function openPSEHub() {
+            const mod = $id('pse-hub-modal'); if(!mod) return;
+            mod.classList.remove('hidden');
+            renderPSELinks();
+        }
+
+        function closePSEHub() {
+            const mod = $id('pse-hub-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
         function renderPSELinks() {
-            const cont = $id('pse-inline-list'); if(!cont) return;
+            const cont = $id('pse-hub-list'); if(!cont) return;
             if (!state.pseLinks) {
                 // Autoinicialización SSoT con predeterminados
                 state.pseLinks = [
@@ -5282,17 +5311,34 @@
                             <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${link.url}</p>
                         </div>
                     </button>
-                    <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button type="button" onclick="openNewPSEForm('${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-blue-500 hover:bg-blue-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                        <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    </div>
                 </div>`;
             }).join('');
         }
 
-        function openNewPSEForm() {
+        function openNewPSEForm(id = null) {
             const mod = $id('new-pse-modal'); if(!mod) return;
-            $id('f-pse-id').value = '';
-            $id('f-pse-name').value = '';
-            $id('f-pse-url').value = '';
-            $id('f-pse-icon').value = '';
+            const titleEl = $id('pse-form-title');
+            
+            if (id) {
+                const link = state.pseLinks.find(l => l.id === id);
+                if (link) {
+                    $id('f-pse-id').value = link.id;
+                    $id('f-pse-name').value = link.name;
+                    $id('f-pse-url').value = link.url;
+                    $id('f-pse-icon').value = link.icon.replace('fa-', ''); // Para mostrarlo sin prefijo en el input
+                    if(titleEl) titleEl.innerText = "Editar Enlace";
+                }
+            } else {
+                $id('f-pse-id').value = '';
+                $id('f-pse-name').value = '';
+                $id('f-pse-url').value = '';
+                $id('f-pse-icon').value = '';
+                if(titleEl) titleEl.innerText = "Nuevo Enlace";
+            }
             mod.classList.remove('hidden');
         }
 
@@ -5341,13 +5387,13 @@
             if (taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
             else taskCalSelectedDate = dateStr;
             renderTasksTab();
+            if(taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
+            else taskCalSelectedDate = dateStr;
+            renderTasksTab();
         }
 
         function renderTasksTab() {
             if(!state.tasks) state.tasks = [];
-            
-            // APEX FIX: Renderizar la lista inline de PSE cada vez que se carga la pestaña
-            if(typeof renderPSELinks === 'function') renderPSELinks();
             
             const pendingList = $id('tasks-list-pending');
             const completedList = $id('tasks-list-completed');
