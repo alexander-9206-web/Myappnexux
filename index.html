@@ -1579,6 +1579,65 @@
         <script>
         const $id = id => document.getElementById(id); const $qAll = sel => document.querySelectorAll(sel);
         
+        // APEX FIX: Sistema In-DOM de Alertas (Reemplazo Fricción Cero para window.alert en iOS)
+        window.alert = function(message) {
+            let container = $id('nexus-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'nexus-toast-container';
+                container.className = 'fixed top-4 left-0 right-0 z-[300] flex flex-col items-center pointer-events-none px-4 gap-2 safe-top';
+                document.body.appendChild(container);
+            }
+
+            // Detección semántica de intención para aplicar color
+            const isSuccess = message.includes('✅');
+            const isWarning = message.includes('⚠️') || message.includes('Error') || message.includes('Atención') || message.includes('Incorrecto') || message.includes('inválido');
+            
+            let bgClass = 'bg-slate-900/95 border-slate-700';
+            let textClass = 'text-white';
+            let iconHtml = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+
+            if (isSuccess) {
+                bgClass = 'bg-emerald-50/95 border-emerald-200';
+                textClass = 'text-emerald-800';
+                iconHtml = '<i class="fa-solid fa-check-circle text-emerald-500"></i>';
+            } else if (isWarning) {
+                bgClass = 'bg-red-50/95 border-red-200';
+                textClass = 'text-red-800';
+                iconHtml = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>';
+            }
+
+            const toast = document.createElement('div');
+            // Diseño Estilo Apple: Sombras profundas, bordes redondeados pronunciados y blur
+            toast.className = `${bgClass} ${textClass} px-5 py-4 rounded-[1.5rem] shadow-2xl flex items-center gap-4 max-w-sm w-full transform transition-all duration-300 translate-y-[-20px] opacity-0 backdrop-blur-md pointer-events-auto border`;
+            
+            // Soporte para saltos de línea enviados desde las alertas originales
+            const formattedMessage = message.replace(/\n/g, '<br>');
+
+            toast.innerHTML = `
+                <div class="text-2xl shrink-0">${iconHtml}</div>
+                <div class="text-[10px] font-black uppercase tracking-widest leading-relaxed">${formattedMessage}</div>
+            `;
+
+            container.appendChild(toast);
+
+            // Micro-interacción: Entrada
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+            });
+
+            // Micro-interacción: Salida y limpieza de memoria
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-[-20px]', 'opacity-0');
+                setTimeout(() => {
+                    if (toast.parentNode) toast.parentNode.removeChild(toast);
+                }, 300);
+            }, 4000);
+        };
+        // ==========================================
+
         // APEX FIX: Diccionarios Base en blanco para permitir únicamente categorías manuales
         const DEFAULT_CATEGORIES = { global: [] };
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
