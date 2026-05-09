@@ -896,23 +896,13 @@
             <!-- APEX FIX: Indicadores de Tareas (KPIs) -->
             <div id="tasks-kpi-container" class="grid grid-cols-3 gap-3 mb-2"></div>
 
-            <!-- APEX FIX: Módulo de Pagos de Servicios (PSE) Integrado -->
-            <div class="mt-4 mb-4">
-                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-solid fa-building-columns mr-1 text-emerald-500"></i> Centro de Pagos Rápido (PSE)</h3>
-                <div class="flex gap-3 overflow-x-auto hide-scrollbar px-2 pb-2 snap-x">
-                    <button onclick="redirigirPago('celsia')" type="button" title="Pago PSE Celsia" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-amber-300 transition-colors active:scale-95 snap-center">
-                        <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center shadow-sm"><i class="fa-solid fa-bolt text-[12px]"></i></div>
-                        <span class="text-[8px] font-black uppercase text-slate-600">Energía (Celsia)</span>
-                    </button>
-                    <button onclick="redirigirPago('internet')" type="button" title="Pago PSE Internet" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-blue-300 transition-colors active:scale-95 snap-center">
-                        <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center shadow-sm"><i class="fa-solid fa-wifi text-[12px]"></i></div>
-                        <span class="text-[8px] font-black uppercase text-slate-600">Internet (Claro)</span>
-                    </button>
-                    <button onclick="redirigirPago('dian')" type="button" title="Pago PSE DIAN" class="theme-card p-3 rounded-2xl border shadow-sm shrink-0 min-w-[110px] flex flex-col items-center justify-center gap-2 hover:border-emerald-300 transition-colors active:scale-95 snap-center">
-                        <div class="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-sm"><i class="fa-solid fa-file-invoice-dollar text-[12px]"></i></div>
-                        <span class="text-[8px] font-black uppercase text-slate-600">Impuestos DIAN</span>
-                    </button>
+            <!-- APEX FIX: Módulo de Pagos de Servicios (PSE) Integrado en Interfaz -->
+            <div class="mt-4 mb-6">
+                <div class="flex justify-between items-center ml-2 mb-3">
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest"><i class="fa-solid fa-bolt mr-1 text-emerald-500"></i> Pagos Rápidos (PSE)</h3>
+                    <button type="button" onclick="openNewPSEForm()" class="text-[9px] font-black bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 active:scale-95 shadow-sm uppercase"><i class="fa-solid fa-plus mr-1"></i>Añadir</button>
                 </div>
+                <div id="pse-inline-list" class="space-y-3"></div>
             </div>
 
             <!-- APEX FIX: Diario Semanal (Lunes a Domingo) Reubicado arriba del Calendario -->
@@ -1494,6 +1484,32 @@
                         <input type="date" id="g-date" required class="form-input text-sm font-bold text-slate-700">
                     </div>
                     <button type="submit" class="w-full bg-orange-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Crear Meta</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- MODAL NUEVO ENLACE PSE -->
+        <div id="new-pse-modal" class="fixed inset-0 z-[110] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-emerald-600">Nuevo Enlace</h3>
+                    <button type="button" onclick="closeNewPSEForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <form onsubmit="savePSELink(event)" class="space-y-4">
+                    <input type="hidden" id="f-pse-id">
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre del Servicio</label>
+                        <input type="text" id="f-pse-name" required class="form-input text-sm" placeholder="Ej: Energía (Celsia)">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">URL de Pago</label>
+                        <input type="url" id="f-pse-url" required class="form-input text-sm" placeholder="https://...">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Ícono FontAwesome (Opcional)</label>
+                        <input type="text" id="f-pse-icon" class="form-input text-sm" placeholder="Ej: fa-bolt">
+                    </div>
+                    <button type="submit" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Enlace</button>
                 </form>
             </div>
         </div>
@@ -5226,19 +5242,85 @@
         let taskPriorityFilter = 'all'; // APEX FIX: Estado del fichero de prioridades
 
         // --- MÓDULO DE PAGOS PSE ---
-        const enlacesPagosPSE = {
-            'celsia': 'https://www.zonapagos.com/t_celsia/pagos.asp',
-            'internet': 'https://mi.claro.com.co/pagos',
-            'dian': 'https://muisca.dian.gov.co/WebRutMuisca/DefLogin.faces'
-        };
+        function redirigirPagoDirecto(url) {
+            if (!url) return;
+            // APEX FIX: Alternativa robusta para contenedores iOS (WKWebView/PWA)
+            // Crea un enlace dinámico temporal para forzar al contenedor a delegar la navegación a Safari
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
 
-        function redirigirPago(servicio) {
-            const url = enlacesPagosPSE[servicio];
-            if (url) {
-                window.open(url, '_blank');
-            } else {
-                console.error("[APEX PSE] Servicio no configurado");
+        function renderPSELinks() {
+            const cont = $id('pse-inline-list'); if(!cont) return;
+            if (!state.pseLinks) {
+                // Autoinicialización SSoT con predeterminados
+                state.pseLinks = [
+                    { id: 'pse_1', name: 'Energía (Celsia)', url: 'https://www.zonapagos.com/t_celsia/pagos.asp', icon: 'fa-bolt' },
+                    { id: 'pse_2', name: 'Internet (Claro)', url: 'https://mi.claro.com.co/pagos', icon: 'fa-wifi' },
+                    { id: 'pse_3', name: 'Impuestos DIAN', url: 'https://muisca.dian.gov.co/WebRutMuisca/DefLogin.faces', icon: 'fa-file-invoice-dollar' }
+                ];
+                saveState();
             }
+
+            if (state.pseLinks.length === 0) {
+                cont.innerHTML = `<div class="text-center p-6 border border-dashed border-emerald-200 rounded-[1.5rem] bg-emerald-50/30"><p class="text-[10px] font-bold text-emerald-600/70 uppercase tracking-widest">No hay enlaces configurados</p></div>`;
+                return;
+            }
+
+            cont.innerHTML = state.pseLinks.map(link => {
+                const iconClass = link.icon || 'fa-building-columns';
+                return `<div class="flex items-center justify-between p-3 bg-slate-50 rounded-[1.25rem] border border-slate-100 shadow-sm transition-colors hover:border-emerald-200 group">
+                    <button onclick="redirigirPagoDirecto('${link.url}')" class="flex flex-1 items-center gap-3 text-left min-w-0 pr-2">
+                        <div class="w-10 h-10 rounded-full bg-white text-emerald-600 flex items-center justify-center shadow-sm shrink-0 border border-slate-100"><i class="fa-solid ${iconClass} text-[14px]"></i></div>
+                        <div class="truncate">
+                            <p class="text-xs font-black uppercase theme-text truncate">${link.name}</p>
+                            <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${link.url}</p>
+                        </div>
+                    </button>
+                    <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                </div>`;
+            }).join('');
+        }
+
+        function openNewPSEForm() {
+            const mod = $id('new-pse-modal'); if(!mod) return;
+            $id('f-pse-id').value = '';
+            $id('f-pse-name').value = '';
+            $id('f-pse-url').value = '';
+            $id('f-pse-icon').value = '';
+            mod.classList.remove('hidden');
+        }
+
+        function closeNewPSEForm() {
+            const mod = $id('new-pse-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function savePSELink(e) {
+            e.preventDefault();
+            const id = $id('f-pse-id').value;
+            const name = $id('f-pse-name').value.trim();
+            const url = $id('f-pse-url').value.trim();
+            let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
+            if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; // Auto corrección simple
+
+            if (!name || !url) return alert("El nombre y la URL son obligatorios.");
+            if (!state.pseLinks) state.pseLinks = [];
+
+            if (id) {
+                const link = state.pseLinks.find(l => l.id === id);
+                if (link) { link.name = name; link.url = url; link.icon = icon; }
+            } else {
+                state.pseLinks.push({ id: 'pse_' + Date.now(), name, url, icon });
+            }
+
+            saveState(); renderPSELinks(); closeNewPSEForm();
         }
         // ---------------------------
 
@@ -5263,6 +5345,10 @@
 
         function renderTasksTab() {
             if(!state.tasks) state.tasks = [];
+            
+            // APEX FIX: Renderizar la lista inline de PSE cada vez que se carga la pestaña
+            if(typeof renderPSELinks === 'function') renderPSELinks();
+            
             const pendingList = $id('tasks-list-pending');
             const completedList = $id('tasks-list-completed');
             const completedContainer = $id('tasks-list-completed-container');
@@ -5994,6 +6080,7 @@
             else if(type === 'bulk_task') msgEl.innerText = "¿Eliminar las tareas seleccionadas permanentemente?";
             else if(type === 'goal') msgEl.innerText = "¿Eliminar esta meta de ahorro (Sinking Fund)?";
             else if(type === 'cat_budget') msgEl.innerText = `¿Eliminar el límite de presupuesto para esta categoría?`;
+            else if(type === 'pse_link') msgEl.innerText = `¿Eliminar este enlace de pago rápido?`;
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
             else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
@@ -6052,6 +6139,10 @@
             } else if (type === 'cat_budget') {
                 delete state.budgets[id];
                 saveState(); renderBudgetTab();
+            } else if (type === 'pse_link') {
+                state.pseLinks = state.pseLinks.filter(l => l.id !== id);
+                saveState();
+                if(typeof renderPSELinks === 'function') renderPSELinks();
             } else if (type === 'account_shared' || type === 'account_personal') {
                 executeAccountDeletion(id);
             } else if (type === 'update_app') {
