@@ -666,8 +666,8 @@
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
 
-            <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto">
-                <h3 class="text-red-600 font-black text-sm uppercase mb-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Zona de Peligro</h3>
+            <div class="bg-red-50 border border-red-200 rounded-[2.5rem] p-6 text-center md:max-w-2xl md:mx-auto" id="danger-zone-container" style="display: none;">
+                <h3 class="text-red-600 font-black text-sm uppercase mb-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Zona de Peligro (Root Admin)</h3>
                 <div id="reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
                     <p class="text-[10px] text-red-600 font-bold uppercase">Acción irreversible. Ingrese su PIN y escriba <b>RESET</b>:</p>
                     <div class="flex gap-2">
@@ -6757,6 +6757,15 @@
 
             updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
+
+            const dz = $id('danger-zone-container');
+            if(dz) {
+                if(userProfile && userProfile.pin === "1234") {
+                    dz.style.display = 'block';
+                } else {
+                    dz.style.display = 'none';
+                }
+            }
         }
 
         // APEX FIX: Estimador de Uso de Firebase Firestore SSoT (Cero Alertas)
@@ -7341,41 +7350,53 @@
             const pinEl = $id('reset-pin');
             const pin = pinEl ? pinEl.value.trim() : '';
             
-            // APEX FIX: Admin PIN forzado a 1234 y Keyword RESET
-            if (kw === 'RESET' && pin === "1234") {
+            // APEX FIX: Admin PIN forzado a 1234 y Keyword RESET. Exige ser Root Admin.
+            if (kw === 'RESET' && pin === "1234" && userProfile && userProfile.pin === "1234") {
                 
-                // Purga destructiva profunda en Firebase
+                // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
                     try {
-                        const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        const batch = writeBatch(window.db);
+                        const { collection, getDocs, doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        let batch = writeBatch(window.db);
+                        let opsCount = 0;
                         
-                        // 1. Eliminar Data Core y fragmentos de Transacciones
-                        if (currentUser) {
-                            batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core'));
-                            const years = new Set((state.tx || []).map(t => new Date(t.date).getFullYear() || new Date().getFullYear()));
-                            years.forEach(y => {
-                                batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + y));
-                            });
+                        // 1. Eliminar Data Core y fragmentos de Transacciones de TODOS LOS USUARIOS en la BD
+                        const usersSnap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
+                        for (const userDoc of usersSnap.docs) {
+                            const email = userDoc.id;
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                            opsCount++;
+                            
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
+                            opsCount++;
+                            
+                            const currentYear = new Date().getFullYear();
+                            for (let y = currentYear - 5; y <= currentYear + 5; y++) {
+                                batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                                opsCount++;
+                            }
+                            
+                            if (opsCount > 400) {
+                                await batch.commit();
+                                batch = writeBatch(window.db);
+                                opsCount = 0;
+                            }
                         }
 
-                        // 2. Eliminar todas las cuentas locales atadas al dispositivo en el directorio de usuarios y su raíz
-                        const currentYear = new Date().getFullYear();
-                        for (let i = 0; i < localStorage.length; i++) {
-                            const key = localStorage.key(i);
-                            if (key && key.startsWith('nexus_profile_')) {
-                                const email = key.replace('nexus_profile_', '');
-                                batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
-                                
-                                // APEX FIX: Borrado de raíz profundo para todos los usuarios atados a este dispositivo
-                                batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
-                                for (let y = currentYear - 3; y <= currentYear + 3; y++) {
-                                    batch.delete(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
-                                }
+                        // 2. Eliminar todas las bóvedas compartidas P2P globales
+                        const sharedSnap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
+                        for (const sharedDoc of sharedSnap.docs) {
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedDoc.id));
+                            opsCount++;
+                            if (opsCount > 400) {
+                                await batch.commit();
+                                batch = writeBatch(window.db);
+                                opsCount = 0;
                             }
                         }
                         
-                        await batch.commit();
+                        if (opsCount > 0) await batch.commit();
+
                     } catch(e) {
                         console.warn("[APEX] Fricción purgada de Nube", e);
                     }
@@ -7398,7 +7419,7 @@
                 // UI Feedback Cero Fricción
                 const zone = $id('reset-confirm-zone');
                 if (zone) {
-                    zone.innerHTML = `<div class="p-6 bg-red-100 rounded-2xl text-center animate-slideUp"><i class="fa-solid fa-skull-crossbones text-red-600 text-4xl mb-3"></i><p class="text-[10px] text-red-800 font-black uppercase tracking-widest">Bóveda Destruida.<br>Reiniciando Sistema...</p></div>`;
+                    zone.innerHTML = `<div class="p-6 bg-red-100 rounded-2xl text-center animate-slideUp"><i class="fa-solid fa-skull-crossbones text-red-600 text-4xl mb-3"></i><p class="text-[10px] text-red-800 font-black uppercase tracking-widest">Base de Datos Erradicada.<br>Reiniciando Sistema a Cero...</p></div>`;
                 }
                 
                 setTimeout(() => location.reload(), 2500);
