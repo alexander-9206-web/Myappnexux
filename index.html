@@ -661,6 +661,19 @@
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
 
+            <!-- BOTÓN DESBLOQUEO ROOT -->
+            <div id="admin-unlock-container" class="md:max-w-2xl md:mx-auto mt-6">
+                <button onclick="document.getElementById('admin-auth-box').classList.remove('hidden'); this.classList.add('hidden');" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-colors border border-slate-800"><i class="fa-solid fa-user-shield mr-1"></i> Habilitar Panel de Administrador</button>
+                <div id="admin-auth-box" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Ingrese PIN Root</p>
+                    <div class="flex gap-2">
+                        <input type="password" id="admin-master-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] flex-1 text-sm bg-slate-800 border-slate-700 text-white outline-none focus:border-red-500" inputmode="numeric">
+                        <button onclick="verifyAdminRoot()" class="bg-red-600 text-white px-6 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-unlock"></i></button>
+                    </div>
+                    <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
+                </div>
+            </div>
+
             <!-- BLOQUE ADMINISTRADOR GLOBAL (ROOT) -->
             <div id="admin-users-block" class="theme-card p-6 md:p-8 rounded-[2rem] border shadow-sm md:col-span-2 hidden bg-red-50/20 border-red-200 md:max-w-2xl md:mx-auto mt-6">
                 <div class="flex justify-between items-center mb-4 border-b border-red-200/50 pb-3">
@@ -671,7 +684,8 @@
 
                 <!-- NUEVO: Módulo de Feature Flags (Encendido/Apagado de Apps) -->
                 <div class="mt-6 pt-5 border-t border-red-200/50">
-                    <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest mb-4"><i class="fa-solid fa-toggle-on mr-2"></i>Control de Módulos (App)</h3>
+                    <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest mb-1"><i class="fa-solid fa-toggle-on mr-2"></i>Control de Módulos (App)</h3>
+                    <p class="text-[9px] text-slate-500 font-bold mb-4 leading-relaxed">Activa o desactiva módulos para la bóveda en curso. Para editar los permisos de otra persona, usa el botón <i class="fa-solid fa-key text-amber-500 mx-1"></i> <b>Tomar Control</b> en su perfil arriba y ajusta estos switches desde adentro.</p>
                     <div id="admin-modules-list" class="grid grid-cols-2 md:grid-cols-3 gap-3"></div>
                 </div>
 
@@ -1489,6 +1503,7 @@
         let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency';
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
+        let isRootAdminUnlocked = false;
 
         // APEX FIX: Variables globales de nube
         let cloudDb = null, fsLib = null, cloudAppId = 'nexus';
@@ -6795,24 +6810,46 @@
             updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
+            const isMaster = (userProfile && userProfile.pin === "1234") || isRootAdminUnlocked;
             const adminBlock = $id('admin-users-block');
+            const unlockCont = $id('admin-unlock-container');
+
             if(adminBlock) {
-                if(userProfile && userProfile.pin === "1234") {
-                    adminBlock.style.display = 'block';
+                if(isMaster) {
+                    adminBlock.classList.remove('hidden');
+                    if(unlockCont) unlockCont.classList.add('hidden');
                     loadAdminGlobalUsers();
                     if(typeof renderAdminModules === 'function') renderAdminModules();
                 } else {
-                    adminBlock.style.display = 'none';
+                    adminBlock.classList.add('hidden');
+                    if(unlockCont) unlockCont.classList.remove('hidden');
                 }
             }
 
             const dz = $id('danger-zone-container');
             if(dz) {
-                if(userProfile && userProfile.pin === "1234") {
-                    dz.style.display = 'block';
+                if(isMaster) {
+                    dz.classList.remove('hidden');
                 } else {
-                    dz.style.display = 'none';
+                    dz.classList.add('hidden');
                 }
+            }
+        }
+
+        function verifyAdminRoot() {
+            const pin = $id('admin-master-pin').value;
+            if (pin === "1234" || (userProfile && userProfile.pin === "1234")) {
+                isRootAdminUnlocked = true;
+                $id('admin-unlock-container').classList.add('hidden');
+                const err = $id('admin-auth-error'); if(err) err.classList.add('hidden');
+                renderSettingsTab();
+                setTimeout(() => {
+                    const block = $id('admin-users-block');
+                    if(block) block.scrollIntoView({behavior: 'smooth', block: 'start'});
+                }, 100);
+            } else {
+                const err = $id('admin-auth-error'); if(err) err.classList.remove('hidden');
+                $id('admin-master-pin').value = '';
             }
         }
 
