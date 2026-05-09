@@ -1594,30 +1594,34 @@
                 const db = await this.init();
                 return new Promise((resolve) => {
                     const tx = db.transaction('states', 'readwrite');
-                    const store = tx.objectStore('states');
-                    store.put({ userId: userId, ...stateObj });
-                    tx.oncomplete = () => resolve(true);
+                    tx.objectStore('states').put({ userId, data: JSON.parse(JSON.stringify(stateObj)) });
+                    tx.oncomplete = () => resolve();
                 });
             },
             getState: async function(userId) {
                 const db = await this.init();
                 return new Promise((resolve) => {
                     const tx = db.transaction('states', 'readonly');
-                    const store = tx.objectStore('states');
-                    const req = store.get(userId);
-                    req.onsuccess = () => resolve(req.result);
-                    req.onerror = () => resolve(null);
+                    const req = tx.objectStore('states').get(userId);
+                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
                 });
             },
-            saveSession: async function(userId) {
+            // APEX FIX: Persistencia de Sesión Activa a prueba de fallos (Capa 2)
+            saveSession: async function(email) {
+                const db = await this.init();
                 return new Promise((resolve) => {
-                    localStorage.setItem('nexus_current_user', userId);
-                    resolve(true);
+                    const tx = db.transaction('states', 'readwrite');
+                    tx.objectStore('states').put({ userId: 'nexus_active_session', data: email });
+                    tx.oncomplete = () => resolve();
                 });
             },
             getSession: async function() {
+                const db = await this.init();
                 return new Promise((resolve) => {
-                    resolve(localStorage.getItem('nexus_current_user'));
+                    const tx = db.transaction('states', 'readonly');
+                    const req = tx.objectStore('states').get('nexus_active_session');
+                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
+                    req.onerror = () => resolve(null);
                 });
             }
         };
@@ -3822,32 +3826,10 @@
         }
         // --- FIN MOTOR P2P ---
 
-        function saveCCPurchase(e, forceOverdraft = false, overdraftData = null) { 
-            if(e && typeof e.preventDefault === 'function') e.preventDefault(); 
-            let cardId, desc, amount, term, date;
-            
-            if (forceOverdraft && overdraftData) {
-                const parsed = JSON.parse(overdraftData);
-                cardId = parsed.cardId; desc = parsed.desc; amount = parsed.amount; term = parsed.term; date = parsed.date;
-            } else {
-                cardId = $id('cc-p-cardid') ? $id('cc-p-cardid').value : ''; 
-                desc = $id('cc-p-desc') ? $id('cc-p-desc').value.trim() : ''; 
-                amount = parseFloat($id('cc-p-amount') ? $id('cc-p-amount').dataset.raw : 0) || 0; 
-                term = parseInt($id('cc-p-term') ? $id('cc-p-term').dataset.raw : 0) || 0; 
-                date = $id('cc-p-date') ? $id('cc-p-date').value : new Date().toISOString().split('T')[0]; 
-            }
-
+        function saveCCPurchase(e) { 
+            e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
-            const card = state.accounts.find(a => a.id === cardId); if(!card) return; 
-            
-            if (!forceOverdraft) {
-                const available = (card.limit || 0) - card.balance; 
-                if(amount > available) { 
-                    triggerUIDelete('cc_overdraft', JSON.stringify({cardId, desc, amount, term, date})); 
-                    return; 
-                } 
-            }
-            
+            const card = state.accounts.find(a => a.id === cardId); if(!card) return; const available = (card.limit || 0) - card.balance; if(amount > available) { if(!confirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`)) return; } 
             card.balance += amount; 
             // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
             const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
@@ -3855,7 +3837,7 @@
             
             state.tx.push(newTx); saveCloudTx(newTx);
             state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
-            saveState(); if(typeof closeCCPurchaseModal === 'function') closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
+            saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
         }
         
         function handleParentCategoryChange() {
@@ -6167,12 +6149,6 @@
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
             else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
-            else if(type === 'cc_overdraft') msgEl.innerText = `⚠️ El valor excede el cupo disponible de la Tarjeta.\n\n¿Estás seguro de registrar un sobregiro?`;
-
-            const confirmBtn = mod.querySelector('button.bg-red-600');
-            if (confirmBtn) {
-                confirmBtn.innerText = (type === 'cc_overdraft') ? 'Sobregirar' : 'Eliminar';
-            }
 
             mod.classList.remove('hidden');
         }
@@ -6232,6 +6208,8 @@
                 state.pseLinks = state.pseLinks.filter(l => l.id !== id);
                 saveState();
                 if(typeof renderPSELinks === 'function') renderPSELinks();
+            } else if (type === 'account_shared' || type === 'account_personal') {
+                executeAccountDeletion(id);
             } else if (type === 'update_app') {
                 if ('serviceWorker' in navigator) {
                     navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -6240,8 +6218,6 @@
                 }
                 window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
                 return;
-            } else if (type === 'cc_overdraft') {
-                saveCCPurchase(null, true, id);
             }
             closeUIDeleteModal();
         }
