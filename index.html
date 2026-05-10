@@ -322,7 +322,7 @@
             <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-purple-600">Auditoría SSoT</h2></div>
             <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
                 <div class="flex gap-2 bg-slate-50 p-1 rounded-xl"><button onclick="setDbQuickFilter('hoy')" type="button" id="db-qf-hoy" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Hoy</button><button onclick="setDbQuickFilter('semana')" type="button" id="db-qf-semana" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Sem.</button><button onclick="setDbQuickFilter('mes')" type="button" id="db-qf-mes" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Mes</button><button onclick="setDbQuickFilter('all')" type="button" id="db-qf-all" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Todo</button></div>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 md:gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Desde</label><input type="date" id="db-filter-start" class="form-input text-xs" onchange="renderDatabase()"></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hasta</label><input type="date" id="db-filter-end" class="form-input text-xs" onchange="renderDatabase()"></div>
                     
@@ -343,6 +343,8 @@
 
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cat.</label><select id="db-filter-cat" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option></select></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="db-filter-currency" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Cuenta</label><select id="db-filter-account" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Clasif.</label><select id="db-filter-cost" class="form-input text-xs" onchange="renderDatabase()"><option value="all">Todas</option><option value="variable">Variable</option><option value="fixed">Fijo</option><option value="direct">Directo</option><option value="indirect">Indirecto</option></select></div>
                 </div>
             </div>
             <div class="flex justify-between items-center px-2 border-b border-slate-200 pb-2">
@@ -3318,7 +3320,10 @@
                             <button type="button" onclick="event.stopPropagation(); toggleTaskStatusDash('${t.id}')" class="w-5 h-5 shrink-0 rounded border-2 border-slate-300 flex items-center justify-center hover:border-indigo-400 transition-colors bg-white"></button>
                             <div class="flex flex-col truncate">
                                 <p class="text-[10px] font-black uppercase text-slate-700 truncate">${t.title}</p>
-                                ${t.timeAlarm ? `<p class="text-[8px] font-bold text-indigo-400 mt-0.5"><i class="fa-solid fa-bell mr-1"></i>${t.timeAlarm}</p>` : ''}
+                                <div class="flex items-center gap-1 mt-0.5">
+                                    ${t.timeAlarm ? `<p class="text-[8px] font-bold text-indigo-400"><i class="fa-solid fa-bell mr-1"></i>${t.timeAlarm}</p>` : ''}
+                                    ${t.createdBy ? `<p class="text-[7px] font-black uppercase bg-purple-100 text-purple-600 px-1 py-0.5 rounded"><i class="fa-solid fa-user mr-0.5"></i>${t.createdBy.split(' ')[0]}</p>` : ''}
+                                </div>
                             </div>
                         </div>
                         <span class="text-[7px] font-black uppercase ${pBg} ${pText} border px-2 py-0.5 rounded shadow-sm shrink-0">${t.priority==='high'?'Alta':t.priority==='medium'?'Media':'Baja'}</span>
@@ -4263,7 +4268,8 @@
             } else if (sel.value !== '') {
                 parentCont.classList.add('hidden');
                 
-                // APEX FIX: Conexión con el nuevo Diccionario Global SSoT
+                // APEX FIX: Conexión con el nuevo Diccionario Global SSoT y Auto-Sanación
+                if (!state.categories) state.categories = { global: [] };
                 const cats = state.categories.global || [];
                 const parent = sel.value;
                 const subs = new Set();
@@ -4351,7 +4357,9 @@
             
             const fullCatName = `[${parentVal}] ${subVal}`;
             
+            if(!state.categories) state.categories = { global: [] };
             if(!state.categories.global) state.categories.global = [];
+            
             if(!state.categories.global.includes(fullCatName)) {
                 state.categories.global.push(fullCatName);
                 saveState();
@@ -4833,7 +4841,8 @@
             renderDatabase();
         }
         
-        function initDatabaseTab() { setDbQuickFilter('mes'); }
+        function initDatabaseTab() { setDbQuickFilter('mes'); populateDbAccountFilter(); }
+        function populateDbAccountFilter() { const accSel = $id('db-filter-account'); if(accSel) { accSel.innerHTML = '<option value="all">Todas</option>'; (state.accounts || []).forEach(a => { accSel.innerHTML += `<option value="${a.id}">${a.name}</option>`; }); } }
         function setDbQuickFilter(range) {
             $qAll('#tab-database button[id^="db-qf-"]').forEach(b => { b.classList.remove('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); b.classList.add('text-slate-400'); });
             const btn = $id('db-qf-' + range); if (btn) { btn.classList.remove('text-slate-400'); btn.classList.add('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); }
@@ -4842,7 +4851,7 @@
             const fs = $id('db-filter-start'); if(fs) fs.value = start.toISOString().split('T')[0]; 
             const fe = $id('db-filter-end'); if(fe) fe.value = end.toISOString().split('T')[0]; updateDbCatFilter();
         }
-        function resetDbFilters() { const tp = $id('db-filter-type'); if(tp) tp.value = 'all'; const fc = $id('db-filter-currency'); if(fc) fc.value = 'all'; setDbQuickFilter('mes'); }
+        function resetDbFilters() { const tp = $id('db-filter-type'); if(tp) tp.value = 'all'; const fc = $id('db-filter-currency'); if(fc) fc.value = 'all'; const fa = $id('db-filter-account'); if(fa) fa.value = 'all'; const fcost = $id('db-filter-cost'); if(fcost) fcost.value = 'all'; setDbQuickFilter('mes'); }
         
         // APEX FIX: Corrección del Filtro de Categorías en Auditoría SSoT para reflejar creaciones dinámicas
         function updateDbCatFilter() { 
@@ -4886,6 +4895,8 @@
         function renderDatabase() { 
             const fsEl = $id('db-filter-start'); const feEl = $id('db-filter-end'); const ftEl = $id('db-filter-type'); const fcEl = $id('db-filter-cat'); const fCurrEl = $id('db-filter-currency'); if(!fsEl || !feEl || !ftEl || !fcEl) return;
             const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); const tp = ftEl.value; const ct = fcEl.value; const fCurr = fCurrEl ? fCurrEl.value : 'all';
+            const fAccEl = $id('db-filter-account'); const fAcc = fAccEl ? fAccEl.value : 'all';
+            const fCostEl = $id('db-filter-cost'); const fCost = fCostEl ? fCostEl.value : 'all';
             
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
@@ -4940,6 +4951,8 @@
                 
                 const origCur = t.original_currency || t.currency;
                 if(fCurr !== 'all' && origCur !== fCurr) return false;
+                if(fAcc !== 'all' && t.accId !== fAcc && t.toAccId !== fAcc) return false;
+                if(fCost !== 'all' && t.costType !== fCost) return false;
                 
                 return true; 
             }); 
@@ -5882,7 +5895,7 @@
                     // APEX FIX: Lógica diferencial al tocar el calendario (Día con Tareas vs Día Vacío)
                     const clickAction = hasEv ? `setTaskCalDate('${dateStr}')` : `openTaskForm(null, '${dateStr}')`;
 
-                    gridHtml += `<div onclick="${clickAction}" class="cal-cell ${extraClasses}" style="min-height:32px; ${cellStyle}" ${hasEv ? `title="${dayTasks.map(t=>t.title).join(', ')}"` : ''}>${i}</div>`;
+                    gridHtml += `<div onclick="${clickAction}" class="cal-cell ${extraClasses}" style="min-height:32px; ${cellStyle}" ${hasEv ? `title="${dayTasks.map(t => t.createdBy ? t.title + ' (' + t.createdBy.split(' ')[0] + ')' : t.title).join(', ')}"` : ''}>${i}</div>`;
                 }
                 taskGrid.innerHTML = gridHtml;
             }
@@ -5918,7 +5931,8 @@
                             if (t.priority === 'high') color = 'bg-red-50 text-red-600 border-red-100';
                             if (t.priority === 'medium') color = 'bg-amber-50 text-amber-600 border-amber-100';
                             if (t.priority === 'low') color = 'bg-emerald-50 text-emerald-600 border-emerald-100';
-                            return `<div onclick="openTaskForm('${t.id}')" class="text-[9px] font-bold truncate p-1.5 border rounded-lg mb-1.5 cursor-pointer shadow-sm active:scale-95 transition-transform ${color}" title="${t.title}">${t.timeAlarm ? t.timeAlarm + ' ' : ''}${t.title}</div>`;
+                            const taskTooltip = t.createdBy ? t.title + ' (' + t.createdBy.split(' ')[0] + ')' : t.title;
+                            return `<div onclick="openTaskForm('${t.id}')" class="text-[9px] font-bold truncate p-1.5 border rounded-lg mb-1.5 cursor-pointer shadow-sm active:scale-95 transition-transform ${color}" title="${taskTooltip}">${t.timeAlarm ? t.timeAlarm + ' ' : ''}${t.title}</div>`;
                         }).join('');
                     } else {
                         tasksHtml = `<div class="text-[9px] text-slate-400 font-bold italic text-center py-4">Libre</div>`;
@@ -5976,7 +5990,8 @@
                 else { pBg = 'bg-slate-50'; pText = 'text-slate-400 border-transparent'; }
 
                 const badge = t.priority !== 'none' ? `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>` : '';
-                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}${t.timeAlarm ? ` <i class="fa-regular fa-clock ml-2 mr-1"></i>${t.timeAlarm}` : ''}</span>` : '';
+                const pCreator = t.createdBy ? `<span class="text-[7px] font-black uppercase bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded shadow-sm border border-purple-200 ml-2 whitespace-nowrap shrink-0"><i class="fa-solid fa-user mr-0.5"></i>${t.createdBy.split(' ')[0]}</span>` : '';
+                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center flex-wrap gap-y-1"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}${t.timeAlarm ? ` <i class="fa-regular fa-clock ml-2 mr-1"></i>${t.timeAlarm}` : ''}${pCreator}</span>` : '';
                 
                 // APEX FIX: Inyectar el border-left para el efecto visual "por color"
                 const card = `
@@ -6156,7 +6171,8 @@
                 }
             } else {
                 finalId = 'task_' + Date.now();
-                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, alarmTriggered: false, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId });
+                const creatorName = userProfile && userProfile.name ? userProfile.name : 'Usuario';
+                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, alarmTriggered: false, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName });
             }
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
@@ -8119,6 +8135,9 @@
         function updateCatManageView() {
             const cont = $id('cat-manage-list'); if(!cont) return;
             
+            if (!state.categories) state.categories = { global: [] };
+            if (!state.catParents) state.catParents = { global: [] };
+
             let cats = state.categories.global || [];
             let parents = state.catParents.global || [];
             
@@ -8257,7 +8276,9 @@
 
             if(!newName || orig === newName) { closeCategoryEdit(); return; }
             
+            if(!state.categories) state.categories = { global: [] };
             if(!state.categories.global) state.categories.global = [];
+            if(!state.catParents) state.catParents = { global: [] };
             if(!state.catParents.global) state.catParents.global = [];
 
             // APEX FIX: Edición Múltiple en Cascada (SSoT)
