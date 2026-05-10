@@ -925,6 +925,7 @@
                         <h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-500">Mis Tareas</h2>
                         <div class="flex items-center gap-2 mt-1">
                             <select id="active-task-vault" onchange="renderTasksTab()" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg outline-none cursor-pointer border border-indigo-100 shadow-sm max-w-[120px] truncate">
+                                <option value="all" selected>Ver Todas</option>
                                 <option value="personal">Privadas</option>
                             </select>
                             <button onclick="openTaskVaultModal()" class="w-6 h-6 bg-purple-50 text-purple-600 rounded-full border border-purple-100 shadow-sm flex items-center justify-center hover:bg-purple-100 transition-colors active:scale-90" title="Bóvedas P2P"><i class="fa-solid fa-link text-[8px]"></i></button>
@@ -5794,8 +5795,10 @@
             if(!pendingList || !completedList || !completedContainer) return;
 
             // APEX FIX: Aislamiento visual por Bóveda
-            const activeVault = $id('active-task-vault') ? $id('active-task-vault').value : 'personal';
-            const currentVaultTasks = state.tasks.filter(t => (t.vaultId || 'personal') === activeVault);
+            const activeVault = $id('active-task-vault') ? $id('active-task-vault').value : 'all';
+            const currentVaultTasks = activeVault === 'all' 
+                ? state.tasks 
+                : state.tasks.filter(t => (t.vaultId || 'personal') === activeVault);
 
             // APEX FIX: Cálculo de Indicadores KPI
             if (kpiContainer) {
@@ -6101,7 +6104,10 @@
                 $id('ftk-date').value = prefillDate || '';
                 if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = '';
                 $id('ftk-priority').value = 'medium';
-                if($id('ftk-vault') && $id('active-task-vault')) $id('ftk-vault').value = $id('active-task-vault').value;
+                if($id('ftk-vault') && $id('active-task-vault')) {
+                    const aV = $id('active-task-vault').value;
+                    $id('ftk-vault').value = aV === 'all' ? 'personal' : aV;
+                }
                 else if($id('ftk-vault')) $id('ftk-vault').value = 'personal';
                 if(delBtn) delBtn.classList.add('hidden'); // Ocultar botón si es nueva
             }
@@ -8532,9 +8538,13 @@
             const formSel = $id('ftk-vault');
             const formCont = $id('ftk-vault-container');
             
-            let html = '<option value="personal">Privadas</option>';
+            let htmlActive = '<option value="all">Ver Todas</option><option value="personal">Privadas</option>';
+            let htmlForm = '<option value="personal">Privadas</option>';
             if(state.taskVaults && state.taskVaults.length > 0) {
-                state.taskVaults.forEach(v => { html += `<option value="${v.remoteId}">${v.name}</option>`; });
+                state.taskVaults.forEach(v => { 
+                    htmlActive += `<option value="${v.remoteId}">${v.name}</option>`; 
+                    htmlForm += `<option value="${v.remoteId}">${v.name}</option>`; 
+                });
                 if(formCont) formCont.classList.remove('hidden');
             } else {
                 if(formCont) formCont.classList.add('hidden');
@@ -8542,14 +8552,14 @@
             
             if(activeSel) {
                 const prevActive = activeSel.value;
-                activeSel.innerHTML = html;
-                if((state.taskVaults && state.taskVaults.some(v => v.remoteId === prevActive)) || prevActive === 'personal') activeSel.value = prevActive;
-                else activeSel.value = 'personal';
+                activeSel.innerHTML = htmlActive;
+                if((state.taskVaults && state.taskVaults.some(v => v.remoteId === prevActive)) || prevActive === 'personal' || prevActive === 'all') activeSel.value = prevActive;
+                else activeSel.value = 'all';
             }
             
             if(formSel) {
                 const prevForm = formSel.value;
-                formSel.innerHTML = html;
+                formSel.innerHTML = htmlForm;
                 if((state.taskVaults && state.taskVaults.some(v => v.remoteId === prevForm)) || prevForm === 'personal') formSel.value = prevForm;
                 else formSel.value = 'personal';
             }
