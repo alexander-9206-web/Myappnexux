@@ -748,6 +748,7 @@
             <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter theme-text">Bóvedas</h2></div>
                 <div class="flex gap-2">
+                    <button onclick="openReorderModal()" type="button" title="Reordenar Bóvedas" class="w-10 h-10 bg-slate-100 text-slate-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-arrow-down-up-across-line"></i></button>
                     <button onclick="openLinkSharedModal()" type="button" class="w-10 h-10 bg-purple-600 text-white rounded-full shadow-lg shadow-purple-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-link"></i></button>
                     <button onclick="openAccountModal()" type="button" class="w-10 h-10 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
@@ -1295,11 +1296,14 @@
 
                 <div class="flex gap-4 pt-2">
                     <div class="flex-1 bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col justify-center">
-                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-1 block">Link Entidad (Extrae Logo)</label>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-1 block">Link Entidad (O subir Logo)</label>
                         <div class="flex gap-2 items-center">
                             <input type="url" id="fa-bank-url" class="form-input text-xs w-full bg-white py-2" placeholder="Ej: bancolombia.com" onchange="updateBankLogoPreview()">
+                            <input type="file" id="fa-logo-upload" accept="image/*" class="hidden" onchange="processAccountLogoUpload(event)">
+                            <button type="button" onclick="document.getElementById('fa-logo-upload').click()" class="w-8 h-8 rounded-xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center shrink-0 shadow-sm hover:text-indigo-500 transition-colors active:scale-90" title="Subir Imagen"><i class="fa-solid fa-upload text-[10px]"></i></button>
                             <div id="fa-logo-preview" class="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-sm"><i class="fa-solid fa-link text-slate-300 text-[10px]"></i></div>
                         </div>
+                        <input type="hidden" id="fa-custom-logo-b64">
                     </div>
                     <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center shrink-0 w-24">
                         <label class="text-[9px] font-black uppercase text-slate-400 mb-1">Color</label>
@@ -1312,6 +1316,18 @@
                     <button type="button" id="btn-delete-account" onclick="deleteAccount()" class="w-full bg-red-50 text-red-600 p-4 rounded-2xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform hidden">Eliminar Cuenta</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- MODAL REORDENAR CUENTAS -->
+    <div id="reorder-accounts-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-2 shrink-0">
+                <h3 class="text-xl font-black uppercase tracking-tighter theme-text"><i class="fa-solid fa-arrow-down-up-across-line mr-2 text-indigo-500"></i>Reordenar</h3>
+                <button type="button" onclick="closeReorderModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-tight shrink-0">Sube o baja las cuentas. El orden de las divisas y grupos en el Dashboard dependerá de la posición de cada bóveda aquí.</p>
+            <div id="reorder-accounts-list" class="flex-1 overflow-y-auto space-y-2 hide-scrollbar pr-2 pb-4"></div>
         </div>
     </div>
 
@@ -3027,6 +3043,8 @@
         function updateBankLogoPreview() {
             const urlInput = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
             const preview = $id('fa-logo-preview');
+            const customB64 = $id('fa-custom-logo-b64');
+            if (customB64) customB64.value = ''; // Resetear el logo custom si el usuario escribe una URL
             if (!preview) return;
             if (urlInput) {
                 let logoUrl = urlInput;
@@ -3042,6 +3060,38 @@
                 }
             }
             preview.innerHTML = '<i class="fa-solid fa-link text-slate-300 text-[10px]"></i>';
+        }
+
+        function processAccountLogoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const MAX_SIZE = 128;
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > height) {
+                        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+                    } else {
+                        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+                    }
+                    canvas.width = width; canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const dataUrl = canvas.toDataURL('image/png'); 
+                    const customB64 = $id('fa-custom-logo-b64');
+                    if (customB64) customB64.value = dataUrl;
+                    const urlInput = $id('fa-bank-url');
+                    if (urlInput) urlInput.value = ''; // Limpiar la URL para evitar conflictos
+                    const preview = $id('fa-logo-preview');
+                    if (preview) preview.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover">`;
+                }
+                img.src = e.target.result;
+            }
+            reader.readAsDataURL(file);
         }
 
         function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
@@ -3787,6 +3837,7 @@
             if($id('fa-type')) $id('fa-type').value = 'liquid'; 
             if($id('fa-color')) $id('fa-color').value = '#e2e8f0'; 
             if($id('fa-bank-url')) $id('fa-bank-url').value = '';
+            if($id('fa-custom-logo-b64')) $id('fa-custom-logo-b64').value = '';
             if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
             const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.value=''; vLimEl.dataset.raw=''; } 
             const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.value=''; vTerm.dataset.raw=''; } 
@@ -3808,7 +3859,18 @@
             if($id('fa-type')) $id('fa-type').value = acc.type; 
             if($id('fa-color')) $id('fa-color').value = acc.color || '#e2e8f0'; 
             if($id('fa-bank-url')) $id('fa-bank-url').value = acc.bankUrl || '';
-            if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
+            
+            const customB64 = $id('fa-custom-logo-b64');
+            if(customB64) customB64.value = (acc.logoUrl && acc.logoUrl.startsWith('data:image')) ? acc.logoUrl : '';
+            
+            if(typeof updateBankLogoPreview === 'function') {
+                if (acc.logoUrl && acc.logoUrl.startsWith('data:image')) {
+                    const preview = $id('fa-logo-preview');
+                    if (preview) preview.innerHTML = `<img src="${acc.logoUrl}" class="w-full h-full object-cover">`;
+                } else {
+                    updateBankLogoPreview();
+                }
+            }
             toggleCreditFields(); 
             if(acc.type === 'credit') { 
                 const limEl = $id('fa-limit'); if(limEl) { limEl.value = fmt(acc.limit||0, acc.currency); limEl.dataset.raw = acc.limit||0; }
@@ -3829,6 +3891,71 @@
         }
 
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        
+        // --- INICIO REORDENAR CUENTAS ---
+        function openReorderModal() {
+            const mod = $id('reorder-accounts-modal');
+            if(!mod) return;
+            renderReorderList();
+            mod.classList.remove('hidden');
+        }
+
+        function closeReorderModal() {
+            const mod = $id('reorder-accounts-modal');
+            if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => {
+                mod.classList.add('hidden');
+                mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
+            }, 300);
+        }
+
+        function renderReorderList() {
+            const list = $id('reorder-accounts-list');
+            if(!list) return;
+
+            if(!state.accounts || state.accounts.length === 0) {
+                list.innerHTML = '<p class="text-xs text-center text-slate-400 font-bold p-6 border border-dashed rounded-3xl">No hay bóvedas creadas.</p>';
+                return;
+            }
+
+            list.innerHTML = state.accounts.map((a, i) => {
+                let badgeColor = 'bg-slate-100 text-slate-500 border-slate-200';
+                if(a.isShared) badgeColor = 'bg-purple-50 text-purple-600 border-purple-200';
+                else if(a.type === 'terceros') badgeColor = 'bg-orange-50 text-orange-600 border-orange-200';
+                else if(a.type === 'virtual') badgeColor = 'bg-indigo-50 text-indigo-600 border-indigo-200';
+                else if(a.type === 'credit') badgeColor = 'bg-red-50 text-red-600 border-red-200';
+
+                return `<div class="flex items-center justify-between p-3 bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-200 rounded-[1.25rem] shadow-sm transition-colors">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="flex flex-col gap-1 shrink-0 bg-white p-1 rounded-lg border border-slate-100 shadow-sm">
+                            <button type="button" onclick="moveAccountOrder(${i}, -1)" class="text-slate-400 hover:text-indigo-500 active:scale-90 p-1 transition-colors" ${i === 0 ? 'disabled style="opacity:0.2"' : ''}><i class="fa-solid fa-chevron-up text-[10px]"></i></button>
+                            <button type="button" onclick="moveAccountOrder(${i}, 1)" class="text-slate-400 hover:text-indigo-500 active:scale-90 p-1 transition-colors" ${i === state.accounts.length - 1 ? 'disabled style="opacity:0.2"' : ''}><i class="fa-solid fa-chevron-down text-[10px]"></i></button>
+                        </div>
+                        <div class="truncate">
+                            <p class="text-[10px] font-black uppercase text-slate-700 truncate">${a.name}</p>
+                            <p class="text-[7px] font-black uppercase mt-1 px-1.5 py-0.5 rounded shadow-sm border inline-block ${badgeColor}">${a.currency || state.settings.baseCurrency} • ${a.type}</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-grip-lines text-slate-300 ml-2 shrink-0"></i>
+                </div>`;
+            }).join('');
+        }
+
+        function moveAccountOrder(index, direction) {
+            if (index + direction < 0 || index + direction >= state.accounts.length) return;
+            
+            // Swap atómico
+            const temp = state.accounts[index];
+            state.accounts[index] = state.accounts[index + direction];
+            state.accounts[index + direction] = temp;
+
+            renderReorderList();
+            saveState();
+            renderAccountsTab();
+            updateDashboard(); // Refresca los sumadores globales en el mismo orden
+        }
+        // --- FIN REORDENAR CUENTAS ---
         
         function deleteAccount() {
             const id = $id('fa-id').value; if(!id) return; const acc = state.accounts.find(a => a.id === id); if(!acc) return;
@@ -3898,8 +4025,12 @@
             
             const color = ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null;
             const bankUrl = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
+            const customLogoB64 = $id('fa-custom-logo-b64') ? $id('fa-custom-logo-b64').value : '';
             let logoUrl = null;
-            if (bankUrl) {
+            
+            if (customLogoB64) {
+                logoUrl = customLogoB64;
+            } else if (bankUrl) {
                 const lowerUrl = bankUrl.toLowerCase();
                 // APEX FIX: Guarda la URL estática sin destruirla si es un vínculo directo
                 if (lowerUrl.match(/\.(jpeg|jpg|gif|png|svg|webp)(\?.*)?$/) || lowerUrl.includes('firebasestorage') || lowerUrl.includes('drive.google') || lowerUrl.includes('image')) {
