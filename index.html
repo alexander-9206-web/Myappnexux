@@ -17,6 +17,8 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>  
         :root { --app-bg: #f8fafc; --card-bg: #ffffff; --app-text: #0f172a; --val-inc: #10b981; --val-exp: #ef4444; --nexus-black: #000000; }
@@ -352,6 +354,7 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Reg: <span id="db-count" class="theme-text">0</span></p>
                     <button onclick="toggleDbDuplicates()" id="db-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
                     <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
+                    <button onclick="exportDatabasePDF()" class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-1" title="Exportar PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
                 </div>
                 <div class="flex items-center gap-2">
                     <select id="db-currency" onchange="renderDatabase()" class="text-[8px] font-black uppercase bg-purple-100 text-purple-700 px-1 py-0.5 rounded outline-none cursor-pointer">
@@ -4964,6 +4967,7 @@
         // AUDITORÍA
         let dbSortOrder = 'desc';
         let dbShowDuplicates = false;
+        let currentFilteredTx = []; // APEX FIX: Caché de la vista actual para PDF
 
         function toggleDbSort() { dbSortOrder = dbSortOrder === 'desc' ? 'asc' : 'desc'; const btn = $id('db-sort-btn'); if (btn) { btn.innerHTML = dbSortOrder === 'desc' ? '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC' : '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC'; } renderDatabase(); }
         
@@ -5139,6 +5143,8 @@
             
             const dcEl = $id('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
             
+            currentFilteredTx = fTx; // APEX FIX: Guardado de estado de filtro para PDF
+            
             const lC = $id('db-list'); if(!lC) return; 
             if(fTx.length === 0) { 
                 if (dbShowDuplicates) {
@@ -5223,6 +5229,99 @@
             }).join(''); 
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
+
+        // APEX FIX: Exportación de Auditoría a PDF con Resumen Inteligente
+        function exportDatabasePDF() {
+            if (!currentFilteredTx || currentFilteredTx.length === 0) {
+                return alert("No hay datos filtrados para exportar.");
+            }
+
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                const curSel = $id('db-currency'); 
+                const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
+
+                let totalInc = 0;
+                let totalExp = 0;
+
+                // Calcular Resumen Inicial basado estrictamente en el filtro
+                currentFilteredTx.forEach(t => {
+                    if (t.isProjected || t.type === 'transfer' || t.type === 'isolated' || t.renderType === 'afterpay') return;
+                    const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
+                    if (t.type === 'income') totalInc += amt;
+                    else if (t.type === 'expense') totalExp += amt;
+                });
+
+                const net = totalInc - totalExp;
+
+                // Extraer valores de los filtros para el resumen narrativo
+                const fsEl = $id('db-filter-start'); const startDate = fsEl && fsEl.value ? new Date(fsEl.value + 'T12:00:00').toLocaleDateString('es-CO') : 'Inicio';
+                const feEl = $id('db-filter-end'); const endDate = feEl && feEl.value ? new Date(feEl.value + 'T12:00:00').toLocaleDateString('es-CO') : 'Fin';
+                const ftEl = $id('db-filter-type'); const fType = ftEl ? ftEl.options[ftEl.selectedIndex].text : 'Todas';
+                const fcEl = $id('db-filter-cat'); const fCat = fcEl ? fcEl.options[fcEl.selectedIndex].text : 'Todas';
+                const fCurrEl = $id('db-filter-currency'); const fCurrFilter = fCurrEl ? fCurrEl.options[fCurrEl.selectedIndex].text : 'Todas';
+                const fAccEl = $id('db-filter-account'); const fAcc = fAccEl ? fAccEl.options[fAccEl.selectedIndex].text : 'Todas';
+                const fCostEl = $id('db-filter-cost'); const fCost = fCostEl ? fCostEl.options[fCostEl.selectedIndex].text : 'Todas';
+
+                // Construir el párrafo descriptivo
+                const incStr = '+' + fmt(totalInc, targetCurr);
+                const expStr = '-' + fmt(totalExp, targetCurr);
+                const netStr = (net >= 0 ? '+' : '') + fmt(net, targetCurr);
+                
+                const narrative = `Este reporte documenta los movimientos de la cuenta "${fAcc}" (Divisa de Filtro: ${fCurrFilter}) en el periodo comprendido entre el ${startDate} y el ${endDate}. Se ha aplicado una visualización por tipo de transacción "${fType}", categoría "${fCat}" y clasificación de gasto "${fCost}". Durante este ciclo auditado, los ingresos operativos sumaron ${incStr} y los egresos alcanzaron los ${expStr}, generando un balance neto consolidado de ${netStr}.`;
+
+                // Títulos y Metadata
+                doc.setFontSize(14);
+                doc.setTextColor(15, 23, 42); // slate-900
+                doc.setFont(undefined, 'bold');
+                doc.text("Auditoría Forense SSoT - NEXUS AR FINANCE", 14, 20);
+                
+                doc.setFontSize(9);
+                doc.setTextColor(100, 116, 139); // slate-500
+                doc.setFont(undefined, 'normal');
+                doc.text(`Fecha de emisión: ${new Date().toLocaleString('es-CO')} | Documento Confidencial`, 14, 26);
+                
+                // Párrafo de Resumen Ejecutivo
+                doc.setFontSize(10);
+                doc.setTextColor(30, 41, 59); // slate-800
+                const splitNarrative = doc.splitTextToSize(narrative, 182); // Auto-wrap a 182mm
+                doc.text(splitNarrative, 14, 36);
+                
+                const tableStartY = 36 + (splitNarrative.length * 5) + 4; // Ajuste dinámico de inicio de tabla
+
+                // Mapeo de la Matriz a formato AutoTable
+                const tableData = currentFilteredTx.map(t => {
+                    const dDate = new Date(t.date);
+                    const dateStr = dDate.toLocaleDateString('es-CO') + ' ' + String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
+                    const accName = state.accounts.find(a=>a.id===t.accId)?.name||'--';
+                    const sign = (t.type === 'expense' || t.type === 'afterpay') ? '-' : (t.type === 'income' ? '+' : '');
+                    const amtStr = sign + fmt(t.original_amount || t.amount, t.original_currency || t.currency);
+                    const concept = t.note || (t.cat ? t.cat.substring(2).trim() : '');
+                    const typeStr = t.type === 'income' ? 'Ingreso' : (t.type === 'expense' ? 'Gasto' : t.type);
+
+                    return [dateStr, concept, t.cat, accName, typeStr, amtStr];
+                });
+
+                // Construcción de la tabla
+                doc.autoTable({
+                    startY: tableStartY,
+                    head: [['Fecha / Hora', 'Concepto', 'Categoría', 'Cuenta', 'Tipo', 'Monto']],
+                    body: tableData,
+                    theme: 'striped',
+                    headStyles: { fillColor: [99, 102, 241] }, // indigo-500
+                    styles: { fontSize: 7, cellPadding: 2 },
+                    columnStyles: { 5: { halign: 'right', fontStyle: 'bold' } }
+                });
+
+                doc.save(`Auditoria_Nexus_${new Date().toISOString().split('T')[0]}.pdf`);
+                alert("✅ Archivo PDF generado exitosamente.");
+            } catch (error) {
+                console.error("Error al exportar PDF:", error);
+                alert("Hubo un error al generar el PDF. Asegúrate de tener conexión a internet para descargar las librerías necesarias.");
+            }
+        }
 
         function saveTransaction(e, forceOverdraft = false) { 
             if(e && typeof e.preventDefault === 'function') e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
