@@ -2312,7 +2312,11 @@
                         if(currentUser) {
                             NexusIDB.saveState(currentUser, state).then(() => {
                                 if (sessionUnlocked) { 
+                                    applyThemeCSS();
+                                    updateCurrencyLabels();
+                                    updateModuleVisibility();
                                     updateDashboard(); 
+                                    if(state.activeTab === 'settings') renderSettingsTab();
                                     if(state.activeTab) switchTab(state.activeTab); 
                                 }
                             });
@@ -2812,7 +2816,7 @@
             const demoTx = [];
 
             // APEX FIX: activeCurrency predeterminado a GLOBAL
-            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [] };
+            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
             state = savedState || defaultDemoData;
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
@@ -3606,7 +3610,7 @@
             if (Object.keys(groups).length > 0) {
                 for(let curr in groups) {
                     const gId = `grp-std-${curr}`;
-                    const isOpen = localStorage.getItem(`nexus_acc_view_${gId}`) === 'true';
+                    const isOpen = state.ui && state.ui[`acc_view_${gId}`] === true;
                     const eyeIcon = isOpen ? 'fa-eye text-indigo-500' : 'fa-eye-slash text-slate-400';
                     const dispCls = isOpen ? '' : 'hidden';
 
@@ -3656,7 +3660,7 @@
                 html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3"><i class="fa-solid fa-mobile-screen text-purple-500 mr-1"></i> Apps y Tarjetas Virtuales</h3></div>`;
                 for(let curr in virtualGroups) {
                     const gId = `grp-virt-${curr}`;
-                    const isOpen = localStorage.getItem(`nexus_acc_view_${gId}`) === 'true';
+                    const isOpen = state.ui && state.ui[`acc_view_${gId}`] === true;
                     const eyeIcon = isOpen ? 'fa-eye text-purple-500' : 'fa-eye-slash text-slate-400';
                     const dispCls = isOpen ? '' : 'hidden';
 
@@ -3690,7 +3694,7 @@
                 html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-4"><i class="fa-solid fa-users text-orange-500 mr-1"></i> Cuentas de Terceros (Aisladas)</h3></div>`;
                 for(let curr in tercerosGroups) {
                     const gId = `grp-terc-${curr}`;
-                    const isOpen = localStorage.getItem(`nexus_acc_view_${gId}`) === 'true';
+                    const isOpen = state.ui && state.ui[`acc_view_${gId}`] === true;
                     const eyeIcon = isOpen ? 'fa-eye text-orange-500' : 'fa-eye-slash text-slate-400';
                     const dispCls = isOpen ? '' : 'hidden';
 
@@ -3724,7 +3728,7 @@
                 html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-4"><i class="fa-solid fa-link text-purple-500 mr-1"></i> Bóvedas Vinculadas (P2P)</h3></div>`;
                 for(let curr in sharedGroups) {
                     const gId = `grp-shared-${curr}`;
-                    const isOpen = localStorage.getItem(`nexus_acc_view_${gId}`) === 'true';
+                    const isOpen = state.ui && state.ui[`acc_view_${gId}`] === true;
                     const eyeIcon = isOpen ? 'fa-eye text-purple-500' : 'fa-eye-slash text-slate-400';
                     const dispCls = isOpen ? '' : 'hidden';
 
@@ -3783,7 +3787,9 @@
                 }
                 isOpen = false;
             }
-            localStorage.setItem('nexus_acc_view_' + id, isOpen ? 'true' : 'false');
+            if (!state.ui) state.ui = {};
+            state.ui['acc_view_' + id] = isOpen;
+            saveState();
         }
 
         function toggleAccountTx(id) {
