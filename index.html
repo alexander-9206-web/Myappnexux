@@ -5315,8 +5315,28 @@
                     columnStyles: { 5: { halign: 'right', fontStyle: 'bold' } }
                 });
 
-                doc.save(`Auditoria_Nexus_${new Date().toISOString().split('T')[0]}.pdf`);
-                alert("✅ Archivo PDF generado exitosamente.");
+                // APEX FIX: Puente Nativo iOS para exportar archivos (Share Sheet / Save to Files)
+                const fileName = `Auditoria_Nexus_${new Date().toISOString().split('T')[0]}.pdf`;
+                const pdfBlob = doc.output('blob');
+                const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+                if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+                    navigator.share({
+                        files: [pdfFile],
+                        title: fileName,
+                        text: 'Auditoría Forense SSoT - NEXUS AR FINANCE'
+                    }).then(() => {
+                        console.log("PDF gestionado por la interfaz nativa del sistema.");
+                    }).catch(err => {
+                        console.error("Acción cancelada o error en puente nativo:", err);
+                        if (err.name !== 'AbortError') doc.save(fileName); // Fallback secundario
+                    });
+                } else {
+                    // Fallback para Desktop o navegadores antiguos
+                    doc.save(fileName);
+                    alert("✅ Archivo PDF descargado exitosamente.");
+                }
+
             } catch (error) {
                 console.error("Error al exportar PDF:", error);
                 alert("Hubo un error al generar el PDF. Asegúrate de tener conexión a internet para descargar las librerías necesarias.");
@@ -7908,12 +7928,13 @@
                 const sizeKB = (currentSizeBytes / 1024).toFixed(2);
                 
                 let usagePct = (sizeKB / MAX_QUOTA_KB) * 100;
+                const displayPct = ((sizeKB / MAX_QUOTA_KB) * 100).toFixed(4); // APEX FIX: Calcula el porcentaje real para mostrar
                 // Garantiza visibilidad mínima en UI si ya hay datos, topando en 100%
                 if (usagePct < 0.5 && sizeKB > 0) usagePct = 0.5; 
                 if (usagePct > 100) usagePct = 100;
                 
                 usageBar.style.width = usagePct + '%';
-                usageText.innerText = sizeKB + ' KB';
+                usageText.innerText = `${sizeKB} KB (${displayPct}%)`;
                 
                 // Semántica de color: Alerta si el almacenamiento supera niveles críticos
                 usageBar.classList.remove('bg-blue-500', 'bg-amber-500', 'bg-red-500');
