@@ -5230,7 +5230,7 @@
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
 
-        // APEX FIX: Exportación de Auditoría a PDF con Resumen Inteligente
+        // APEX FIX: Exportación de Auditoría a PDF con Resumen Inteligente (Diseño Extracto Bancario)
         function exportDatabasePDF() {
             if (!currentFilteredTx || currentFilteredTx.length === 0) {
                 return alert("No hay datos filtrados para exportar.");
@@ -5265,31 +5265,90 @@
                 const fAccEl = $id('db-filter-account'); const fAcc = fAccEl ? fAccEl.options[fAccEl.selectedIndex].text : 'Todas';
                 const fCostEl = $id('db-filter-cost'); const fCost = fCostEl ? fCostEl.options[fCostEl.selectedIndex].text : 'Todas';
 
-                // Construir el párrafo descriptivo
                 const incStr = '+' + fmt(totalInc, targetCurr);
                 const expStr = '-' + fmt(totalExp, targetCurr);
                 const netStr = (net >= 0 ? '+' : '') + fmt(net, targetCurr);
                 
-                const narrative = `Este reporte documenta los movimientos de la cuenta "${fAcc}" (Divisa de Filtro: ${fCurrFilter}) en el periodo comprendido entre el ${startDate} y el ${endDate}. Se ha aplicado una visualización por tipo de transacción "${fType}", categoría "${fCat}" y clasificación de gasto "${fCost}". Durante este ciclo auditado, los ingresos operativos sumaron ${incStr} y los egresos alcanzaron los ${expStr}, generando un balance neto consolidado de ${netStr}.`;
+                const narrative = `Este extracto documenta los movimientos de la cuenta "${fAcc}" (Divisa de Filtro: ${fCurrFilter}) en el periodo comprendido entre el ${startDate} y el ${endDate}. Se ha aplicado una visualización por tipo de transacción "${fType}", categoría "${fCat}" y clasificación "${fCost}". Durante este ciclo auditado, los abonos sumaron ${incStr} y los cargos alcanzaron los ${expStr}, generando un flujo neto de ${netStr}.`;
 
-                // Títulos y Metadata
-                doc.setFontSize(14);
-                doc.setTextColor(15, 23, 42); // slate-900
+                // --- DISEÑO TIPO EXTRACTO BANCARIO ---
+                
+                // 1. Cabecera (Header oscuro)
+                doc.setFillColor(15, 23, 42); // slate-900
+                doc.rect(0, 0, 210, 40, 'F');
+                
+                // Logo (Escudo Nexus dibujado vectorialmente para calidad perfecta)
+                doc.setFillColor(99, 102, 241); // indigo-500
+                doc.roundedRect(14, 10, 16, 16, 3, 3, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(16);
                 doc.setFont(undefined, 'bold');
-                doc.text("Auditoría Forense SSoT - NEXUS AR FINANCE", 14, 20);
+                doc.text("N", 19, 22);
                 
-                doc.setFontSize(9);
-                doc.setTextColor(100, 116, 139); // slate-500
+                // Título de la Institución
+                doc.setFontSize(14);
+                doc.text("NEXUS AR FINANCE", 35, 18);
+                doc.setFontSize(8);
                 doc.setFont(undefined, 'normal');
-                doc.text(`Fecha de emisión: ${new Date().toLocaleString('es-CO')} | Documento Confidencial`, 14, 26);
+                doc.setTextColor(148, 163, 184); // slate-400
+                doc.text("EXTRACTO OFICIAL / STATEMENT OF ACCOUNT", 35, 23);
                 
-                // Párrafo de Resumen Ejecutivo
-                doc.setFontSize(10);
-                doc.setTextColor(30, 41, 59); // slate-800
-                const splitNarrative = doc.splitTextToSize(narrative, 182); // Auto-wrap a 182mm
-                doc.text(splitNarrative, 14, 36);
+                // Metadatos a la derecha
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(8);
+                doc.setFont(undefined, 'bold');
+                doc.text("RESUMEN DE CUENTA", 196, 15, { align: 'right' });
+                doc.setFont(undefined, 'normal');
+                doc.setTextColor(203, 213, 225); // slate-300
+                doc.text(`Emisión: ${new Date().toLocaleDateString('es-CO')}`, 196, 21, { align: 'right' });
+                doc.text(`Periodo: ${startDate} al ${endDate}`, 196, 26, { align: 'right' });
+                doc.text(`Divisa: ${fCurrFilter}`, 196, 31, { align: 'right' });
+
+                // 2. Bloque de Resumen Financiero (3 Cajas)
+                const boxY = 48;
+                doc.setDrawColor(226, 232, 240); // slate-200 border
                 
-                const tableStartY = 36 + (splitNarrative.length * 5) + 4; // Ajuste dinámico de inicio de tabla
+                // Caja Ingresos
+                doc.setFillColor(248, 250, 252); // slate-50
+                doc.roundedRect(14, boxY, 57, 20, 2, 2, 'FD');
+                doc.setFontSize(8);
+                doc.setTextColor(100, 116, 139); // slate-500
+                doc.text("Total Abonos (+)", 18, boxY + 7);
+                doc.setFontSize(11);
+                doc.setTextColor(16, 185, 129); // emerald-500
+                doc.setFont(undefined, 'bold');
+                doc.text(incStr, 18, boxY + 15);
+
+                // Caja Gastos
+                doc.roundedRect(76, boxY, 57, 20, 2, 2, 'FD');
+                doc.setFontSize(8);
+                doc.setTextColor(100, 116, 139);
+                doc.setFont(undefined, 'normal');
+                doc.text("Total Cargos (-)", 80, boxY + 7);
+                doc.setFontSize(11);
+                doc.setTextColor(239, 68, 68); // red-500
+                doc.setFont(undefined, 'bold');
+                doc.text(expStr, 80, boxY + 15);
+
+                // Caja Neto
+                doc.roundedRect(138, boxY, 57, 20, 2, 2, 'FD');
+                doc.setFontSize(8);
+                doc.setTextColor(100, 116, 139);
+                doc.setFont(undefined, 'normal');
+                doc.text("Flujo Neto / Saldo", 142, boxY + 7);
+                doc.setFontSize(11);
+                doc.setTextColor(net >= 0 ? 16 : 239, net >= 0 ? 185 : 68, net >= 0 ? 129 : 68);
+                doc.setFont(undefined, 'bold');
+                doc.text(netStr, 142, boxY + 15);
+
+                // 3. Párrafo Narrativo Ejecutivo
+                doc.setFontSize(9);
+                doc.setTextColor(71, 85, 105); // slate-600
+                doc.setFont(undefined, 'normal');
+                const splitNarrative = doc.splitTextToSize(narrative, 182);
+                doc.text(splitNarrative, 14, boxY + 28);
+                
+                const tableStartY = boxY + 28 + (splitNarrative.length * 4) + 6;
 
                 // Mapeo de la Matriz a formato AutoTable
                 const tableData = currentFilteredTx.map(t => {
@@ -5304,19 +5363,52 @@
                     return [dateStr, concept, t.cat, accName, typeStr, amtStr];
                 });
 
-                // Construcción de la tabla
+                // 4. Construcción de la tabla (Estilo Grid Bancario)
                 doc.autoTable({
                     startY: tableStartY,
-                    head: [['Fecha / Hora', 'Concepto', 'Categoría', 'Cuenta', 'Tipo', 'Monto']],
+                    head: [['FECHA / HORA', 'CONCEPTO / REF', 'CATEGORÍA', 'CUENTA', 'TIPO', 'VALOR']],
                     body: tableData,
-                    theme: 'striped',
-                    headStyles: { fillColor: [99, 102, 241] }, // indigo-500
-                    styles: { fontSize: 7, cellPadding: 2 },
-                    columnStyles: { 5: { halign: 'right', fontStyle: 'bold' } }
+                    theme: 'grid',
+                    headStyles: { 
+                        fillColor: [241, 245, 249], // slate-100
+                        textColor: [15, 23, 42],    // slate-900
+                        fontStyle: 'bold', 
+                        fontSize: 7, 
+                        lineColor: [226, 232, 240], // slate-200
+                        lineWidth: 0.1 
+                    },
+                    bodyStyles: { 
+                        textColor: [51, 65, 85],    // slate-700
+                        fontSize: 7, 
+                        lineColor: [226, 232, 240], 
+                        lineWidth: 0.1 
+                    },
+                    alternateRowStyles: { 
+                        fillColor: [252, 253, 255] 
+                    },
+                    margin: { left: 14, right: 14 },
+                    columnStyles: { 5: { halign: 'right', fontStyle: 'bold' } },
+                    didParseCell: function(data) {
+                        if (data.section === 'body' && data.column.index === 5) {
+                            const valStr = data.cell.raw;
+                            if (valStr.startsWith('-')) data.cell.styles.textColor = [239, 68, 68]; // red-500
+                            else if (valStr.startsWith('+')) data.cell.styles.textColor = [16, 185, 129]; // emerald-500
+                        }
+                    }
                 });
 
+                // 5. Pie de Página (Paginación y aviso legal)
+                const pageCount = doc.internal.getNumberOfPages();
+                for (let i = 1; i <= pageCount; i++) {
+                    doc.setPage(i);
+                    doc.setFontSize(6);
+                    doc.setTextColor(148, 163, 184); // slate-400
+                    doc.text("Este extracto es generado automáticamente por el Motor SSoT de NEXUS AR FINANCE.", 105, 290, { align: 'center' });
+                    doc.text(`Página ${i} de ${pageCount}`, 196, 290, { align: 'right' });
+                }
+
                 // APEX FIX: Puente Nativo iOS para exportar archivos (Share Sheet / Save to Files)
-                const fileName = `Auditoria_Nexus_${new Date().toISOString().split('T')[0]}.pdf`;
+                const fileName = `Extracto_Nexus_${new Date().toISOString().split('T')[0]}.pdf`;
                 const pdfBlob = doc.output('blob');
                 const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
 
@@ -5324,7 +5416,7 @@
                     navigator.share({
                         files: [pdfFile],
                         title: fileName,
-                        text: 'Auditoría Forense SSoT - NEXUS AR FINANCE'
+                        text: 'Extracto Oficial SSoT - NEXUS AR FINANCE'
                     }).then(() => {
                         console.log("PDF gestionado por la interfaz nativa del sistema.");
                     }).catch(err => {
