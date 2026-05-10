@@ -1711,6 +1711,16 @@
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre del Servicio</label>
                         <input type="text" id="f-pse-name" required class="form-input text-sm" placeholder="Ej: Energía (Celsia)">
                     </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Etiqueta (Ej: Casa)</label>
+                            <input type="text" id="f-pse-ref-name" class="form-input text-sm" placeholder="Ej: Apto 101">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">NIC / Referencia</label>
+                            <input type="text" id="f-pse-ref" class="form-input text-sm font-mono" placeholder="Ej: 123456789">
+                        </div>
+                    </div>
                     <div>
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">URL de Pago</label>
                         <input type="url" id="f-pse-url" required class="form-input text-sm" placeholder="https://...">
@@ -6073,9 +6083,9 @@
             if (!state.pseLinks) {
                 // Autoinicialización SSoT con predeterminados
                 state.pseLinks = [
-                    { id: 'pse_1', name: 'Energía (Celsia)', url: 'https://www.zonapagos.com/t_celsia/pagos.asp', icon: 'fa-bolt' },
-                    { id: 'pse_2', name: 'Internet (Claro)', url: 'https://mi.claro.com.co/pagos', icon: 'fa-wifi' },
-                    { id: 'pse_3', name: 'Impuestos DIAN', url: 'https://muisca.dian.gov.co/WebRutMuisca/DefLogin.faces', icon: 'fa-file-invoice-dollar' }
+                    { id: 'pse_1', name: 'Energía (Celsia)', refName: 'Principal', reference: '', url: 'https://www.zonapagos.com/t_celsia/pagos.asp', icon: 'fa-bolt' },
+                    { id: 'pse_2', name: 'Internet (Claro)', refName: 'Hogar', reference: '', url: 'https://mi.claro.com.co/pagos', icon: 'fa-wifi' },
+                    { id: 'pse_3', name: 'Impuestos DIAN', refName: 'RUT', reference: '', url: 'https://muisca.dian.gov.co/WebRutMuisca/DefLogin.faces', icon: 'fa-file-invoice-dollar' }
                 ];
                 saveState();
             }
@@ -6085,25 +6095,98 @@
                 return;
             }
 
-            cont.innerHTML = state.pseLinks.map(link => {
-                const iconClass = link.icon || 'fa-building-columns';
-                return `<div class="flex items-center justify-between p-3 bg-slate-50 rounded-[1.25rem] border border-slate-100 shadow-sm transition-colors hover:border-emerald-200 group">
-                    <button onclick="redirigirPagoDirecto('${link.url}')" class="flex flex-1 items-center gap-3 text-left min-w-0 pr-2">
-                        <div class="w-10 h-10 rounded-full bg-white text-emerald-600 flex items-center justify-center shadow-sm shrink-0 border border-slate-100"><i class="fa-solid ${iconClass} text-[14px]"></i></div>
-                        <div class="truncate">
-                            <p class="text-xs font-black uppercase theme-text truncate">${link.name}</p>
-                            <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${link.url}</p>
+            // Agrupar los links por nombre de empresa/servicio para consolidar la vista
+            const groupedLinks = {};
+            state.pseLinks.forEach(link => {
+                if(!groupedLinks[link.name]) {
+                    groupedLinks[link.name] = { url: link.url, icon: link.icon, items: [] };
+                }
+                groupedLinks[link.name].items.push(link);
+            });
+
+            cont.innerHTML = Object.keys(groupedLinks).map(groupName => {
+                const group = groupedLinks[groupName];
+                const iconClass = group.icon || 'fa-building-columns';
+                
+                let actionsHtml = group.items.map(link => {
+                    if (link.reference) {
+                        return `
+                        <div class="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm mt-2">
+                            <div class="flex flex-col min-w-0 pr-2 flex-1">
+                                <div class="flex justify-between items-center mb-1">
+                                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate"><i class="fa-solid fa-hashtag text-slate-300 mr-1"></i> ${link.refName || 'REF / NIC'}</p>
+                                    <div class="flex items-center gap-1 shrink-0 ml-2">
+                                        <button type="button" onclick="openNewPSEForm('${link.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
+                                        <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
+                                    </div>
+                                </div>
+                                <p class="text-xs font-mono font-black text-slate-700 truncate">${link.reference}</p>
+                            </div>
+                            <button onclick="copyAndPayPSE('${link.reference}', '${link.url}')" class="bg-emerald-500 text-white px-4 py-3 rounded-lg font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform flex items-center gap-1.5 shrink-0 ml-2 hover:bg-emerald-600">
+                                Pagar <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </button>
+                        </div>`;
+                    } else {
+                        return `
+                        <div class="flex items-center justify-between mt-2">
+                            <button type="button" onclick="redirigirPagoDirecto('${link.url}')" class="flex-1 bg-emerald-500 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm hover:bg-emerald-600 transition-colors active:scale-95 flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i> Ir al Portal de Pago
+                            </button>
+                            <div class="flex items-center gap-1 shrink-0 ml-2 bg-white p-2 rounded-xl border border-slate-100">
+                                <button type="button" onclick="openNewPSEForm('${link.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
+                                <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
+                            </div>
+                        </div>`;
+                    }
+                }).join('');
+                
+                return `<div class="p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100 shadow-sm transition-colors hover:border-emerald-200 group mb-3">
+                    <div class="flex items-start justify-between border-b border-slate-100/50 pb-3">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div class="w-10 h-10 rounded-full bg-white text-emerald-600 flex items-center justify-center shadow-sm shrink-0 border border-slate-100"><i class="fa-solid ${iconClass} text-[14px]"></i></div>
+                            <div class="truncate">
+                                <p class="text-xs font-black uppercase theme-text truncate">${groupName}</p>
+                                <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${group.url}</p>
+                            </div>
                         </div>
-                    </button>
-                    <div class="flex items-center gap-1 shrink-0">
-                        <button type="button" onclick="openNewPSEForm('${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-blue-500 hover:bg-blue-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                        <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="w-8 h-8 rounded-full bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm shrink-0 transition-colors active:scale-90"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                        <button type="button" onclick="openNewPSEForm(null, '${groupName}')" class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm shrink-0 transition-colors hover:bg-emerald-500 hover:text-white active:scale-90" title="Añadir otra referencia para esta empresa"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                    </div>
+                    <div class="flex flex-col gap-1 mt-1">
+                        ${actionsHtml}
                     </div>
                 </div>`;
             }).join('');
         }
 
-        function openNewPSEForm(id = null) {
+        function copyPSECard(text) {
+            const temp = document.createElement("textarea");
+            temp.value = text;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            document.body.removeChild(temp);
+            alert("✅ NIC copiado al portapapeles:\n\n" + text);
+        }
+
+        function copyAndPayPSE(reference, url) {
+            // 1. Copiar al portapapeles silenciosamente
+            const temp = document.createElement("textarea");
+            temp.value = reference;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            document.body.removeChild(temp);
+            
+            // 2. Feedback visual
+            alert("✅ NIC Copiado.\nAbriendo portal de pagos...");
+            
+            // 3. Abrir pestaña de pago
+            setTimeout(() => {
+                redirigirPagoDirecto(url);
+            }, 800);
+        }
+
+        function openNewPSEForm(id = null, prefillName = null) {
             const mod = $id('new-pse-modal'); if(!mod) return;
             const titleEl = $id('pse-form-title');
             
@@ -6112,15 +6195,34 @@
                 if (link) {
                     $id('f-pse-id').value = link.id;
                     $id('f-pse-name').value = link.name;
+                    $id('f-pse-ref-name').value = link.refName || '';
+                    $id('f-pse-ref').value = link.reference || '';
                     $id('f-pse-url').value = link.url;
                     $id('f-pse-icon').value = link.icon.replace('fa-', ''); // Para mostrarlo sin prefijo en el input
                     if(titleEl) titleEl.innerText = "Editar Enlace";
                 }
             } else {
                 $id('f-pse-id').value = '';
-                $id('f-pse-name').value = '';
-                $id('f-pse-url').value = '';
-                $id('f-pse-icon').value = '';
+                
+                // Si viene prefillName, buscamos el primer link que coincida para heredar sus datos (URL e icono)
+                if (prefillName) {
+                    $id('f-pse-name').value = prefillName;
+                    const existingLink = state.pseLinks.find(l => l.name === prefillName);
+                    if (existingLink) {
+                        $id('f-pse-url').value = existingLink.url;
+                        $id('f-pse-icon').value = existingLink.icon.replace('fa-', '');
+                    } else {
+                        $id('f-pse-url').value = '';
+                        $id('f-pse-icon').value = '';
+                    }
+                } else {
+                    $id('f-pse-name').value = '';
+                    $id('f-pse-url').value = '';
+                    $id('f-pse-icon').value = '';
+                }
+                
+                $id('f-pse-ref-name').value = '';
+                $id('f-pse-ref').value = '';
                 if(titleEl) titleEl.innerText = "Nuevo Enlace";
             }
             mod.classList.remove('hidden');
@@ -6136,6 +6238,8 @@
             e.preventDefault();
             const id = $id('f-pse-id').value;
             const name = $id('f-pse-name').value.trim();
+            const refName = $id('f-pse-ref-name').value.trim();
+            const reference = $id('f-pse-ref').value.trim();
             const url = $id('f-pse-url').value.trim();
             let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
             if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; // Auto corrección simple
@@ -6145,9 +6249,9 @@
 
             if (id) {
                 const link = state.pseLinks.find(l => l.id === id);
-                if (link) { link.name = name; link.url = url; link.icon = icon; }
+                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; }
             } else {
-                state.pseLinks.push({ id: 'pse_' + Date.now(), name, url, icon });
+                state.pseLinks.push({ id: 'pse_' + Date.now(), name, refName, reference, url, icon });
             }
 
             saveState(); renderPSELinks(); closeNewPSEForm();
