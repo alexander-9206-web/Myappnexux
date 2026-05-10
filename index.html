@@ -1729,6 +1729,26 @@
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Ícono FontAwesome (Opcional)</label>
                         <input type="text" id="f-pse-icon" class="form-input text-sm" placeholder="Ej: fa-bolt">
                     </div>
+                    
+                    <div class="grid grid-cols-3 gap-3 border-t border-slate-100 pt-4 mt-2">
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Frecuencia</label>
+                            <select id="f-pse-freq" class="form-input text-sm font-bold bg-slate-50 text-indigo-700">
+                                <option value="none">Ninguna</option>
+                                <option value="monthly">Mensual</option>
+                                <option value="weekly">Semanal</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2" title="Día del mes (1-31) o de la semana (1=Lun, 7=Dom)">Corte</label>
+                            <input type="number" id="f-pse-cutoff" min="1" max="31" class="form-input text-sm font-bold bg-slate-50 text-indigo-700" placeholder="Día">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Pago Lím.</label>
+                            <input type="number" id="f-pse-payday" min="1" max="31" class="form-input text-sm font-bold bg-slate-50 text-indigo-700" placeholder="Día">
+                        </div>
+                    </div>
+
                     <button type="submit" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Enlace</button>
                 </form>
             </div>
@@ -6218,6 +6238,9 @@
                     $id('f-pse-ref').value = link.reference || '';
                     $id('f-pse-url').value = link.url;
                     $id('f-pse-icon').value = link.icon.replace('fa-', ''); // Para mostrarlo sin prefijo en el input
+                    if($id('f-pse-freq')) $id('f-pse-freq').value = link.freq || 'none';
+                    if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
+                    if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
                     if(titleEl) titleEl.innerText = "Editar Enlace";
                 }
             } else {
@@ -6242,6 +6265,9 @@
                 
                 $id('f-pse-ref-name').value = '';
                 $id('f-pse-ref').value = '';
+                if($id('f-pse-freq')) $id('f-pse-freq').value = 'none';
+                if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = '';
+                if($id('f-pse-payday')) $id('f-pse-payday').value = '';
                 if(titleEl) titleEl.innerText = "Nuevo Enlace";
             }
             mod.classList.remove('hidden');
@@ -6263,17 +6289,87 @@
             let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
             if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; // Auto corrección simple
 
+            const freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
+            const cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
+            const payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
+
             if (!name || !url) return alert("El nombre y la URL son obligatorios.");
             if (!state.pseLinks) state.pseLinks = [];
 
+            let currentPseId = id;
+
             if (id) {
                 const link = state.pseLinks.find(l => l.id === id);
-                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; }
+                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; }
             } else {
-                state.pseLinks.push({ id: 'pse_' + Date.now(), name, refName, reference, url, icon });
+                currentPseId = 'pse_' + Date.now();
+                state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday });
+            }
+
+            // APEX FIX: Generación/Actualización de Tarea Automática (Recordatorio PSE con -3 días)
+            if (freq !== 'none' && cutoff > 0) {
+                if(!state.tasks) state.tasks = [];
+                const taskId = 'task_pse_' + currentPseId;
+                
+                let now = new Date();
+                now.setHours(0,0,0,0);
+                let nextCutoff = new Date(now);
+                
+                if (freq === 'monthly') {
+                    nextCutoff = new Date(now.getFullYear(), now.getMonth(), cutoff);
+                    if (nextCutoff <= now) nextCutoff.setMonth(nextCutoff.getMonth() + 1);
+                } else if (freq === 'weekly') {
+                    let currentDay = now.getDay() || 7; // 1=Lun, 7=Dom
+                    let dist = cutoff - currentDay;
+                    if (dist <= 0) dist += 7;
+                    nextCutoff.setDate(now.getDate() + dist);
+                }
+                
+                let reminderDate = new Date(nextCutoff);
+                reminderDate.setDate(reminderDate.getDate() - 3); // 3 días antes de la fecha de corte
+                
+                const dateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
+                const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
+                const taskDesc = 'Recordatorio PSE Automático. Día de pago límite: ' + (payday ? payday : 'Verificar portal') + '. Día de corte exacto: ' + nextCutoff.toLocaleDateString('es-CO');
+
+                const existingTask = state.tasks.find(t => t.id === taskId);
+                if (existingTask) {
+                    existingTask.date = dateStr;
+                    existingTask.title = taskTitle;
+                    existingTask.description = taskDesc;
+                    existingTask.completed = false; // Reactivamos si la habían tachado
+                    existingTask.alarmTriggered = false;
+                } else {
+                    state.tasks.push({
+                        id: taskId,
+                        title: taskTitle,
+                        description: taskDesc,
+                        date: dateStr,
+                        timeAlarm: '09:00',
+                        priority: 'high',
+                        completed: false,
+                        alarmTriggered: false,
+                        createdAt: new Date().toISOString(),
+                        vaultId: 'personal',
+                        createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
+                    });
+                    
+                    // Notificación empujada al puente nativo de iOS (Si existe)
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
+                            id: taskId, title: "Recordatorio: " + taskTitle, body: taskDesc, date: dateStr, time: '09:00', priority: 'high' 
+                        }));
+                    }
+                }
+            } else {
+                // Limpieza si el usuario apaga la automatización del servicio
+                if (state.tasks) {
+                    state.tasks = state.tasks.filter(t => t.id !== 'task_pse_' + currentPseId);
+                }
             }
 
             saveState(); renderPSELinks(); closeNewPSEForm();
+            if(typeof renderTasksTab === 'function') renderTasksTab();
         }
         // ---------------------------
 
