@@ -2672,7 +2672,7 @@
                 const { auth, GoogleAuthProvider, signInWithPopup } = await getFirebaseAuth();
                 const provider = new GoogleAuthProvider();
                 const result = await signInWithPopup(auth, provider);
-                handleOAuthResult(result.user);
+                await handleOAuthResult(result.user);
                 
                 btn.innerHTML = originalHtml;
             } catch(e) {
@@ -2691,7 +2691,7 @@
                 const { auth, OAuthProvider, signInWithPopup } = await getFirebaseAuth();
                 const provider = new OAuthProvider('apple.com');
                 const result = await signInWithPopup(auth, provider);
-                handleOAuthResult(result.user);
+                await handleOAuthResult(result.user);
                 
                 btn.innerHTML = originalHtml;
             } catch(e) {
@@ -2701,25 +2701,61 @@
             }
         };
 
-        function handleOAuthResult(user) {
+        async function handleOAuthResult(user) {
             const email = user.email ? user.email.toLowerCase() : (user.uid + '@apple.com');
             const name = user.displayName || 'Usuario';
             const photo = user.photoURL || '';
 
-            let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
-            if (existingProfile) {
-                selectUserForLogin(email, name);
-            } else {
-                toggleNewUserForm(true);
-                const emailInput = document.getElementById('login-new-email');
-                const nameInput = document.getElementById('login-new-name');
-                if(emailInput) {
-                    emailInput.value = email;
-                    emailInput.readOnly = true;
-                    emailInput.classList.add('opacity-50', 'cursor-not-allowed');
+            // APEX FIX: Autenticación 100% Directa "One-Tap" (Sin PIN local para OAuth)
+            try {
+                const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const { getFirestore, doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                
+                const firebaseConfig = {
+                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
+                    authDomain: "nexus-jr.firebaseapp.com",
+                    projectId: "nexus-jr",
+                    storageBucket: "nexus-jr.firebasestorage.app",
+                    messagingSenderId: "273022472068",
+                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
+                    measurementId: "G-LGT2X8EC0R"
+                };
+                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+                const tempDb = getFirestore(app);
+                
+                const docRef = doc(tempDb, 'artifacts', 'nexus-jr', 'public', 'data', 'nexus_users', email);
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                    // LOGIN DIRECTO: El usuario ya tiene bóveda en la nube
+                    const cloudProfile = docSnap.data();
+                    cloudProfile.isCloud = true;
+                    if(photo && !cloudProfile.avatar) cloudProfile.avatar = photo; // Actualizar foto si no tenía
+                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                    
+                    userProfile = cloudProfile;
+                    await processLoginSuccess(email); // Saltamos directo al Dashboard
+                } else {
+                    // CREACIÓN DIRECTA (Sign Up): Registrar bóveda en silencio sin pedir PIN
+                    const newUserProfile = { 
+                        name: name, 
+                        email: email, 
+                        pin: "1234", // PIN de respaldo asignado automáticamente
+                        avatar: photo, 
+                        lastSeen: Date.now(),
+                        isOAuth: true,
+                        isCloud: true
+                    };
+                    
+                    await setDoc(docRef, newUserProfile, { merge: true });
+                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(newUserProfile));
+                    
+                    userProfile = newUserProfile;
+                    await processLoginSuccess(email); // Saltamos directo al Dashboard
                 }
-                if(nameInput && name) nameInput.value = name;
-                window.tempOAuthAvatar = photo;
+            } catch(e) {
+                console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
+                alert("Error de red validando identidad. Revisa tu conexión a internet.");
             }
         }
 
