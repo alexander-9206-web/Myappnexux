@@ -6551,10 +6551,59 @@
                         }));
                     }
                 }
+
+                // APEX FIX: Generar tarea secundaria para marcar el Día de Corte en el calendario
+                if (cutoff > 0) {
+                    const cutoffTaskId = 'task_pse_cutoff_' + currentPseId;
+                    let cutoffDate = new Date(now);
+                    
+                    if (freq === 'monthly') {
+                        cutoffDate = new Date(now.getFullYear(), now.getMonth(), cutoff);
+                        if (cutoffDate <= now) cutoffDate.setMonth(cutoffDate.getMonth() + 1);
+                    } else if (freq === 'weekly') {
+                        let currentDay = now.getDay() || 7;
+                        let dist = cutoff - currentDay;
+                        if (dist <= 0) dist += 7;
+                        cutoffDate.setDate(now.getDate() + dist);
+                    }
+                    
+                    const cutoffDateStr = cutoffDate.getFullYear() + '-' + String(cutoffDate.getMonth()+1).padStart(2,'0') + '-' + String(cutoffDate.getDate()).padStart(2,'0');
+                    const cutoffTaskTitle = 'Corte: ' + name + (refName ? ' (' + refName + ')' : '') + ' [' + freqLabel + ']';
+                    const cutoffTaskDesc = 'Día de corte de facturación de este servicio.';
+
+                    const existingCutoffTask = state.tasks.find(t => t.id === cutoffTaskId);
+                    if (existingCutoffTask) {
+                        existingCutoffTask.date = cutoffDateStr;
+                        existingCutoffTask.title = cutoffTaskTitle;
+                        existingCutoffTask.description = cutoffTaskDesc;
+                        existingCutoffTask.completed = false;
+                        existingCutoffTask.alarmTriggered = false;
+                    } else {
+                        state.tasks.push({
+                            id: cutoffTaskId,
+                            title: cutoffTaskTitle,
+                            description: cutoffTaskDesc,
+                            date: cutoffDateStr,
+                            timeAlarm: '08:00',
+                            priority: 'medium',
+                            completed: false,
+                            alarmTriggered: false,
+                            createdAt: new Date().toISOString(),
+                            vaultId: 'personal',
+                            createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
+                        });
+                        
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
+                                id: cutoffTaskId, title: "Corte: " + cutoffTaskTitle, body: cutoffTaskDesc, date: cutoffDateStr, time: '08:00', priority: 'medium' 
+                            }));
+                        }
+                    }
+                }
             } else {
                 // Limpieza si el usuario apaga la automatización del servicio
                 if (state.tasks) {
-                    state.tasks = state.tasks.filter(t => t.id !== 'task_pse_' + currentPseId);
+                    state.tasks = state.tasks.filter(t => t.id !== 'task_pse_' + currentPseId && t.id !== 'task_pse_cutoff_' + currentPseId);
                 }
             }
 
