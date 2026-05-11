@@ -9004,16 +9004,55 @@
         }
 
         // --- BACKUP Y RESTAURACIÓN ---
-        function exportBackup() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
-            const dlNode = document.createElement('a');
-            const d = new Date();
-            const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
-            dlNode.setAttribute("href", dataStr);
-            dlNode.setAttribute("download", `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`);
-            document.body.appendChild(dlNode);
-            dlNode.click();
-            dlNode.remove();
+        async function exportBackup(isAuto = false) {
+            try {
+                const d = new Date();
+                const tag = (state.settings && state.settings.backupFolder) ? `_${state.settings.backupFolder}` : '';
+                // Formato exacto por fecha y hora: YYYYMMDD_HHMM
+                const timestamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
+                const safeEmail = currentUser ? currentUser.split('@')[0] : 'vault';
+                const fileName = `Nexus_Backup_${safeEmail}${tag}_${timestamp}.json`;
+
+                const jsonStr = JSON.stringify(state, null, 2); // Formato JSON legible
+                
+                // Si es un Auto-Backup silencioso, aseguramos persistencia profunda
+                if (isAuto) {
+                    localStorage.setItem(`nexus_autobackup_${currentUser}`, jsonStr);
+                    localStorage.setItem('nexus_last_backup_date', d.toDateString());
+                    console.log("[APEX SYS] Auto-Backup silencioso ejecutado e inyectado en caché segura.");
+                }
+
+                const blob = new Blob([jsonStr], { type: 'application/json' });
+                const file = new File([blob], fileName, { type: 'application/json' });
+
+                // Puente Nativo iOS / Android (Fricción Cero para "Elegir Carpeta")
+                // Nota: navigator.share requiere interacción humana estricta, se omite en auto-backup
+                if (!isAuto && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: fileName,
+                        text: 'Copia de Seguridad SSoT - NEXUS AR FINANCE'
+                    });
+                    // iOS lanzará su Share Sheet nativo, permitiendo "Guardar en Archivos" (iCloud / Local)
+                } else {
+                    // Fallback para Web/Desktop o para forzar la descarga en el Auto-Backup
+                    const url = URL.createObjectURL(blob);
+                    const dlNode = document.createElement('a');
+                    dlNode.href = url;
+                    dlNode.download = fileName;
+                    document.body.appendChild(dlNode);
+                    dlNode.click();
+                    setTimeout(() => {
+                        document.body.removeChild(dlNode);
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                    
+                    if (!isAuto) alert(`✅ Backup generado con éxito:\n\n${fileName}`);
+                }
+            } catch (error) {
+                console.error("Error exportando backup:", error);
+                if (!isAuto && error.name !== 'AbortError') alert("⚠️ Error al generar el archivo de backup.");
+            }
         }
 
         function importBackup(event) {
@@ -9048,8 +9087,7 @@
                         const lastBackupDate = localStorage.getItem('nexus_last_backup_date');
                         const todayStr = now.toDateString();
                         if (lastBackupDate !== todayStr) {
-                            exportBackup();
-                            localStorage.setItem('nexus_last_backup_date', todayStr);
+                            exportBackup(true); // Ejecuta el backup pasándole el flag isAuto = true
                         }
                     }
                 }, 60000);
