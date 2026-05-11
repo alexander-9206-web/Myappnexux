@@ -2017,6 +2017,7 @@
                         
                         const data = docSnap.data();
                         let hasSharedChanges = false;
+                        let hasNewCategories = false; // APEX FIX: Flag para detectar aprendizaje de diccionario P2P
 
                         // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras (Race Conditions).
                         if (!localAcc.syncedOnce && data.balance !== undefined) {
@@ -2066,6 +2067,27 @@
                                     state.tx.push(mappedTx);
                                     hasSharedChanges = true;
                                     
+                                    // APEX FIX: Motor de Aprendizaje Silencioso (Categorías Compartidas SSoT)
+                                    // Si el socio usa una categoría o jerarquía que no tenemos, la agregamos a nuestro diccionario local.
+                                    if (mappedTx.cat) {
+                                        if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+                                        if(!state.categories.global) state.categories.global = [];
+                                        if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+                                        if(!state.catParents.global) state.catParents.global = [];
+
+                                        if (!state.categories.global.includes(mappedTx.cat)) {
+                                            state.categories.global.push(mappedTx.cat);
+                                            hasNewCategories = true;
+                                            
+                                            // Extraer al Padre y asegurar que exista
+                                            const m = mappedTx.cat.match(/\[(.*?)\]\s*(.*)/);
+                                            const parentCat = m ? m[1] : mappedTx.cat;
+                                            if (!state.catParents.global.includes(parentCat)) {
+                                                state.catParents.global.push(parentCat);
+                                            }
+                                        }
+                                    }
+
                                     // Sumar al balance local el delta de la nueva transacción (Event Sourcing)
                                     if (localAcc.syncedOnce) {
                                         if (mappedTx.type === 'transfer') {
@@ -2101,6 +2123,24 @@
                                         }
                                         state.tx[idx] = mappedTx;
                                         hasSharedChanges = true;
+                                        
+                                        // APEX FIX: Aprender categoría si se edita
+                                        if (mappedTx.cat) {
+                                            if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+                                            if(!state.categories.global) state.categories.global = [];
+                                            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
+                                            if(!state.catParents.global) state.catParents.global = [];
+
+                                            if (!state.categories.global.includes(mappedTx.cat)) {
+                                                state.categories.global.push(mappedTx.cat);
+                                                hasNewCategories = true;
+                                                const m = mappedTx.cat.match(/\[(.*?)\]\s*(.*)/);
+                                                const parentCat = m ? m[1] : mappedTx.cat;
+                                                if (!state.catParents.global.includes(parentCat)) {
+                                                    state.catParents.global.push(parentCat);
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             });
@@ -2117,6 +2157,23 @@
                             if (sessionUnlocked) { 
                                 clearTimeout(p2pRenderTimeout);
                                 p2pRenderTimeout = setTimeout(() => {
+                                    // APEX FIX: Si aprendimos categorías nuevas de un socio, actualizamos los selectores globales
+                                    if (hasNewCategories) {
+                                        if(typeof updateCatManageView === 'function') updateCatManageView();
+                                        if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
+                                        
+                                        // Actualiza el modal de registro activo silenciosamente sin cerrarlo si el usuario está en él
+                                        const selP = document.getElementById('f-cat-parent-select');
+                                        if (selP && !document.getElementById('tx-modal').classList.contains('hidden')) {
+                                            const currentVal = selP.value;
+                                            selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
+                                            state.catParents.global.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
+                                            selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
+                                            if(Array.from(selP.options).some(o => o.value === currentVal)) selP.value = currentVal;
+                                            handleParentCategoryChange();
+                                        }
+                                    }
+
                                     updateDashboard(); 
                                     if(state.activeTab === 'accounts') renderAccountsTab(); 
                                     if(state.activeTab === 'database') renderDatabase();
