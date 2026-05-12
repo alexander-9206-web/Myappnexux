@@ -2777,14 +2777,29 @@
                 
                 const { auth, GoogleAuthProvider, signInWithPopup } = await getFirebaseAuth();
                 const provider = new GoogleAuthProvider();
+                
+                // APEX FIX: Forzar la selección de cuenta para limpiar estados fantasma en móviles/PWA
+                provider.setCustomParameters({ prompt: 'select_account' }); 
+                
                 const result = await signInWithPopup(auth, provider);
                 await handleOAuthResult(result.user);
                 
                 btn.innerHTML = originalHtml;
             } catch(e) {
-                console.error(e);
-                if (e.code !== 'auth/popup-closed-by-user') window.alert("⚠️ Error al conectar con Google.");
-                event.currentTarget.innerHTML = '<i class="fa-brands fa-google text-lg"></i> Continuar con Google';
+                console.error("OAuth Error:", e);
+                let msg = "Fallo de comunicación con los servidores de Google.";
+                
+                // APEX FIX: Trazabilidad semántica de errores de Firebase para el usuario
+                if (e.code === 'auth/unauthorized-domain') {
+                    msg = "Dominio no autorizado. Debes agregar tu URL de Vercel en la consola de Firebase -> Authentication -> Settings -> Authorized domains.";
+                } else if (e.code === 'auth/popup-blocked') {
+                    msg = "Tu navegador bloqueó la ventana de Google. Por favor, permite las ventanas emergentes (Pop-ups).";
+                } else if (e.code !== 'auth/popup-closed-by-user') {
+                    msg = e.message || msg;
+                }
+                
+                if (e.code !== 'auth/popup-closed-by-user') window.alert("⚠️ " + msg);
+                event.currentTarget.innerHTML = '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg> Continuar con Google';
             }
         };
 
@@ -2801,8 +2816,18 @@
                 
                 btn.innerHTML = originalHtml;
             } catch(e) {
-                console.error(e);
-                if (e.code !== 'auth/popup-closed-by-user') window.alert("⚠️ Error al conectar con Apple.");
+                console.error("OAuth Error:", e);
+                let msg = "Fallo de comunicación con los servidores de Apple.";
+                
+                if (e.code === 'auth/unauthorized-domain') {
+                    msg = "Dominio no autorizado. Debes agregar tu URL de Vercel en la consola de Firebase -> Authentication -> Settings -> Authorized domains.";
+                } else if (e.code === 'auth/popup-blocked') {
+                    msg = "Tu navegador bloqueó la ventana de inicio de sesión. Por favor, permite las ventanas emergentes (Pop-ups).";
+                } else if (e.code !== 'auth/popup-closed-by-user') {
+                    msg = e.message || msg;
+                }
+                
+                if (e.code !== 'auth/popup-closed-by-user') window.alert("⚠️ " + msg);
                 event.currentTarget.innerHTML = '<i class="fa-brands fa-apple text-xl mb-0.5"></i> Continuar con Apple';
             }
         };
@@ -2829,7 +2854,7 @@
                 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
                 const tempDb = getFirestore(app);
                 
-                const docRef = doc(tempDb, 'artifacts', 'nexus-jr', 'public', 'data', 'nexus_users', email);
+                const docRef = doc(tempDb, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
                 const docSnap = await getDoc(docRef);
                 
                 if (docSnap.exists()) {
@@ -2861,7 +2886,8 @@
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
-                alert("Error de red validando identidad. Revisa tu conexión a internet.");
+                window.alert("⚠️ Error de red validando identidad. Revisa tu conexión a internet o los permisos de Firebase.");
+                throw e; // APEX FIX: Forzar la captura del error en la capa superior para reiniciar el botón visual
             }
         }
 
@@ -4742,7 +4768,7 @@
         function generateShareTokenForAccount(accId) {
             const acc = state.accounts.find(a => a.id === accId);
             if(!acc) return;
-            alert("✅ Compartir Bóveda P2P:\n\nIndícale a tu socio que ingrese a la app en:\nhttps://myappnexux-git-main-alexander-9206-webs-projects.vercel.app/\n\nY busque tu correo exacto:\n" + currentUser + "\n\nAsí podrá vincularse directamente a esta cuenta.");
+            alert("✅ Compartir Bóveda P2P:\n\nIndícale a tu socio que ingrese a la app en:\nhttps://myappnexux.vercel.app/\n\nY busque tu correo exacto:\n" + currentUser + "\n\nAsí podrá vincularse directamente a esta cuenta.");
         }
         // --- FIN MOTOR P2P ---
 
@@ -8186,7 +8212,7 @@
                 const userSnap = await getDoc(userRef);
                 
                 if(!userSnap.exists()) {
-                    return alert("No se encontró un usuario con ese correo. Dile que inicie sesión en la app primero.\n\nEnlace: https://myappnexux-git-main-alexander-9206-webs-projects.vercel.app/");
+                    return alert("No se encontró un usuario con ese correo. Dile que inicie sesión en la app primero.\n\nEnlace: https://myappnexux.vercel.app/");
                 }
 
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', acc.remoteId);
@@ -9600,7 +9626,7 @@
         }
 
         function generateTaskVaultToken(id) {
-            alert("✅ Compartir Tareas P2P:\n\nIndícale a tu equipo que ingrese a la app en:\nhttps://myappnexux-git-main-alexander-9206-webs-projects.vercel.app/\n\nY busque tu correo exacto:\n" + currentUser + "\n\nAsí podrán vincularse a tus tareas directamente.");
+            alert("✅ Compartir Tareas P2P:\n\nIndícale a tu equipo que ingrese a la app en:\nhttps://myappnexux.vercel.app/\n\nY busque tu correo exacto:\n" + currentUser + "\n\nAsí podrán vincularse a tus tareas directamente.");
         }
 
         function renderTaskVaultsList() {
