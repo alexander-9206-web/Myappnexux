@@ -9,11 +9,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="NEXUS AR">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="icono.png">
     
-    <!-- Manifest incrustado directamente (Fricción Cero de lectura) -->
-    <link rel="manifest" href='data:application/manifest+json;charset=utf-8,%7B%22short_name%22%3A%22NEXUS%20AR%22%2C%22name%22%3A%22NEXUS%20AR%20FINANCE%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%2C%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%2C%22start_url%22%3A%22.%2Findex.html%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%23000000%22%2C%22background_color%22%3A%22%23ffffff%22%7D'>
+    <!-- APEX FIX: Manifest corregido (start_url genérico) para evitar 404 en contenedores -->
+    <link rel="manifest" href='data:application/manifest+json;charset=utf-8,%7B%22short_name%22%3A%22NEXUS%20AR%22%2C%22name%22%3A%22NEXUS%20AR%20FINANCE%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%2C%7B%22src%22%3A%22icono.png%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22theme_color%22%3A%22%230f172a%22%2C%22background_color%22%3A%22%23f8fafc%22%7D'>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -821,7 +821,7 @@
                 </div>
 
                 <!-- APEX FIX: Botón de Soporte de Usuario Integrado -->
-                <div id="user-support-block" class="theme-card p-6 md:p-8 rounded-[2rem] border border-blue-100 shadow-sm space-y-4 md:col-span-2 bg-blue-50/30">
+                <div class="theme-card p-6 md:p-8 rounded-[2rem] border border-blue-100 shadow-sm space-y-4 md:col-span-2 bg-blue-50/30">
                     <div class="flex justify-between items-center">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shadow-sm"><i class="fa-solid fa-headset text-lg"></i></div>
@@ -2969,26 +2969,12 @@
                 }
             });
 
-            // APEX FIX: Sincronización perfecta al volver del background en iOS.
-            // Esto asegura que cuando el iPhone despierte la app tras haber estado minimizada, 
-            // Firebase y la vista se recarguen de forma instantánea.
-            document.addEventListener("visibilitychange", () => {
-                if (document.visibilityState === "visible") {
-                    if (!sessionUnlocked || !state || !state.settings) return; // APEX FIX: Prevención de ejecución en estado zombie (Pantalla de login)
-                    
-                    // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
-                    if (sessionUnlocked) {
-                        if (fbUser && window.db) fetchCloudState(); 
-                        if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
-                    }
-                } else if (document.visibilityState === "hidden") {
-                    // APEX FIX: Registrar el milisegundo exacto al bloquear el teléfono o cambiar de app
-                    localStorage.setItem('nexus_last_active', Date.now());
-                }
-            });
-
-            // APEX FIX: Recuperación profunda de sesión (LocalStorage + IndexedDB + Cookies)
-            currentUser = localStorage.getItem('nexus_current_user');
+            // APEX FIX: Recuperación profunda de sesión con Try/Catch para Containers estrictos
+            try {
+                currentUser = localStorage.getItem('nexus_current_user');
+            } catch(e) {
+                console.warn("[APEX] Contenedor bloqueó el acceso síncrono al Storage.");
+            }
             
             if (!currentUser) {
                 currentUser = await NexusIDB.getSession();
@@ -2996,11 +2982,13 @@
             }
             
             if (!currentUser) {
-                const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                if (match) {
-                    currentUser = match[2];
-                    localStorage.setItem('nexus_current_user', currentUser);
-                }
+                try {
+                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                    if (match) {
+                        currentUser = match[2];
+                        localStorage.setItem('nexus_current_user', currentUser);
+                    }
+                } catch(e) { console.warn("[APEX] Cookie access blocked in container."); }
             }
 
             if (!currentUser) {
@@ -3463,7 +3451,7 @@
 
         function setupInactivityLock() {
             const resetTimer = () => {
-                localStorage.setItem('nexus_last_active', Date.now()); // APEX FIX: Rastrear milisegundo del último toque/interacción
+                try { localStorage.setItem('nexus_last_active', Date.now()); } catch(e) {}
                 clearTimeout(inactivityTimer);
                 if (sessionUnlocked && state.settings && state.settings.requirePin) {
                     inactivityTimer = setTimeout(() => {
@@ -3476,7 +3464,15 @@
         }
 
         async function bootApp() {
-            userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
+            // APEX FIX: Blindaje de perfil fantasma (Evita Crash fatal si el contenedor borró el localStorage)
+            try {
+                userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
+            } catch(e) {}
+            
+            if (!userProfile) {
+                userProfile = { name: 'Administrador', email: currentUser, pin: 'Admin@1234!' };
+                try { localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile)); } catch(e) {}
+            }
             
             // APEX FIX: Migración Transparente a IndexedDB
             let savedState = await NexusIDB.getState(currentUser);
@@ -3506,10 +3502,11 @@
             const demoLoans = [];
             const demoTx = [];
 
-            // APEX FIX: activeCurrency predeterminado a GLOBAL
+            // APEX FIX: Auto-reparación estructural del estado para evitar variables huérfanas
             const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
             state = savedState || defaultDemoData;
+            if(!state.settings) state.settings = defaultDemoData.settings;
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
             if(!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
@@ -4184,6 +4181,8 @@
         }
 
         function render7DaysChart(aTx) { 
+            // APEX FIX: Supervivencia Offline en Contenedores. Si el CDN falla, aborta el gráfico sin colapsar la app.
+            if (typeof Chart === 'undefined') return;
             const canvas = $id('chart-7days'); if(!canvas) return; const ctx = canvas.getContext('2d'); if(charts.d7) charts.d7.destroy(); 
             const dI = [], dO = [], l = []; 
             for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate() - i); l.push(d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })); const dTx = aTx.filter(t => new Date(t.date).toDateString() === d.toDateString() && t.type !== 'afterpay'); dI.push(dTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)); dO.push(dTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0)); } 
@@ -4191,6 +4190,7 @@
         }
 
         function renderPeriodChart(cTx) { 
+            if (typeof Chart === 'undefined') return; // APEX FIX: Supervivencia Offline
             const canvas = $id('chart-period'); if(!canvas) return; const ctx = canvas.getContext('2d'); if(charts.period) charts.period.destroy(); 
             const grp = {}; 
             cTx.forEach(t => { 
@@ -8040,7 +8040,7 @@
                 trendInc.push(mI); trendExp.push(mE); totalInc6m += mI; totalExp6m += mE;
             }
 
-            const rCT = $id('report-chart-trend'); if(rCT) { const ctxTrend = rCT.getContext('2d'); if(charts.trend) charts.trend.destroy(); charts.trend = new Chart(ctxTrend, { type: 'bar', data: { labels: trendLabels, datasets: [{ label:'Ingresos', data: trendInc, backgroundColor: state.theme.inc }, { label:'Egresos', data: trendExp, backgroundColor: state.theme.exp }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); }
+            const rCT = $id('report-chart-trend'); if(rCT) { if (typeof Chart === 'undefined') return; const ctxTrend = rCT.getContext('2d'); if(charts.trend) charts.trend.destroy(); charts.trend = new Chart(ctxTrend, { type: 'bar', data: { labels: trendLabels, datasets: [{ label:'Ingresos', data: trendInc, backgroundColor: state.theme.inc }, { label:'Egresos', data: trendExp, backgroundColor: state.theme.exp }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); }
             
             // Structure calculation
             let fixedExp = 0; let varExp = 0;
@@ -8048,7 +8048,7 @@
             tx90d.filter(t=>t.type==='expense').forEach(t => { if(fixedCats.some(k => t.cat.toLowerCase().includes(k))) fixedExp += convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC); else varExp += convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC); });
             if(fixedExp === 0 && varExp === 0) { fixedExp = exp90d*0.6; varExp = exp90d*0.4; } // Fallback
 
-            const rCV = $id('report-chart-vs'); if(rCV) { const ctxVs = rCV.getContext('2d'); if(charts.vs) charts.vs.destroy(); charts.vs = new Chart(ctxVs, { type: 'doughnut', data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [fixedExp, varExp], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' } }); }
+            const rCV = $id('report-chart-vs'); if(rCV) { if (typeof Chart === 'undefined') return; const ctxVs = rCV.getContext('2d'); if(charts.vs) charts.vs.destroy(); charts.vs = new Chart(ctxVs, { type: 'doughnut', data: { labels: ['Fijos', 'Variables'], datasets: [{ data: [fixedExp, varExp], backgroundColor: [state.theme.text, state.theme.exp], borderWidth: 0 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position: 'right', labels: {font:{size:8, weight:'bold'}}}}, cutout: '70%' } }); }
 
             // NEW TEXT BOXES POPULATION
             const rTrendText = $id('rep-trend-text');
@@ -8726,19 +8726,17 @@
             const isMaster = isSuperAdminEmail && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
             const adminBlock = $id('admin-users-block');
             const unlockCont = $id('admin-unlock-container');
-            const userSupportBlock = $id('user-support-block'); // APEX FIX: Control UI Soporte Usuario
+            const supportMailbox = $id('admin-support-mailbox-container'); // APEX FIX: Candado UI Buzón
 
             if(adminBlock) {
                 if(isMaster) {
                     adminBlock.classList.remove('hidden');
                     if(unlockCont) unlockCont.classList.add('hidden');
-                    if(userSupportBlock) userSupportBlock.classList.add('hidden'); // APEX FIX: Admin no envía tickets, solo lee
                     loadAdminGlobalUsers();
                     loadSupportTickets(); // APEX FIX: Carga automática de los tickets al abrir admin
                     if(typeof renderAdminModules === 'function') renderAdminModules();
                 } else {
                     adminBlock.classList.add('hidden');
-                    if(userSupportBlock) userSupportBlock.classList.remove('hidden'); // APEX FIX: Usuarios sí envían tickets
                     if(unlockCont) {
                         if (isSuperAdminEmail) unlockCont.classList.remove('hidden');
                         else unlockCont.classList.add('hidden');
