@@ -687,7 +687,7 @@
                     
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1"><i class="fa-solid fa-globe text-blue-500 mr-1"></i> Red Firebase (SSoT)</h3>
-                        <button type="button" onclick="updateLocalUsersList(); if(typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect(); if(typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();" class="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase shadow-sm active:scale-95 transition-transform flex items-center gap-1.5 hover:bg-blue-100"><i class="fa-solid fa-rotate"></i> Sync</button>
+                        <button type="button" onclick="updateLocalUsersList();" class="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase shadow-sm active:scale-95 transition-transform flex items-center gap-1.5 hover:bg-blue-100"><i class="fa-solid fa-rotate"></i> Sync</button>
                     </div>
 
                     <div class="space-y-4">
@@ -697,28 +697,6 @@
                             <div id="network-users-list" class="space-y-2 max-h-[300px] overflow-y-auto hide-scrollbar"></div>
                         </div>
 
-                        <!-- Bóvedas Financieras Compartidas P2P -->
-                        <div class="bg-purple-50/50 p-4 rounded-3xl border border-purple-100 shadow-sm">
-                            <div class="flex justify-between items-center mb-3 border-b border-purple-100/50 pb-2">
-                                <p class="text-[9px] font-black uppercase text-purple-600"><i class="fa-solid fa-satellite-dish mr-1"></i> Bóvedas Compartidas (Radar P2P)</p>
-                                <button onclick="scanP2PRadarDirect()" class="text-[8px] bg-purple-100 text-purple-600 px-3 py-1.5 rounded-lg font-black uppercase active:scale-95 shadow-sm hover:bg-purple-200 transition-colors"><i class="fa-solid fa-search mr-1"></i> Escanear</button>
-                            </div>
-                            <div id="direct-p2p-radar-list" class="space-y-2">
-                                <p class="text-[10px] text-purple-400 font-bold text-center py-2">Presiona escanear para buscar bóvedas</p>
-                            </div>
-                        </div>
-
-                        <!-- NUEVO MÓDULO: Escáner de Tareas Compartidas P2P -->
-                        <div class="bg-indigo-50/50 p-4 rounded-3xl border border-indigo-100 shadow-sm">
-                            <div class="flex justify-between items-center mb-3 border-b border-indigo-100/50 pb-2">
-                                <p class="text-[9px] font-black uppercase text-indigo-600"><i class="fa-solid fa-list-check mr-1"></i> Tareas Compartidas (Radar P2P)</p>
-                                <button onclick="scanTaskP2PRadarDirect()" class="text-[8px] bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg font-black uppercase active:scale-95 shadow-sm hover:bg-indigo-200 transition-colors"><i class="fa-solid fa-search mr-1"></i> Escanear</button>
-                            </div>
-                            <div id="direct-task-radar-list" class="space-y-2">
-                                <p class="text-[10px] text-indigo-400 font-bold text-center py-2">Presiona escanear para buscar tareas</p>
-                            </div>
-                        </div>
-                        
                         <!-- NUEVO MÓDULO: Indicador de Almacenamiento Firebase -->
                         <div class="bg-blue-50/30 p-4 rounded-3xl border border-blue-100 shadow-sm">
                             <div class="flex justify-between items-center mb-3">
@@ -8425,8 +8403,7 @@
                 const cExp = $id('set-color-exp'); if(cExp) cExp.value = state.theme.exp;
             }
 
-            updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
-            if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
+            updateLocalUsersList(); updateCatManageView();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
             const isMaster = (userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked;
@@ -8795,77 +8772,6 @@
             });
             
             if(netList) netList.innerHTML = netHtml || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay cuentas en la red.</p>';
-        }
-
-        // APEX FIX: Función para buscar cuentas P2P directamente en la vista de cuentas
-        async function scanP2PRadarDirect() {
-            const radarList = $id('direct-p2p-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando invitaciones...</p>';
-            try {
-                const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'), where("invitedUsers", "array-contains", currentUser));
-                const snap = await getDocs(q);
-                let html = '';
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
-                    if(!alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-envelope-open-text text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Invitación de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
-                });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay invitaciones nuevas.</p>';
-                radarList.innerHTML = html;
-            } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
-            }
-        }
-
-        // APEX FIX: Función para buscar Tareas P2P directamente en la vista de configuración
-        async function scanTaskP2PRadarDirect() {
-            const radarList = $id('direct-task-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-indigo-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando en Firebase...</p>';
-            try {
-                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'));
-                let html = '';
-                if (!state.taskVaults) state.taskVaults = [];
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.taskVaults.some(v => v.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-indigo-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-list-check text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-indigo-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${doc.id}', '${data.name}', '${data.owner}')" class="bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-indigo-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
-                });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas de tareas nuevas en la red.</p>';
-                radarList.innerHTML = html;
-            } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
-            }
-        }
-
-        function linkTaskRadarVault(remoteId, name, owner) {
-            if(!state.taskVaults) state.taskVaults = [];
-            if(state.taskVaults.some(v => v.remoteId === remoteId)) return alert("Ya estás vinculado a esta bóveda.");
-            
-            let cleanName = name;
-            if(!cleanName.startsWith('👥 ')) cleanName = '👥 ' + cleanName;
-
-            state.taskVaults.push({ id: remoteId, name: cleanName, isShared: true, remoteId: remoteId, owner: owner });
-            if(currentUser) NexusIDB.saveState(currentUser, state);
-            
-            if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
-            
-            alert("✅ Bóveda de tareas P2P vinculada desde el Radar.");
-            
-            populateTaskVaultSelects();
-            if ($id('task-vault-modal') && !$id('task-vault-modal').classList.contains('hidden')) renderTaskVaultsList();
-            
-            scanTaskP2PRadarDirect();
-            updateDashboard();
         }
 
         let currentEditAvatar = null;
