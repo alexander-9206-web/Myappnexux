@@ -2417,7 +2417,7 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2450,29 +2450,16 @@
                 import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
-                return new Promise((resolve) => {
-                    const initAuth = async () => {
-                        try {
-                            if (!auth.currentUser) {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (err) {
-                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
-                        }
-                    };
-                    initAuth();
+                // APEX FIX: Fallback Cero Fricción para Firebase Auth si Anonymous no está habilitado
+                try {
+                    await signInAnonymously(auth);
+                } catch (err) {
+                    console.warn("[APEX SYS] Firebase Auth Anónimo desactivado o bloqueado. Se fuerza conexión SSoT pura de base de datos.");
+                }
+                
+                updateCloudBadge(true, false);
+                return true;
 
-                    onAuthStateChanged(auth, (user) => {
-                        fbUser = user;
-                        if(user) {
-                            updateCloudBadge(true, false);
-                            resolve(true);
-                        } else {
-                            updateCloudBadge(false);
-                            resolve(false);
-                        }
-                    });
-                });
             } catch(e) {
                 console.warn("[APEX SYS] Error de red. Trabajando en modo Local-First.", e);
                 updateCloudBadge(false);
@@ -2481,21 +2468,24 @@
         }
 
         function updateCloudBadge(active, syncing = false) {
-            const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-            if(!dcb || !dcd) return;
+            const dcb = $id('dash-cloud-badge'); 
+            if(!dcb) return;
             if(active) {
-                dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
-                dcd.className = "w-1.5 h-1.5 rounded-full bg-blue-500 transition-all";
-                if(syncing) dcd.classList.add('animate-pulse'); else dcd.classList.remove('animate-pulse');
+                if(syncing) {
+                    dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
+                    dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Sync...`;
+                } else {
+                    dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
+                    dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-blue-500 transition-all"></div> En Línea`;
+                }
             } else {
                 dcb.className = "bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all";
-                dcd.className = "w-1.5 h-1.5 rounded-full bg-slate-400 transition-all";
-                dcd.classList.remove('animate-pulse');
+                dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Desconectado`;
             }
         }
 
         async function fetchCloudState() {
-            if (!fbUser || !window.db || !currentUser) return;
+            if (!window.db || !currentUser) return;
             try {
                 // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
                 const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2579,7 +2569,7 @@
         }
 
         function triggerCloudSync() {
-            if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
+            if(!sessionUnlocked || !window.db || !currentUser) return;
             
             // APEX OPTIMIZATION: Prevención de Cola Infinita (Race Condition Fix)
             if(isSyncing) {
@@ -3105,10 +3095,12 @@
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
                     await bootApp(); 
+                    await initCloud(); // APEX FIX: Asegurar inicialización de BD
                     fetchCloudState(); 
                 }, 300); 
             } else {
                 await bootApp();
+                await initCloud();
                 fetchCloudState();
             }
         }
