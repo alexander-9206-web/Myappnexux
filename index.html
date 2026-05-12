@@ -2019,7 +2019,40 @@
             setTimeout(() => {
                 if(action === 'edit_parent_cat') executeEditParentCat(payload, val);
                 else if(action === 'invite_p2p_vault') executeInviteP2PVault(payload, val);
+                else if(action === 'admin_pwd') executeAdminPwdChange(payload, val);
             }, 300);
+        }
+
+        // APEX FIX: Módulo Administrativo de Modificación Directa de Contraseñas
+        function adminChangePasswordPrompt(email, name) {
+            triggerUIPrompt(`Modificar contraseña de ${name} (${email}):\nRequisito: Mín. 8 caracteres (Mayúscula, minúscula, número y símbolo).`, '', 'admin_pwd', email);
+        }
+
+        async function executeAdminPwdChange(email, newPin) {
+            const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+            if(!passRegex.test(newPin)) {
+                return alert("⚠️ La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
+            }
+            if(!window.db) return alert("⚠️ Sin conexión a la red SSoT.");
+            
+            try {
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                const snap = await getDoc(userRef);
+                
+                if(snap.exists()) {
+                    const userData = snap.data();
+                    userData.pin = newPin; // Forzar actualización de seguridad
+                    await setDoc(userRef, { pin: newPin }, { merge: true });
+                    localStorage.setItem('nexus_profile_' + email, JSON.stringify(userData));
+                    alert(`✅ Contraseña de ${email} modificada exitosamente en la nube.`);
+                } else {
+                    alert("⚠️ Usuario no encontrado en la base de datos.");
+                }
+            } catch(e) {
+                console.error(e);
+                alert("⚠️ Error al intentar modificar la contraseña.");
+            }
         }
         
         function executeEditParentCat(currentParent, newName) {
@@ -8543,6 +8576,9 @@
                 const MAX_QUOTA_KB = 10240; // Cuota teórica de 10MB para perfil SSoT
 
                 users.forEach(data => {
+                    // APEX FIX: Auto-Caché Forzado para estabilizar la Edición de Usuarios (Fricción Cero)
+                    localStorage.setItem('nexus_profile_' + data.email, JSON.stringify(data));
+                    
                     const isCurrent = data.email === currentUser;
                     const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
                     const usagePct = Math.min(100, (sizeKB / MAX_QUOTA_KB) * 100).toFixed(2);
@@ -8551,17 +8587,18 @@
                     const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
 
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
-                        <div class="flex items-center gap-3">
+                        <div class="flex items-center gap-3 min-w-0">
                             <div class="w-10 h-10 rounded-full ${isCurrent && !data.avatar ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
-                            <div class="flex flex-col">
-                                <p class="text-[11px] font-black uppercase text-slate-800">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
-                                <p class="text-[9px] font-bold text-slate-500 mt-0.5">${data.email}</p>
-                                <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5"><i class="fa-solid fa-database mr-1 text-blue-400"></i>Uso: ${usagePct}% (${sizeKB} KB) • Ult: ${lastSync}</p>
+                            <div class="flex flex-col truncate">
+                                <p class="text-[11px] font-black uppercase text-slate-800 truncate">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
+                                <p class="text-[9px] font-bold text-slate-500 mt-0.5 truncate">${data.email}</p>
+                                <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 truncate"><i class="fa-solid fa-database mr-1 text-blue-400"></i>Uso: ${usagePct}% (${sizeKB} KB) • Ult: ${lastSync}</p>
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center justify-end gap-2 w-24">
+                        <div class="flex flex-wrap items-center justify-end gap-2 flex-1 ml-2">
                             ${!isCurrent ? `
                             <button onclick="openRemotePermissions('${data.email}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
+                            <button onclick="adminChangePasswordPrompt('${data.email}', '${data.name}')" class="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center hover:bg-emerald-100 transition-colors shadow-sm" title="Modificar Contraseña"><i class="fa-solid fa-unlock-keyhole text-[10px]"></i></button>
                             <button onclick="openUserEdit('${data.email}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
                             <button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
                             <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
