@@ -751,7 +751,11 @@
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4">Engine Global</h3>
                     <div class="grid grid-cols-2 gap-4">
                         <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
-                        <div><label class="text-[10px] font-black text-slate-400 ml-2">Divisas en Dashboard</label><select id="set-currency-count" class="form-input text-center" onchange="updateSettings()"><option value="1">1 Divisa (Unificada)</option><option value="2">2 Divisas (Dual)</option></select></div>
+                        <div><label class="text-[10px] font-black text-slate-400 ml-2">Informes</label><select id="set-currency-count" class="form-input text-center" onchange="updateSettings(); renderSettingsTab();"><option value="1">1 Divisa (Simple)</option><option value="2">2 Divisas (Dual)</option></select></div>
+                    </div>
+                    <!-- APEX FIX: Selector de Divisa Secundaria Dinámico -->
+                    <div id="set-sec-curr-container" class="hidden grid grid-cols-1 pt-4 border-t border-slate-100 animate-slideUp">
+                        <div><label class="text-[10px] font-black uppercase text-indigo-500 ml-2 tracking-widest"><i class="fa-solid fa-coins mr-1"></i> Divisa Secundaria SSoT</label><select id="set-secondary-currency" class="form-input text-center font-bold text-indigo-900 bg-indigo-50 border border-indigo-100 w-full mt-1" onchange="updateSettings()"><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option><option value="COP">COP</option></select></div>
                     </div>
                     <div class="flex items-center justify-between pt-4 border-t border-slate-100"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo Contraseña</h4><p class="text-[8px] text-slate-400">Pedir al abrir o inactividad</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div></label></div>
                     <div class="pt-4 border-t border-slate-100">
@@ -3828,6 +3832,7 @@
             if (!state || !state.settings) return;
             const ccMode = state.settings.currencyCount || '2';
             const baseCurr = state.settings.baseCurrency || 'COP';
+            const secCurr = state.settings.secondaryCurrency || 'USD'; // APEX FIX: Divisa Secundaria
 
             // Filtros de Auditoría y Calendario con opción "Todas"
             const filtersAll = [
@@ -3843,14 +3848,15 @@
                         el.innerHTML = `<option value="${f.allVal}">Todas</option><option value="${baseCurr}">${baseCurr}</option>`;
                         el.value = (prev === f.allVal) ? f.allVal : baseCurr;
                     } else {
-                        el.innerHTML = `<option value="${f.allVal}">Todas</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
+                        // APEX FIX: Restricción absoluta a las dos monedas configuradas
+                        el.innerHTML = `<option value="${f.allVal}">Todas</option><option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
                         if (!el.value) el.value = f.allVal;
                     }
                 }
             });
 
             // Filtros Directos (Impuestos, Analítica Divisa 1)
-            const filtersDirect = ['cal-cov-currency-1', 'tax-currency'];
+            const filtersDirect = ['cal-cov-currency-1', 'tax-currency', 'dash-alt-currency'];
             filtersDirect.forEach(id => {
                 const el = $id(id);
                 if (el) {
@@ -3859,11 +3865,24 @@
                         el.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                         el.value = baseCurr;
                     } else {
-                        el.innerHTML = `<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
-                        el.value = (prev && prev !== 'COP' && prev !== baseCurr) ? prev : baseCurr;
+                        // APEX FIX: Candado SSoT
+                        el.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
+                        el.value = (prev && (prev === baseCurr || prev === secCurr)) ? prev : secCurr;
                     }
                 }
             });
+            
+            // Selector del Bloque 2 del Calendario Pro
+            const calBlock2Curr = $id('cal-cov-currency-2');
+            if(calBlock2Curr) {
+                if (ccMode === '1') {
+                    calBlock2Curr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    calBlock2Curr.value = baseCurr;
+                } else {
+                    calBlock2Curr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
+                    calBlock2Curr.value = secCurr;
+                }
+            }
             
             // Selector de Sumador en Auditoría
             const dbTotalCurr = $id('db-currency');
@@ -3873,8 +3892,8 @@
                     dbTotalCurr.innerHTML = `<option value="BASE">${baseCurr}</option>`;
                     dbTotalCurr.value = 'BASE';
                 } else {
-                    dbTotalCurr.innerHTML = `<option value="BASE">Base</option><option value="USD">USD</option><option value="COP">COP</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
-                    dbTotalCurr.value = prev;
+                    dbTotalCurr.innerHTML = `<option value="BASE">Base</option><option value="${secCurr}">${secCurr}</option>`;
+                    dbTotalCurr.value = prev === secCurr ? secCurr : 'BASE';
                 }
             }
             
@@ -3887,8 +3906,8 @@
                     apCurrEl.value = baseCurr;
                     state.settings.apCurrency = baseCurr; // Forzar coherencia
                 } else {
-                    apCurrEl.innerHTML = `<option value="AUD">AUD</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option>`;
-                    apCurrEl.value = prev;
+                    apCurrEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
+                    apCurrEl.value = (prev === baseCurr || prev === secCurr) ? prev : secCurr;
                 }
             }
         }
@@ -4703,11 +4722,14 @@
             if (faCurr) {
                 const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
                 const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                const secCurr = state.settings.secondaryCurrency || 'USD';
+                
                 if (ccMode === '1') {
                     faCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                     faCurr.value = baseCurr;
                 } else {
-                    faCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    // APEX FIX: Restricción absoluta
+                    faCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
                     faCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
                 }
             }
@@ -4735,7 +4757,16 @@
             if($id('acc-form-title')) $id('acc-form-title').innerText = "Detalles y Edición"; 
             if($id('fa-id')) $id('fa-id').value = acc.id; 
             if($id('fa-name')) $id('fa-name').value = acc.name.replace('👥 ', ''); 
-            if($id('fa-currency')) $id('fa-currency').value = acc.currency || 'COP'; 
+            
+            const faCurr = $id('fa-currency');
+            if(faCurr) {
+                // APEX FIX: Asegurar que si edita, la moneda actual de la cuenta esté en las opciones
+                if(!Array.from(faCurr.options).some(o => o.value === acc.currency)) {
+                    faCurr.innerHTML += `<option value="${acc.currency}">${acc.currency}</option>`;
+                }
+                faCurr.value = acc.currency || 'COP'; 
+            }
+
             const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal'; 
             const balEl = $id('fa-balance'); if(balEl) { balEl.value = fmt(acc.balance, acc.currency); balEl.dataset.raw = acc.balance; } 
             if($id('fa-type')) $id('fa-type').value = acc.type; 
@@ -5110,11 +5141,12 @@
             if (flCurr) {
                 const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
                 const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                const secCurr = state.settings.secondaryCurrency || 'USD';
                 if (ccMode === '1') {
                     flCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                     flCurr.value = baseCurr;
                 } else {
-                    flCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    flCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
                     flCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
                 }
             }
@@ -5152,11 +5184,12 @@
             if (fpCurr) {
                 const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
                 const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                const secCurr = state.settings.secondaryCurrency || 'USD';
                 if (ccMode === '1') {
                     fpCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                     fpCurr.value = baseCurr;
                 } else {
-                    fpCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    fpCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
                     fpCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
                 }
             }
@@ -5606,11 +5639,12 @@
                 curS.innerHTML = ''; 
                 const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
                 const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                const secCurr = state.settings.secondaryCurrency || 'USD';
                 if (ccMode === '1') {
                     curS.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                     curS.value = baseCurr;
                 } else {
-                    CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); 
+                    curS.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`; 
                     curS.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency; 
                 }
             }
@@ -7892,8 +7926,7 @@
             `;
             listCont.innerHTML = html;
         }
-
-        // APEX FIX: Función para abrir modal robusta, que cierra el FAB Menu al invocarse
+        // MODAL PROYECTOS
         function openProjectModal() {
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
             const mod = $id('new-project-modal'); if(!mod) return;
@@ -7906,11 +7939,12 @@
             if (currEl) {
                 const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
                 const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                const secCurr = state.settings.secondaryCurrency || 'USD';
                 if (ccMode === '1') {
                     currEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
                     currEl.value = baseCurr;
                 } else {
-                    currEl.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    currEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
                     currEl.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
                 }
             }
@@ -8942,6 +8976,19 @@
         function renderSettingsTab() {
             $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
             const ccEl = $id('set-currency-count'); if(ccEl) ccEl.value = state.settings.currencyCount || '2';
+            
+            // APEX FIX: Lógica de despliegue de Divisa Secundaria
+            const secCurrCont = $id('set-sec-curr-container');
+            if (secCurrCont) {
+                if (state.settings.currencyCount === '1') {
+                    secCurrCont.classList.add('hidden');
+                } else {
+                    secCurrCont.classList.remove('hidden');
+                    const secCurrEl = $id('set-secondary-currency');
+                    if (secCurrEl) secCurrEl.value = state.settings.secondaryCurrency || 'USD';
+                }
+            }
+
             const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) apCurrEl.value = state.settings.apCurrency || 'AUD';
             $id('set-ap-day').value = state.settings.apPayDay !== undefined ? state.settings.apPayDay : 5; 
@@ -9245,6 +9292,13 @@
         function updateSettings() {
             state.settings.baseCurrency = $id('set-base-currency').value;
             const ccEl = $id('set-currency-count'); if(ccEl) state.settings.currencyCount = ccEl.value;
+            
+            // APEX FIX: Guardar divisa secundaria
+            const secCurrEl = $id('set-secondary-currency');
+            if (secCurrEl && !secCurrEl.closest('#set-sec-curr-container').classList.contains('hidden')) {
+                state.settings.secondaryCurrency = secCurrEl.value;
+            }
+
             const apLimEl = $id('set-ap-limit'); state.settings.apLimit = parseFloat(apLimEl.dataset.raw || 5000000);
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) state.settings.apCurrency = apCurrEl.value;
             const apDayParsed = parseInt($id('set-ap-day').value);
