@@ -1092,7 +1092,7 @@
                     </div>
 
                     <!-- Bloque Divisa 2 -->
-                    <div class="flex-1 bg-white/60 p-4 rounded-[1.5rem] border border-rose-100 shadow-sm flex flex-col justify-between">
+                    <div id="cal-block-curr-2" class="flex-1 bg-white/60 p-4 rounded-[1.5rem] border border-rose-100 shadow-sm flex flex-col justify-between">
                         <div class="flex justify-between items-center mb-4">
                             <p class="text-[10px] text-rose-600 font-bold uppercase">Divisa Secundaria</p>
                             <select id="cal-cov-currency-2" onchange="renderCalendar()" class="text-[8px] font-black uppercase bg-rose-200 text-rose-800 px-2 py-1 rounded outline-none cursor-pointer"><option value="USD">USD</option><option value="COP">COP</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select>
@@ -4628,7 +4628,20 @@
             const mod = $id('new-account-modal'); if(!mod) return; 
             mod.classList.remove('hidden'); 
             if($id('acc-form-title')) $id('acc-form-title').innerText = "Nueva Cuenta"; 
-            if($id('fa-currency')) $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; 
+            
+            const faCurr = $id('fa-currency');
+            if (faCurr) {
+                const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+                const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                if (ccMode === '1') {
+                    faCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    faCurr.value = baseCurr;
+                } else {
+                    faCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    faCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
+                }
+            }
+            
             if($id('fa-id')) $id('fa-id').value = ''; 
             if($id('fa-name')) $id('fa-name').value = ''; 
             const scp = $id('fa-scope'); if(scp) scp.value = 'personal'; 
@@ -4996,43 +5009,88 @@
                 const mod = $id('pending-modal'); if(mod) mod.classList.remove('hidden');
                 if($id('fp-id')) $id('fp-id').value = l.id;
                 $id('fp-name').value = l.name.replace('⚡ ', '');
-                const amtEl = $id('fp-amount'); amtEl.value = fmt(l.total); amtEl.dataset.raw = l.total;
+                const amtEl = $id('fp-amount'); amtEl.value = fmt(l.total, l.currency); amtEl.dataset.raw = l.total;
                 $id('fp-date').value = l.date.split('T')[0];
                 if($id('fp-priority')) $id('fp-priority').value = l.priority || 'medium';
-                if($id('fp-currency')) $id('fp-currency').value = l.currency || state.activeCurrency;
+                if($id('fp-currency')) $id('fp-currency').value = l.currency || 'COP';
             } else {
                 const mod = $id('loan-modal'); if(mod) mod.classList.remove('hidden');
                 if($id('fl-id')) $id('fl-id').value = l.id;
                 $id('fl-name').value = l.name;
-                const amtEl = $id('fl-amount'); amtEl.value = fmt(l.total); amtEl.dataset.raw = l.total;
+                const amtEl = $id('fl-amount'); amtEl.value = fmt(l.total, l.currency); amtEl.dataset.raw = l.total;
                 const rateEl = $id('fl-rate'); rateEl.value = l.rate; rateEl.dataset.raw = l.rate;
                 const termEl = $id('fl-term'); termEl.value = l.term; termEl.dataset.raw = l.term;
                 $id('fl-date').value = l.date.split('T')[0];
-                if($id('fl-currency')) $id('fl-currency').value = l.currency || state.activeCurrency;
+                if($id('fl-currency')) $id('fl-currency').value = l.currency || 'COP';
             }
         }
 
-        function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); if($id('fl-id')) $id('fl-id').value = ''; $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
+        function openLoanForm() { 
+            const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); 
+            const mod = $id('loan-modal'); if(!mod) return; 
+            mod.classList.remove('hidden'); 
+            if($id('fl-id')) $id('fl-id').value = ''; 
+            $id('fl-name').value = ''; 
+            const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; 
+            const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; 
+            const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; 
+            $id('fl-date').value = new Date().toISOString().split('T')[0]; 
+            
+            const flCurr = $id('fl-currency');
+            if (flCurr) {
+                const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+                const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                if (ccMode === '1') {
+                    flCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    flCurr.value = baseCurr;
+                } else {
+                    flCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    flCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
+                }
+            }
+        }
         
         function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         
         function saveLoan(e) { 
             e.preventDefault(); const idEl = $id('fl-id'); const id = idEl ? idEl.value : ''; const name = $id('fl-name').value; const amount = parseFloat($id('fl-amount').dataset.raw) || 0; const rate = parseFloat($id('fl-rate').dataset.raw) || 0; const term = parseInt($id('fl-term').dataset.raw) || 0; const date = $id('fl-date').value; 
             if(!name || amount <= 0 || term <= 0) return alert("Monto y plazo mayores a cero."); 
-            const currency = $id('fl-currency') ? $id('fl-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency); 
+            const targetDate = new Date(`${date}T12:00:00`); 
+            const currency = $id('fl-currency') ? $id('fl-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             if(id) { 
                 const l = state.loans.find(x => x.id === id); 
-                if(l) { l.name = name; l.total = amount; l.rate = rate; l.term = term; l.date = new Date(`${date}T12:00:00`).toISOString(); l.currency = currency; } 
+                if(l) { l.name = name; l.total = amount; l.rate = rate; l.term = term; l.date = targetDate.toISOString(); l.currency = currency; } 
             } else { 
-                const newLoan = { id: 'loan_' + Date.now(), name, total: amount, balance: amount, rate, term, paidQuotas: 0, date: new Date(`${date}T12:00:00`).toISOString(), currency: currency, isBNPL: false }; 
-                state.loans.push(newLoan); 
+                state.loans.push({ id: 'loan_' + Date.now(), name, total: amount, balance: amount, rate, term, paidQuotas: 0, date: targetDate.toISOString(), currency: currency, isBNPL: false, priority: 'none' }); 
             } 
             saveState(); updateDashboard(); closeLoanForm(); 
             const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) { lv.classList.remove('hidden'); lv.classList.add('animate-slideUp'); } if(ld) ld.classList.add('hidden'); 
             renderLoansList(); 
         }
 
-        function openPendingForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('pending-modal'); if(!mod) return; mod.classList.remove('hidden'); if($id('fp-id')) $id('fp-id').value = ''; $id('fp-name').value = ''; const amtEl = $id('fp-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('fp-date').value = new Date().toISOString().split('T')[0]; if($id('fp-priority')) $id('fp-priority').value = 'medium'; if($id('fp-currency')) $id('fp-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
+        function openPendingForm() { 
+            const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); 
+            const mod = $id('pending-modal'); if(!mod) return; 
+            mod.classList.remove('hidden'); 
+            if($id('fp-id')) $id('fp-id').value = ''; 
+            $id('fp-name').value = ''; 
+            const amtEl = $id('fp-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; 
+            $id('fp-date').value = new Date().toISOString().split('T')[0]; 
+            if($id('fp-priority')) $id('fp-priority').value = 'medium'; 
+            
+            const fpCurr = $id('fp-currency');
+            if (fpCurr) {
+                const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+                const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                if (ccMode === '1') {
+                    fpCurr.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    fpCurr.value = baseCurr;
+                } else {
+                    fpCurr.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    fpCurr.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
+                }
+            }
+        }
         
         function closePendingForm() { const modal = $id('pending-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         
@@ -5476,8 +5534,15 @@
             const curS = $id('f-currency'); 
             if(curS) { 
                 curS.innerHTML = ''; 
-                CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); 
-                curS.value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency; 
+                const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+                const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                if (ccMode === '1') {
+                    curS.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    curS.value = baseCurr;
+                } else {
+                    CURRENCIES.forEach(c => curS.innerHTML += `<option value="${c}">${c}</option>`); 
+                    curS.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency; 
+                }
             }
 
             const catMod = $id('category-module');
@@ -7766,7 +7831,19 @@
             const nameEl = $id('f-proj-name'); if(nameEl) nameEl.value = '';
             const bEl = $id('f-proj-budget'); if(bEl) { bEl.value = ''; bEl.dataset.raw = ''; }
             const dateEl = $id('f-proj-date'); if(dateEl) dateEl.value = new Date().toISOString().split('T')[0];
-            const currEl = $id('f-proj-currency'); if(currEl) currEl.value = state.activeCurrency === 'GLOBAL' ? (state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP') : state.activeCurrency;
+            
+            const currEl = $id('f-proj-currency');
+            if (currEl) {
+                const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+                const baseCurr = state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP';
+                if (ccMode === '1') {
+                    currEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    currEl.value = baseCurr;
+                } else {
+                    currEl.innerHTML = '<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>';
+                    currEl.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency;
+                }
+            }
             mod.classList.remove('hidden');
         }
 
@@ -8667,6 +8744,14 @@
             }
             const gmEl = $id('cal-grid-month'); if(gmEl) gmEl.innerText = viewDate.toLocaleDateString('es-CO', {month: 'long', year: 'numeric'});
             
+            // APEX FIX: Ocultar el bloque de divisa secundaria en el Calendario según configuración global
+            const ccMode = (state.settings && state.settings.currencyCount) ? state.settings.currencyCount : '2';
+            const block2 = $id('cal-block-curr-2');
+            if(block2) {
+                if(ccMode === '1') block2.classList.add('hidden');
+                else block2.classList.remove('hidden');
+            }
+
             // Lógica Pura: Filtrado Multidivisa Estricto (Sin Conversión)
             const curr1 = $id('cal-cov-currency-1') ? $id('cal-cov-currency-1').value : 'COP';
             const curr2 = $id('cal-cov-currency-2') ? $id('cal-cov-currency-2').value : 'USD';
@@ -8713,8 +8798,10 @@
 
             const cv1 = inc1 - debt1;
             const cv2 = inc2 - debt2;
-            let nT = `<b>${curr1}:</b> ${cv1 >= 0 ? '<span class="text-emerald-600">Flujo Positivo (+' + fmt(cv1, curr1) + ')</span>' : '<span class="text-red-600">Déficit (-' + fmt(Math.abs(cv1), curr1) + ')</span>'} &nbsp; | &nbsp; `;
-            nT += `<b>${curr2}:</b> ${cv2 >= 0 ? '<span class="text-emerald-600">Flujo Positivo (+' + fmt(cv2, curr2) + ')</span>' : '<span class="text-red-600">Déficit (-' + fmt(Math.abs(cv2), curr2) + ')</span>'}`;
+            let nT = `<b>${curr1}:</b> ${cv1 >= 0 ? '<span class="text-emerald-600">Flujo Positivo (+' + fmt(cv1, curr1) + ')</span>' : '<span class="text-red-600">Déficit (-' + fmt(Math.abs(cv1), curr1) + ')</span>'}`;
+            if (ccMode === '2') {
+                nT += ` &nbsp; | &nbsp; <b>${curr2}:</b> ${cv2 >= 0 ? '<span class="text-emerald-600">Flujo Positivo (+' + fmt(cv2, curr2) + ')</span>' : '<span class="text-red-600">Déficit (-' + fmt(Math.abs(cv2), curr2) + ')</span>'}`;
+            }
             const cnEl = $id('cal-coverage-narrative'); if(cnEl) cnEl.innerHTML = nT;
             
             const gridDays = $id('cal-grid-days');
