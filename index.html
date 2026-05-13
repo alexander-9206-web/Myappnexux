@@ -3561,7 +3561,7 @@
             setupAutoBackup();
             
             // APEX FIX: Selector de Vista Global restringido a las divisas configuradas
-            const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
+            const currSelects = $qAll('#global-currency, #fa-currency');
             currSelects.forEach(s => { 
                 const currentVal = s.value || state.activeCurrency; 
                 s.innerHTML = ''; 
@@ -3572,8 +3572,6 @@
                     const ccMode = state.settings.currencyCount || '2';
                     s.innerHTML += `<option value="${baseC}">${baseC}</option>`;
                     if(ccMode === '2') s.innerHTML += `<option value="${secC}">${secC}</option>`;
-                } else if (s.id === 'set-base-currency') {
-                    CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
                 } else {
                     const baseC = state.settings.baseCurrency || 'COP';
                     const secC = state.settings.secondaryCurrency || 'USD';
@@ -3589,6 +3587,16 @@
                     s.value = 'GLOBAL';
                     state.activeCurrency = 'GLOBAL'; // Fallback a Global si la moneda anterior ya no está permitida
                 }
+            });
+
+            // APEX FIX: Selectores de Configuración y Afterpay Independientes (100% Divisas Disponibles)
+            $qAll('#set-base-currency, #set-secondary-currency, #set-ap-currency').forEach(s => {
+                const currentVal = s.id === 'set-base-currency' ? (state.settings.baseCurrency || 'COP') : 
+                                   s.id === 'set-secondary-currency' ? (state.settings.secondaryCurrency || 'USD') : 
+                                   (state.settings.apCurrency || 'AUD');
+                s.innerHTML = '';
+                CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
+                s.value = currentVal;
             });
 
             const hb = $id('header-user-badge'); if(hb) hb.innerText = userProfile.name;
@@ -3923,19 +3931,7 @@
                 }
             }
             
-            // Selector de Afterpay en Configuración
-            const apCurrEl = $id('set-ap-currency');
-            if (apCurrEl) {
-                const prev = apCurrEl.value;
-                if (ccMode === '1') {
-                    apCurrEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
-                    apCurrEl.value = baseCurr;
-                    state.settings.apCurrency = baseCurr; // Forzar coherencia
-                } else {
-                    apCurrEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`;
-                    apCurrEl.value = (prev === baseCurr || prev === secCurr) ? prev : secCurr;
-                }
-            }
+            // APEX FIX: El Selector de Afterpay ha sido purgado de esta función para garantizar su soberanía total sobre todas las divisas.
         }
 
         function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); syncCurrencyFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
