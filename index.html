@@ -4245,6 +4245,50 @@
             if(totIncAltEl) totIncAltEl.innerText = "+" + fmt(cI_alt, dashAltCurr);
             if(totExpAltEl) totExpAltEl.innerText = "-" + fmt(cE_alt, dashAltCurr);
 
+            // APEX FIX: Puente Nativo SSoT para actualización en vivo de Widgets en iOS (Swift)
+            try {
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.updateWidgetHandler) {
+                    const finalNwVal = (ccMode === '1' || !isGlobal) ? uNW : nwMain;
+                    const finalNwCurr = (ccMode === '1' || !isGlobal) ? displayCurr : bC;
+                    
+                    const nowW = new Date();
+                    const todayStrW = nowW.getFullYear() + '-' + String(nowW.getMonth()+1).padStart(2,'0') + '-' + String(nowW.getDate()).padStart(2,'0');
+                    
+                    const pTasks = (state.tasks || []).filter(t => t.date === todayStrW && !t.completed).sort((a,b) => {
+                        const pMap = { 'high': 3, 'medium': 2, 'low': 1, 'none': 0 };
+                        return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
+                    });
+                    
+                    const endWeek = new Date(nowW); endWeek.setDate(endWeek.getDate() + 7);
+                    const weekDebts = aTx.filter(t => t.isProjected && t.type === 'expense' && (t.cat.includes('Deuda') || t.cat.includes('TC') || t.cat.includes('Afterpay') || t.cat.includes('Pendiente')) && new Date(t.date) >= nowW && new Date(t.date) <= endWeek).reduce((s,t) => s + t.amount, 0);
+
+                    // Motor de Presupuesto para el Widget (0.0 a 1.0)
+                    const mIncWidget = cTxMain.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                    const mExpWidget = cTxMain.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+                    
+                    let totLimits = 0;
+                    if (state.budgets && Object.keys(state.budgets).length > 0) {
+                        Object.values(state.budgets).forEach(v => totLimits += v);
+                    } else {
+                        totLimits = (mIncWidget > 0 ? mIncWidget : 1000000) * 0.8; // Fallback al 80% del ingreso
+                    }
+                    
+                    let bProg = totLimits > 0 ? (mExpWidget / totLimits) : 0;
+                    if (bProg > 1) bProg = 1;
+
+                    window.webkit.messageHandlers.updateWidgetHandler.postMessage(JSON.stringify({
+                        netWorth: fmt(finalNwVal, finalNwCurr),
+                        income: "+" + fmt(cI, dashMainCurr),
+                        expense: "-" + fmt(cE, dashMainCurr),
+                        todayTasks: pTasks.length.toString(),
+                        weeklyDebts: fmt(weekDebts, dashMainCurr),
+                        nextTask: pTasks.length > 0 ? pTasks[0].title : "Todo al día",
+                        budgetSpent: (bProg * 100).toFixed(0) + "%",
+                        budgetProgress: parseFloat(bProg.toFixed(2))
+                    }));
+                }
+            } catch(e) { console.warn("[APEX SYS] Fricción en el envío de datos al Widget Swift:", e); }
+
             if(state.context === 'day') { renderAccounts(); render7DaysChart(aTx); renderDashTasks(); } else { renderPeriodChart(cTx); renderPeriodList(cTx); }
         }
 
