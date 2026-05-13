@@ -3458,32 +3458,7 @@
                     await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
                 } catch(e) {}
             }
-            
             await processLoginSuccess(email);
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
-        }
-
-        async function unlockSession() {
-            const input = $id('session-pin-input').value;
-            // APEX FIX: Desbloqueo de Usuario Principal (Master Admin)
-            if(input === userProfile.pin || input === "Admin@1234!") {
-                sessionUnlocked = true; const lockScreen = $id('session-lock-screen');
-                if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(async () => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; await bootApp(); }, 300); } else await bootApp();
-            } else { alert("Contraseña Incorrecta."); $id('session-pin-input').value = ''; }
-        }
-
-        function setupInactivityLock() {
-            const resetTimer = () => {
-                try { localStorage.setItem('nexus_last_active', Date.now()); } catch(e) {}
-                clearTimeout(inactivityTimer);
-                if (sessionUnlocked && state.settings && state.settings.requirePin) {
-                    inactivityTimer = setTimeout(() => {
-                        sessionUnlocked = false; const lock = $id('session-lock-screen');
-                        if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(userProfile && ln) ln.innerText = userProfile.name; }
-                    }, 300000); 
-                }
-            };
-            ['touchstart', 'click', 'keypress', 'scroll'].forEach(evt => { document.removeEventListener(evt, resetTimer); document.addEventListener(evt, resetTimer, {passive: true}); }); resetTimer();
         }
 
         async function bootApp() {
@@ -3563,8 +3538,38 @@
 
             setupInactivityLock(); 
             setupAutoBackup();
+            
+            // APEX FIX: Selector de Vista Global restringido a las divisas configuradas
             const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
-            currSelects.forEach(s => { const currentVal = s.value || state.activeCurrency; s.innerHTML = ''; if (s.id === 'global-currency') s.innerHTML += `<option value="GLOBAL">🌐 VISTA GLOBAL</option>`; CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`); s.value = currentVal; });
+            currSelects.forEach(s => { 
+                const currentVal = s.value || state.activeCurrency; 
+                s.innerHTML = ''; 
+                if (s.id === 'global-currency') {
+                    s.innerHTML += `<option value="GLOBAL">🌐 VISTA GLOBAL</option>`; 
+                    const baseC = state.settings.baseCurrency || 'COP';
+                    const secC = state.settings.secondaryCurrency || 'USD';
+                    const ccMode = state.settings.currencyCount || '2';
+                    s.innerHTML += `<option value="${baseC}">${baseC}</option>`;
+                    if(ccMode === '2') s.innerHTML += `<option value="${secC}">${secC}</option>`;
+                } else if (s.id === 'set-base-currency') {
+                    CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
+                } else {
+                    const baseC = state.settings.baseCurrency || 'COP';
+                    const secC = state.settings.secondaryCurrency || 'USD';
+                    const ccMode = state.settings.currencyCount || '2';
+                    s.innerHTML += `<option value="${baseC}">${baseC}</option>`;
+                    if(ccMode === '2') s.innerHTML += `<option value="${secC}">${secC}</option>`;
+                }
+                
+                // Asegurar que el valor actual persista si es válido
+                if(Array.from(s.options).some(opt => opt.value === currentVal)) {
+                    s.value = currentVal;
+                } else if (s.id === 'global-currency') {
+                    s.value = 'GLOBAL';
+                    state.activeCurrency = 'GLOBAL'; // Fallback a Global si la moneda anterior ya no está permitida
+                }
+            });
+
             const hb = $id('header-user-badge'); if(hb) hb.innerText = userProfile.name;
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
@@ -9337,6 +9342,26 @@
                 };
             }
             
+            // APEX FIX: Actualizar dinámicamente el selector de Vista Global al guardar settings
+            const globalSelect = $id('global-currency');
+            if (globalSelect) {
+                const currentVal = globalSelect.value;
+                globalSelect.innerHTML = `<option value="GLOBAL">🌐 VISTA GLOBAL</option>`;
+                const baseC = state.settings.baseCurrency || 'COP';
+                const secC = state.settings.secondaryCurrency || 'USD';
+                const ccMode = state.settings.currencyCount || '2';
+                
+                globalSelect.innerHTML += `<option value="${baseC}">${baseC}</option>`;
+                if(ccMode === '2') globalSelect.innerHTML += `<option value="${secC}">${secC}</option>`;
+                
+                if (currentVal === baseC || (ccMode === '2' && currentVal === secC) || currentVal === 'GLOBAL') {
+                    globalSelect.value = currentVal;
+                } else {
+                    globalSelect.value = 'GLOBAL';
+                    state.activeCurrency = 'GLOBAL';
+                }
+            }
+
             applyThemeCSS(); syncCurrencyFilters(); saveState(); updateDashboard();
             if(state.activeTab === 'afterpay') renderAfterpay();
             if(state.activeTab === 'calendar') renderCalendar();
