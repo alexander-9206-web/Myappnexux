@@ -2684,7 +2684,7 @@
                 updateCloudBadge(true, false);
                 return true;
             }
-            updateCloudBadge(false, true); 
+            updateCloudBadge(true, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
                 const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
@@ -2999,6 +2999,8 @@
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
         window.onload = async () => {
+            updateCloudBadge(true, true); // APEX FIX: Iniciar indicador de conexión desde el milisegundo cero
+
             // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
                 if (state.activeTab === 'database') {
@@ -3035,10 +3037,12 @@
             if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 
-                // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
+                // APEX FIX: Renderizado instantáneo local y disparo simultáneo de escaneo en la Nube
                 fetchLoginUsers(false);
                 
-                // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
+                initCloud().then((isOnline) => {
+                    if(isOnline) fetchLoginUsers(true);
+                });
             } else {
                 // ARRANQUE LOCAL-FIRST
                 await bootApp(); 
@@ -3594,8 +3598,12 @@
                 const currentVal = s.id === 'set-base-currency' ? (state.settings.baseCurrency || 'COP') : 
                                    s.id === 'set-secondary-currency' ? (state.settings.secondaryCurrency || 'USD') : 
                                    (state.settings.apCurrency || 'AUD');
-                s.innerHTML = '';
-                CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
+                
+                // APEX FIX: Reconstrucción no destructiva. Evita destruir el menú nativo si el usuario está seleccionando.
+                if (s.options.length !== CURRENCIES.length) {
+                    s.innerHTML = '';
+                    CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
+                }
                 s.value = currentVal;
             });
 
@@ -9017,7 +9025,21 @@
 
         // CONFIGURACIÓN
         function renderSettingsTab() {
-            $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
+            // APEX FIX: Población garantizada en tiempo real de Divisas Maestras
+            $qAll('#set-base-currency, #set-secondary-currency, #set-ap-currency').forEach(s => {
+                if(!s) return;
+                const currentVal = s.id === 'set-base-currency' ? (state.settings.baseCurrency || 'COP') : 
+                                   s.id === 'set-secondary-currency' ? (state.settings.secondaryCurrency || 'USD') : 
+                                   (state.settings.apCurrency || 'AUD');
+                
+                // APEX FIX: Reconstrucción no destructiva para evitar colisión con el Sincronizador de la Nube.
+                if (s.options.length !== CURRENCIES.length) {
+                    s.innerHTML = '';
+                    CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`);
+                }
+                s.value = currentVal;
+            });
+
             const ccEl = $id('set-currency-count'); if(ccEl) ccEl.value = state.settings.currencyCount || '2';
             
             // APEX FIX: Lógica de despliegue de Divisa Secundaria
@@ -9027,13 +9049,10 @@
                     secCurrCont.classList.add('hidden');
                 } else {
                     secCurrCont.classList.remove('hidden');
-                    const secCurrEl = $id('set-secondary-currency');
-                    if (secCurrEl) secCurrEl.value = state.settings.secondaryCurrency || 'USD';
                 }
             }
 
             const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
-            const apCurrEl = $id('set-ap-currency'); if(apCurrEl) apCurrEl.value = state.settings.apCurrency || 'AUD';
             $id('set-ap-day').value = state.settings.apPayDay !== undefined ? state.settings.apPayDay : 5; 
             const tpEl = $id('set-theme-preset'); if(tpEl) tpEl.value = state.settings.themePreset || 'default';
             const fsEl = $id('set-font-style'); if(fsEl) fsEl.value = state.settings.fontStyle || 'system';
