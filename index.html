@@ -3823,7 +3823,77 @@
             reader.readAsDataURL(file);
         }
 
-        function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
+        // APEX FIX: Sincronización Transversal de Divisas para Filtros e Informes
+        function syncCurrencyFilters() {
+            if (!state || !state.settings) return;
+            const ccMode = state.settings.currencyCount || '2';
+            const baseCurr = state.settings.baseCurrency || 'COP';
+
+            // Filtros de Auditoría y Calendario con opción "Todas"
+            const filtersAll = [
+                { id: 'db-filter-currency', allVal: 'all' },
+                { id: 'cal-filter-currency', allVal: 'ALL' }
+            ];
+
+            filtersAll.forEach(f => {
+                const el = $id(f.id);
+                if (el) {
+                    const prev = el.value;
+                    if (ccMode === '1') {
+                        el.innerHTML = `<option value="${f.allVal}">Todas</option><option value="${baseCurr}">${baseCurr}</option>`;
+                        el.value = (prev === f.allVal) ? f.allVal : baseCurr;
+                    } else {
+                        el.innerHTML = `<option value="${f.allVal}">Todas</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
+                        if (!el.value) el.value = f.allVal;
+                    }
+                }
+            });
+
+            // Filtros Directos (Impuestos, Analítica Divisa 1)
+            const filtersDirect = ['cal-cov-currency-1', 'tax-currency'];
+            filtersDirect.forEach(id => {
+                const el = $id(id);
+                if (el) {
+                    const prev = el.value;
+                    if (ccMode === '1') {
+                        el.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                        el.value = baseCurr;
+                    } else {
+                        el.innerHTML = `<option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
+                        el.value = (prev && prev !== 'COP' && prev !== baseCurr) ? prev : baseCurr;
+                    }
+                }
+            });
+            
+            // Selector de Sumador en Auditoría
+            const dbTotalCurr = $id('db-currency');
+            if (dbTotalCurr) {
+                const prev = dbTotalCurr.value;
+                if (ccMode === '1') {
+                    dbTotalCurr.innerHTML = `<option value="BASE">${baseCurr}</option>`;
+                    dbTotalCurr.value = 'BASE';
+                } else {
+                    dbTotalCurr.innerHTML = `<option value="BASE">Base</option><option value="USD">USD</option><option value="COP">COP</option><option value="EUR">EUR</option><option value="AUD">AUD</option>`;
+                    dbTotalCurr.value = prev;
+                }
+            }
+            
+            // Selector de Afterpay en Configuración
+            const apCurrEl = $id('set-ap-currency');
+            if (apCurrEl) {
+                const prev = apCurrEl.value;
+                if (ccMode === '1') {
+                    apCurrEl.innerHTML = `<option value="${baseCurr}">${baseCurr}</option>`;
+                    apCurrEl.value = baseCurr;
+                    state.settings.apCurrency = baseCurr; // Forzar coherencia
+                } else {
+                    apCurrEl.innerHTML = `<option value="AUD">AUD</option><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option>`;
+                    apCurrEl.value = prev;
+                }
+            }
+        }
+
+        function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); syncCurrencyFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
         
         // APEX FIX: Motor de Recordatorios Push (JS Fallback Foreground)
         function startReminderEngine() {
@@ -9200,10 +9270,11 @@
                 };
             }
             
-            applyThemeCSS(); saveState(); updateDashboard();
+            applyThemeCSS(); syncCurrencyFilters(); saveState(); updateDashboard();
             if(state.activeTab === 'afterpay') renderAfterpay();
             if(state.activeTab === 'calendar') renderCalendar();
             if(state.activeTab === 'database') renderDatabase();
+            if(state.activeTab === 'taxes') renderTaxes();
         }
         
         // APEX FIX: Directorio de Usuarios sincronizado con Firebase
