@@ -4308,11 +4308,17 @@
 
         function renderAccounts() {
             const cont = $id('accounts-container'); if(!cont) return;
-            if(!state.accounts || state.accounts.length === 0) { cont.innerHTML = `<div class="text-center p-8 border border-slate-100 rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas</p></div>`; return; }
+            
+            let accsToRender = state.accounts || [];
+            if (state.activeCurrency !== 'GLOBAL') {
+                accsToRender = accsToRender.filter(a => a.currency === state.activeCurrency);
+            }
+            
+            if(accsToRender.length === 0) { cont.innerHTML = `<div class="text-center p-8 border border-slate-100 rounded-3xl"><p class="text-[10px] font-bold text-slate-400 uppercase">Sin cuentas en esta divisa</p></div>`; return; }
             
             const groups = {}; const sharedGroups = {}; 
             
-            state.accounts.forEach(a => { 
+            accsToRender.forEach(a => { 
                 const curr = a.currency || state.settings.baseCurrency || 'COP'; // APEX FIX: Auto-Sanación de divisa
                 if(a.isShared) {
                     if(!sharedGroups[curr]) sharedGroups[curr] = []; 
@@ -4428,22 +4434,29 @@
         function renderAccountsTab() {
             const sumContainer = $id('acc-hub-summary'); const listContainer = $id('acc-hub-list'); if(!sumContainer || !listContainer) return;
             
-            let totalAssets = 0, totalLiabilities = 0; 
-            const bC = state.settings.baseCurrency || 'COP';
+            const displayCurr = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
+            let accsToRender = state.accounts || [];
             
-            (state.accounts || []).forEach(a => { 
+            if (state.activeCurrency !== 'GLOBAL') {
+                accsToRender = accsToRender.filter(a => a.currency === state.activeCurrency);
+            }
+
+            let totalAssets = 0, totalLiabilities = 0, totalInvestments = 0; 
+            
+            accsToRender.forEach(a => { 
                 // APEX FIX: Aislamiento contable estricto para cuentas de Terceros y Compartidas (P2P)
                 if(a.type === 'terceros' || a.isShared) return; 
 
-                const balInBase = convertCurrency(a.balance, a.currency, bC);
+                const balInBase = convertCurrency(a.balance, a.currency, displayCurr);
                 if(a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
+                else if(a.type === 'investment') totalInvestments += balInBase;
                 else totalAssets += balInBase; 
             });
             
-            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(0, bC)}</p></div>`; 
+            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets, displayCurr)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities, displayCurr)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(totalInvestments, displayCurr)}</p></div>`; 
             
-            if(!state.accounts || state.accounts.length === 0) {
-                listContainer.innerHTML = '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas configuradas.</p>';
+            if(accsToRender.length === 0) {
+                listContainer.innerHTML = '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas configuradas o en esta divisa.</p>';
                 return;
             }
 
@@ -4452,7 +4465,7 @@
             const tercerosGroups = {}; // APEX FIX: Contenedor para Cuentas de Terceros
             const sharedGroups = {}; // APEX FIX: Contenedor aislado para Cuentas Compartidas P2P
 
-            state.accounts.forEach(a => {
+            accsToRender.forEach(a => {
                 const curr = a.currency || state.settings.baseCurrency || 'COP'; // APEX FIX: Auto-Sanación de divisa
                 if (a.isShared) {
                     if(!sharedGroups[curr]) sharedGroups[curr] = [];
@@ -10268,7 +10281,7 @@
                         <button onclick="generateTaskVaultToken('${v.id}')" class="w-7 h-7 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
                         <button onclick="triggerUIDelete('task_vault', '${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
                     </div>
-                </div>
+                </div>       a
             `).join('');
         }
 
