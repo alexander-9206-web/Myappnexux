@@ -290,7 +290,7 @@
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
                 <div class="flex items-center gap-3"><img src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
                 <div class="flex items-center gap-2">
-                    <span id="dash-cloud-badge" class="bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all"><div id="dash-cloud-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all animate-pulse"></div> Nube</span>
+                    <button onclick="manualCloudSync()" type="button" id="dash-cloud-badge" class="bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all cursor-pointer hover:bg-slate-200"><div id="dash-cloud-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Conectar</button>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
                     <button onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
                 </div>
@@ -2742,15 +2742,36 @@
             if(!dcb) return;
             if(active) {
                 if(syncing) {
-                    dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
+                    dcb.className = "cursor-pointer hover:bg-blue-100 bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all shadow-sm";
                     dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div> Sync...`;
                 } else {
-                    dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
+                    dcb.className = "cursor-pointer hover:bg-blue-100 bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all shadow-sm";
                     dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-blue-500 transition-all"></div> En Línea`;
                 }
             } else {
-                dcb.className = "bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all";
-                dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Desconectado`;
+                dcb.className = "cursor-pointer hover:bg-slate-200 bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all shadow-sm";
+                dcb.innerHTML = `<div class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Conectar`;
+            }
+        }
+
+        async function manualCloudSync() {
+            const dcb = $id('dash-cloud-badge');
+            if(!dcb) return;
+            updateCloudBadge(true, true);
+            try {
+                const isOnline = await initCloud();
+                if (isOnline && window.db) {
+                    await fetchCloudState();
+                    triggerCloudSync(); // Forzar push
+                    alert("✅ Conectado y Sincronizando con SSoT.");
+                } else {
+                    alert("⚠️ No se pudo establecer conexión. Revisa tu internet.");
+                    updateCloudBadge(false);
+                }
+            } catch(e) {
+                console.error(e);
+                alert("⚠️ Fallo en la sincronización.");
+                updateCloudBadge(false);
             }
         }
 
@@ -4085,30 +4106,37 @@
             let uNW = 0; const bC = state.settings.baseCurrency; let totAssets = 0; let totLiab = 0;
             const dashAltCurr = $id('dash-alt-currency') ? $id('dash-alt-currency').value : 'USD';
             
-            // APEX FIX: Acumuladores aislados para la vista Dual
             let nwMain = 0;
             let nwAlt = 0;
 
+            // APEX FIX: Logica de filtro por Vista Global o Divisa Específica
+            const isGlobal = state.activeCurrency === 'GLOBAL';
+            const displayCurr = isGlobal ? bC : state.activeCurrency;
+
             (state.accounts || []).forEach(a => { 
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
+                if (!isGlobal && a.currency !== state.activeCurrency) return; // Filtrar por divisa activa
+
                 let bal = a.type === 'credit' ? -a.balance : a.balance; 
-                uNW += convertCurrency(bal, a.currency, bC); 
+                uNW += convertCurrency(bal, a.currency, displayCurr); 
                 
                 if (a.currency === bC) nwMain += bal;
                 if (a.currency === dashAltCurr) nwAlt += bal;
 
-                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, displayCurr)); else totAssets += convertCurrency(a.balance, a.currency, displayCurr); 
             });
             (state.loans || []).forEach(l => { 
-                totLiab += convertCurrency(l.balance, l.currency, bC); 
+                if (!isGlobal && l.currency !== state.activeCurrency) return;
+                totLiab += convertCurrency(l.balance, l.currency, displayCurr); 
                 if (l.currency === bC) nwMain -= l.balance;
                 if (l.currency === dashAltCurr) nwAlt -= l.balance;
             });
 
             // APEX FIX: Afterpay pasivo estricto
             state.tx.filter(t => t.type === 'afterpay').forEach(t => {
+                if (!isGlobal && t.currency !== state.activeCurrency) return;
                 const quotas = t.apQuotas || 4; const pending = (t.amount / quotas) * (quotas - (t.apPaid || 0));
-                totLiab += convertCurrency(pending, t.currency, bC);
+                totLiab += convertCurrency(pending, t.currency, displayCurr);
                 
                 if (t.currency === bC) nwMain -= pending;
                 if (t.currency === dashAltCurr) nwAlt -= pending;
@@ -4131,12 +4159,13 @@
             const singleCont = $id('wealth-single-container');
             const wTitle = $id('wealth-title');
             
-            if (ccMode === '1') {
+            // APEX FIX: Forzar Vista Única (Single) si el usuario filtra por una divisa específica
+            if (ccMode === '1' || !isGlobal) {
                 if(dualCont) dualCont.classList.add('hidden');
                 if(singleCont) singleCont.classList.remove('hidden');
-                if(netWorthSingleEl) netWorthSingleEl.innerText = fmt(uNW, bC); 
-                if(baseCurrLabelSingle) baseCurrLabelSingle.innerText = bC;
-                if(wTitle) wTitle.innerText = state.context === 'day' ? "Patrimonio Global Unificado" : (state.context === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año");
+                if(netWorthSingleEl) netWorthSingleEl.innerText = fmt(uNW, displayCurr); 
+                if(baseCurrLabelSingle) baseCurrLabelSingle.innerText = displayCurr;
+                if(wTitle) wTitle.innerText = state.context === 'day' ? (isGlobal ? "Patrimonio Global Unificado" : `Patrimonio en ${displayCurr}`) : (state.context === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año");
             } else {
                 if(dualCont) dualCont.classList.remove('hidden');
                 if(singleCont) singleCont.classList.add('hidden');
