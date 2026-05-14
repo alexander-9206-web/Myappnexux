@@ -3046,15 +3046,43 @@
                     if(isOnline) {
                         // APEX FIX: Escáner de intercepción de redirección OAuth (Fricción Cero Contenedores)
                         try {
-                            const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                            const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                             const auth = getAuth();
+                            
+                            let oauthResolved = false;
+
+                            // 1. Motor de escucha pasiva (Atrapa la sesión si getRedirectResult falla por el WKWebView en iOS)
+                            onAuthStateChanged(auth, async (user) => {
+                                if (user && !currentUser) {
+                                    oauthResolved = true;
+                                    sessionStorage.removeItem('nexus_oauth_pending');
+                                    if (ls) ls.innerHTML = '<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda...</p></div>';
+                                    await handleOAuthResult(user);
+                                }
+                            });
+
+                            // 2. Interceptor activo de redirección
                             const result = await getRedirectResult(auth);
                             
-                            if (result && result.user) {
+                            if (result && result.user && !currentUser) {
+                                oauthResolved = true;
+                                sessionStorage.removeItem('nexus_oauth_pending');
                                 if (ls) ls.innerHTML = '<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando Credenciales SSoT...</p></div>';
                                 await handleOAuthResult(result.user);
                                 return; // Detiene el flujo de login, redirige al Dashboard
                             }
+
+                            // 3. Fallback de Contingencia para Contenedores Estrictos de iOS
+                            if (sessionStorage.getItem('nexus_oauth_pending')) {
+                                setTimeout(() => {
+                                    if (!oauthResolved && !currentUser) {
+                                        sessionStorage.removeItem('nexus_oauth_pending');
+                                        window.alert("⚠️ El sistema de seguridad de tu iPhone/App bloqueó el traspaso automático de sesión de Google.\n\nPor favor, usa la opción 'Registro con Correo' o el 'Ingreso Manual' en la pantalla principal para entrar directamente a tu bóveda.");
+                                        fetchLoginUsers(true);
+                                    }
+                                }, 3500);
+                            }
+
                         } catch(err) {
                             console.error("OAuth Redirect Error:", err);
                             let msgError = err.message || "Falló la validación con los servidores de autenticación.";
@@ -3113,6 +3141,7 @@
                 const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
                 
                 if (isMobileContainer) {
+                    sessionStorage.setItem('nexus_oauth_pending', 'true'); // APEX FIX: Flag de rastreo de redirección
                     await signInWithRedirect(auth, provider);
                     // No se restaura el botón porque el Frame navegará hacia Google
                 } else {
@@ -3150,6 +3179,7 @@
                 const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
                 
                 if (isMobileContainer) {
+                    sessionStorage.setItem('nexus_oauth_pending', 'true'); // APEX FIX: Flag de rastreo de redirección
                     await signInWithRedirect(auth, provider);
                 } else {
                     const result = await signInWithPopup(auth, provider);
@@ -10273,6 +10303,45 @@
                 }
             };
             reader.readAsText(file);
+        }
+
+        function setupInactivityLock() {
+            if (!state || !state.settings) return;
+            const reqPin = state.settings.requirePin;
+            
+            document.removeEventListener('mousemove', resetInactivityTimer);
+            document.removeEventListener('keypress', resetInactivityTimer);
+            document.removeEventListener('touchstart', resetInactivityTimer);
+            
+            if (reqPin) {
+                document.addEventListener('mousemove', resetInactivityTimer);
+                document.addEventListener('keypress', resetInactivityTimer);
+                document.addEventListener('touchstart', resetInactivityTimer);
+                resetInactivityTimer();
+            } else {
+                if (inactivityTimer) clearTimeout(inactivityTimer);
+            }
+        }
+
+        function resetInactivityTimer() {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            inactivityTimer = setTimeout(() => {
+                if (!sessionUnlocked) return;
+                sessionUnlocked = false;
+                const lock = $id('session-lock-screen');
+                if (lock) {
+                    lock.classList.remove('hidden');
+                    lock.classList.remove('opacity-0');
+                    const ln = $id('lock-name'); 
+                    if(ln && typeof userProfile !== 'undefined') ln.innerText = userProfile.name;
+                    
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                        const bioBtn = $id('btn-bio-auth');
+                        if (bioBtn) bioBtn.classList.remove('hidden');
+                        setTimeout(() => triggerBiometricAuth(), 400);
+                    }
+                }
+            }, 5 * 60 * 1000); // 5 minutos de inactividad activa la Bóveda
         }
 
         function setupAutoBackup() {
