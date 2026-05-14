@@ -9246,8 +9246,8 @@
             updateLocalUsersList(); updateCatManageView();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
-            const isSuperAdminEmail = currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com';
-            const isMaster = isSuperAdminEmail && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
+            const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
+            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
             const adminBlock = $id('admin-users-block');
             const unlockCont = $id('admin-unlock-container');
             const supportMailbox = $id('admin-support-mailbox-container'); // APEX FIX: Candado UI Buzón
@@ -9262,7 +9262,7 @@
                 } else {
                     adminBlock.classList.add('hidden');
                     if(unlockCont) {
-                        if (isSuperAdminEmail) unlockCont.classList.remove('hidden');
+                        if (isSuperAdmin) unlockCont.classList.remove('hidden');
                         else unlockCont.classList.add('hidden');
                     }
                 }
@@ -9286,7 +9286,7 @@
         }
 
         function verifyAdminRoot() {
-            if (currentUser !== 'johnalex9206@gmail.com' && currentUser !== 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com') return; // APEX FIX: Bloqueo estricto por correo o Apple ID
+            if (!(userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) return; // APEX FIX: Bloqueo estricto por UID
             const pin = $id('admin-master-pin').value;
             if (pin === "Admin@1234!" || (userProfile && userProfile.pin === "Admin@1234!")) {
                 isRootAdminUnlocked = true;
@@ -9582,17 +9582,17 @@
                     p.isLocal = true;
                     // APEX FIX: Aislamiento Patrimonial de Identidad
                     // Si no soy superAdmin, SOLO cargo mi propio perfil
-                    const isSuperAdminEmail = currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com';
-                    if (isSuperAdminEmail || p.email === currentUser) {
+                    const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
+                    if (isSuperAdmin || p.email === currentUser) {
                         usersMap.set(p.email, p);
                     }
                 }
             }
 
             // 2. Extraer de la Nube (Directorio Global) SOLO SI SOY SUPERADMIN
-            const isSuperAdminEmail = currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com';
+            const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
             
-            if (isSuperAdminEmail && window.db) {
+            if (isSuperAdmin && window.db) {
                 try {
                     const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
@@ -9702,8 +9702,8 @@
             }
 
             // APEX FIX: Validar si mostramos o no el botón de Takeover
-            const isSuperAdminEmail = currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com';
-            const isMaster = isSuperAdminEmail && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
+            const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
+            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
             const btnTakeover = $id('btn-admin-takeover');
             if (btnTakeover) {
                 if (isMaster && email !== currentUser) btnTakeover.classList.remove('hidden');
@@ -9794,7 +9794,7 @@
             const errMsg = $id('takeover-error-msg');
             
             // Validar que la contraseña coincida con la del Admin actual
-            if((inputPin === userProfile.pin || inputPin === "Admin@1234!") && (currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com')) {
+            if((inputPin === userProfile.pin || inputPin === "Admin@1234!") && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 if(errMsg) errMsg.classList.add('hidden');
                 
                 // Efectuar el cambio de bóveda de forma transparente
@@ -9880,7 +9880,7 @@
             const targetPin = targetProfile ? targetProfile.pin : null;
             
             // Validar Contraseña, Checklist y Keyword de seguridad
-            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "Admin@1234!") && isChecked && kw === 'RESET' && (currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com')) {
+            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "Admin@1234!") && isChecked && kw === 'RESET' && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -10347,7 +10347,7 @@
             const pin = pinEl ? pinEl.value.trim() : '';
             
             // APEX FIX: Admin Password forzado a Admin@1234! y Keyword RESET. Exige ser Root Admin.
-            if (kw === 'RESET' && pin === "Admin@1234!" && (currentUser === 'johnalex9206@gmail.com' || currentUser === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2@apple.com')) {
+            if (kw === 'RESET' && pin === "Admin@1234!" && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 
                 // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
