@@ -3709,68 +3709,92 @@
             const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
             const uid = user.uid; // APEX FIX: Capturar el UID único
 
-            // APEX FIX: Autenticación 100% Directa "One-Tap" Blindada contra congelamientos
+            // APEX FIX: Autenticación 100% Directa "One-Tap" y Motor de Enlace SSoT
             try {
-                await initCloud(); // APEX FIX: Forzar la inicialización unificada para evitar choques de caché de Firestore
+                await initCloud(); 
                 if (!window.db) throw new Error("Network offline");
 
-                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                // APEX FIX: Usar UID como llave maestra criptográfica en Firestore
-                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
-                const docSnap = await getDoc(docRef);
+                const { collection, doc, getDoc, getDocs, query, where, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                
+                // 1. Lógica de enlace (Link). Busca por UID, si no, busca por Email para enlazar bóvedas antiguas.
+                let docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
+                let docSnap = await getDoc(docRef);
+                let finalUserId = uid;
+                let existingProfile = null;
                 
                 if (docSnap.exists()) {
-                    // LOGIN DIRECTO: El usuario ya tiene bóveda en la nube
-                    const cloudProfile = docSnap.data();
+                    existingProfile = docSnap.data();
+                } else {
+                    // Buscar si existe una cuenta manual previa con el mismo correo
+                    const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("email", "==", email));
+                    const emailSnap = await getDocs(q);
+                    
+                    if (!emailSnap.empty) {
+                        existingProfile = emailSnap.docs[0].data();
+                        finalUserId = emailSnap.docs[0].id; // Conservar el ID de la bóveda antigua (usualmente el correo)
+                        docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', finalUserId);
+                    } else {
+                        // Respaldo para versiones muy antiguas donde el correo era el ID del documento
+                        const emailDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                        const emailDocSnap = await getDoc(emailDocRef);
+                        if (emailDocSnap.exists()) {
+                            existingProfile = emailDocSnap.data();
+                            finalUserId = email;
+                            docRef = emailDocRef;
+                        }
+                    }
+                }
+                
+                if (existingProfile) {
+                    // LOGIN EXISTENTE (Carga o Enlaza Bóveda Antigua)
+                    const cloudProfile = existingProfile;
                     cloudProfile.isCloud = true;
-                    cloudProfile.uid = uid; // Asegurar que el UID esté inyectado
+                    if (!cloudProfile.uid) cloudProfile.uid = uid; // Sella el enlace criptográfico
+                    cloudProfile.isOAuth = true;
 
-                    // APEX FIX: Forzar inyección de datos de Google si el perfil local/nube estaba incompleto o desactualizado
                     let needsUpdate = false;
                     if (name && name !== 'Usuario' && (!cloudProfile.name || cloudProfile.name === 'Usuario' || cloudProfile.name === email)) {
-                        cloudProfile.name = name;
-                        needsUpdate = true;
+                        cloudProfile.name = name; needsUpdate = true;
                     }
                     if (photo && cloudProfile.avatar !== photo) {
-                        cloudProfile.avatar = photo;
-                        needsUpdate = true;
+                        cloudProfile.avatar = photo; needsUpdate = true;
                     }
 
-                    if (needsUpdate || !cloudProfile.uid) {
-                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid }, { merge: true });
+                    if (needsUpdate || !existingProfile.uid || !existingProfile.isOAuth) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid, isOAuth: true }, { merge: true });
                     }
 
-                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(cloudProfile));
+                    localStorage.setItem(`nexus_profile_${finalUserId}`, JSON.stringify(cloudProfile));
+                    localStorage.setItem('nexus_last_email', finalUserId); 
+                    
                     userProfile = cloudProfile;
-                    
                     const loader = $id('oauth-loader'); if(loader) loader.remove();
-                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
+                    await processLoginSuccess(finalUserId); 
                 } else {
-                    // APEX FIX: USUARIO NUEVO - Redirigir a creación de PIN en lugar de creación silenciosa
-                    window.tempOAuthUser = { uid, email, name, photo };
+                    // REGISTRO SILENCIOSO DE NUEVO USUARIO (Fricción Cero)
+                    const newUserProfile = { 
+                        uid: uid, 
+                        name: name, 
+                        email: email, 
+                        pin: "AutoGen@1234!", // PIN Falso, protegido y respaldado por Google OAuth
+                        avatar: photo, 
+                        lastSeen: Date.now(),
+                        isOAuth: true,
+                        isCloud: true
+                    };
                     
+                    await setDoc(docRef, newUserProfile, { merge: true });
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
+                    localStorage.setItem('nexus_last_email', uid);
+                    
+                    userProfile = newUserProfile;
                     const loader = $id('oauth-loader'); if(loader) loader.remove();
-                    
-                    $id('login-initial-choice').classList.add('hidden');
-                    $id('login-new-section').classList.remove('hidden');
-                    $id('login-new-methods').classList.add('hidden');
-                    $id('login-new-form').classList.remove('hidden');
-                    
-                    $id('login-new-name').value = name;
-                    $id('login-new-email').value = email;
-                    $id('login-new-email').readOnly = true;
-                    $id('login-new-email').classList.add('opacity-70', 'cursor-not-allowed');
-                    
-                    const subtitle = $id('new-section-subtitle');
-                    if(subtitle) subtitle.innerText = 'Establece un PIN de seguridad para tu nueva bóveda';
-                    const title = $id('auth-main-title');
-                    if(title) title.innerText = 'Completar Registro';
+                    await processLoginSuccess(uid); 
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
                 const loader = $id('oauth-loader'); if(loader) loader.remove();
                 window.alert("⚠️ Error de red validando identidad. Inténtalo nuevamente.");
-                throw e; // APEX FIX: Forzar la captura del error en la capa superior para reiniciar el botón visual
             }
         }
 
