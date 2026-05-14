@@ -3180,30 +3180,28 @@
                 }
             });
 
-            // APEX FIX: Candado Estricto (Cold Boot Forzado si se presionó Salir)
-            const isColdBoot = !sessionStorage.getItem('nexus_session_active');
-
-            if (!isColdBoot) {
+            // APEX FIX: Inicio de Sesión Estándar (Persistencia Real SSoT)
+            // Eliminada la regla destructiva 'isColdBoot' que borraba la sesión al cerrar la app
+            try { currentUser = localStorage.getItem('nexus_current_user'); } catch(e) {}
+            
+            if (!currentUser) {
+                currentUser = await NexusIDB.getSession();
+                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+            }
+            
+            if (!currentUser) {
                 try {
-                    currentUser = localStorage.getItem('nexus_current_user');
+                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                    if (match) {
+                        currentUser = match[2];
+                        localStorage.setItem('nexus_current_user', currentUser);
+                    }
                 } catch(e) {}
-                
-                if (!currentUser) {
-                    currentUser = await NexusIDB.getSession();
-                    if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-                }
-                
-                if (!currentUser) {
-                    try {
-                        const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                        if (match) {
-                            currentUser = match[2];
-                            localStorage.setItem('nexus_current_user', currentUser);
-                        }
-                    } catch(e) {}
-                }
-            } else {
-                currentUser = null; // Fuerza a mostrar la pantalla de Acceso
+            }
+
+            // Candado de Cierre de Sesión Estricto
+            if (sessionStorage.getItem('nexus_logged_out') === 'true') {
+                currentUser = null;
             }
 
             if (!currentUser) {
@@ -4023,6 +4021,10 @@
         }
 
         async function processLoginSuccess(email) {
+            // APEX FIX: Liberar candados de cierre al iniciar sesión exitosamente
+            sessionStorage.removeItem('nexus_logged_out'); 
+            sessionStorage.setItem('nexus_session_active', 'true');
+
             // APEX FIX: Blindaje contra errores de escritura en navegadores estrictos
             try {
                 localStorage.setItem('nexus_current_user', email); 
@@ -6392,36 +6394,48 @@
             const aSDest = $id('f-account-dest');
             const lbl = $id('f-currency-label'); 
             
-            // APEX FIX: Siempre mostrar las cuentas para permitir al usuario seleccionar la fuente del primer abono
             if(accCont) accCont.classList.remove('hidden'); aS.required = true; aS.innerHTML = '';
-            if(curS) curS.disabled = true; // Se bloquea visualmente porque la cuenta dictará la divisa (o Afterpay lo fijará global)
             
+            // APEX FIX: Desbloquear selector de divisas y aislar lógica (Fricción Cero)
             if(type === 'afterpay') {
                 const apCurr = state.settings.apCurrency || 'AUD';
-                if(curS) curS.value = apCurr;
+                if(curS) { curS.value = apCurr; curS.disabled = true; }
                 if(lbl) lbl.innerText = apCurr;
             } else {
                 if(aSDest) aSDest.innerHTML = '';
+                if(curS) curS.disabled = false;
             }
             
-            // APEX FIX: Mostrar TODAS las cuentas incondicionalmente (Incluyendo P2P)
+            // Extraer la divisa que el usuario seleccionó libremente
+            const selectedCur = curS ? curS.value : (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency);
+            if(lbl && type !== 'afterpay') lbl.innerText = selectedCur;
+
             const accs = state.accounts || [];
             
-            // Agrupamos visualmente por divisa para fácil lectura en el Select
+            // APEX FIX: Agrupamos visualmente filtrando estrictamente las bóvedas por la divisa seleccionada
             const groups = {};
+            let hasAccounts = false;
+            
             accs.forEach(a => {
                 const c = a.currency || state.settings.baseCurrency || 'COP';
-                if (!groups[c]) groups[c] = [];
-                groups[c].push(a);
+                if (type === 'afterpay' || c === selectedCur) {
+                    if (!groups[c]) groups[c] = [];
+                    groups[c].push(a);
+                    hasAccounts = true;
+                }
             });
-
-            for (const curr in groups) {
-                aS.innerHTML += `<optgroup label="--- Bóvedas en ${curr} ---">`;
-                groups[curr].forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
-                aS.innerHTML += `</optgroup>`;
+            
+            // Blindaje UX: Si no hay cuentas creadas para la divisa elegida
+            if (!hasAccounts) {
+                aS.innerHTML = `<option value="" disabled selected>Sin bóvedas en ${selectedCur}</option>`;
+            } else {
+                for (const curr in groups) {
+                    aS.innerHTML += `<optgroup label="--- Bóvedas en ${curr} ---">`;
+                    groups[curr].forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
+                    aS.innerHTML += `</optgroup>`;
+                }
             }
 
-            // Disparamos la actualización asíncrona para sincronizar cuenta destino y labels
             setTimeout(() => checkTxAccount(), 50);
         }
 
@@ -6433,15 +6447,11 @@
             const lbl = $id('f-currency-label');
             const type = $id('f-type').value; 
 
-            // APEX FIX: Auto-ajuste de divisa. Si es Afterpay, fuerza su moneda matriz. Si es otra, hereda la de la cuenta.
+            // APEX FIX: Respetar la elección del usuario (Solo forzar sobreescritura si es Afterpay)
             if (type === 'afterpay') {
                 const apCurr = state.settings.apCurrency || 'AUD';
                 if(curS) curS.value = apCurr;
                 if(lbl) lbl.innerText = apCurr;
-            } else if (acc) {
-                const c = acc.currency || state.settings.baseCurrency || 'COP';
-                if(curS) curS.value = c;
-                if(lbl) lbl.innerText = c;
             }
 
             const ccCont = $id('cc-term-container'); 
@@ -6456,7 +6466,7 @@
             if (type === 'transfer' && aSDest && acc) {
                 const prevVal = aSDest.value;
                 aSDest.innerHTML = '';
-                const currentAccCurr = acc.currency || state.settings.baseCurrency || 'COP';
+                const currentAccCurr = curS ? curS.value : (acc.currency || state.settings.baseCurrency || 'COP');
                 const sameCurAccs = state.accounts.filter(a => (a.currency || state.settings.baseCurrency || 'COP') === currentAccCurr);
 
                 sameCurAccs.forEach(a => { aSDest.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
@@ -6493,6 +6503,14 @@
                 } else {
                     curS.innerHTML = `<option value="${baseCurr}">${baseCurr}</option><option value="${secCurr}">${secCurr}</option>`; 
                     curS.value = state.activeCurrency === 'GLOBAL' ? baseCurr : state.activeCurrency; 
+                }
+            }
+            
+            // APEX FIX: Pre-ajustar la divisa desde la base de datos si el usuario está editando un registro antiguo
+            if (txId && curS) {
+                const oldTx = state.tx.find(t => t.id === txId);
+                if (oldTx && (oldTx.original_currency || oldTx.currency)) {
+                    curS.value = oldTx.original_currency || oldTx.currency;
                 }
             }
 
