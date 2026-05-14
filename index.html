@@ -3237,7 +3237,10 @@
                                     oauthResolved = true;
                                     sessionStorage.removeItem('nexus_oauth_pending');
                                     const dName = user.displayName ? user.displayName.split(' ')[0] : 'Usuario';
-                                    if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda de ${dName}...</p></div>`;
+                                    if (ls) {
+                                        const loaderHtml = `<div id="oauth-loader" class="absolute inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda de ${dName}...</p></div>`;
+                                        if (!$id('oauth-loader')) ls.insertAdjacentHTML('beforeend', loaderHtml);
+                                    }
                                     await handleOAuthResult(user);
                                 }
                             });
@@ -3249,7 +3252,10 @@
                                 oauthResolved = true;
                                 sessionStorage.removeItem('nexus_oauth_pending');
                                 const dName = result.user.displayName ? result.user.displayName.split(' ')[0] : 'Usuario';
-                                if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando a ${dName} en SSoT...</p></div>`;
+                                if (ls) {
+                                    const loaderHtml = `<div id="oauth-loader" class="absolute inset-0 z-50 bg-slate-900 flex flex-col items-center justify-center space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando a ${dName} en SSoT...</p></div>`;
+                                    if (!$id('oauth-loader')) ls.insertAdjacentHTML('beforeend', loaderHtml);
+                                }
                                 await handleOAuthResult(result.user);
                                 return; 
                             }
@@ -3501,6 +3507,7 @@
         }
 
         function hideManualRegistration() {
+            window.tempOAuthUser = null; // APEX FIX: Limpiar caché si retrocede
             const methods = $id('login-new-methods');
             const form = $id('login-new-form');
             if(methods && form) {
@@ -3509,6 +3516,16 @@
             }
             const subtitle = $id('new-section-subtitle');
             if(subtitle) subtitle.innerText = 'Elige cómo deseas registrarte';
+            const title = $id('auth-main-title');
+            if(title) title.innerText = 'Crear cuenta';
+            
+            const emailInput = $id('login-new-email');
+            if(emailInput) {
+                emailInput.readOnly = false;
+                emailInput.classList.remove('opacity-70', 'cursor-not-allowed');
+                emailInput.value = '';
+            }
+            if($id('login-new-name')) $id('login-new-name').value = '';
         }
 
         async function processLoginSuccess(uid) {
@@ -3725,28 +3742,33 @@
 
                     localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(cloudProfile));
                     userProfile = cloudProfile;
+                    
+                    const loader = $id('oauth-loader'); if(loader) loader.remove();
                     await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
                 } else {
-                    // CREACIÓN DIRECTA (Sign Up): Registrar bóveda en silencio sin pedir PIN
-                    const newUserProfile = { 
-                        uid: uid, // APEX FIX: Guardar UID
-                        name: name, 
-                        email: email, 
-                        pin: "AutoGen@1234!", // Contraseña de respaldo asignada automáticamente
-                        avatar: photo, 
-                        lastSeen: Date.now(),
-                        isOAuth: true,
-                        isCloud: true
-                    };
+                    // APEX FIX: USUARIO NUEVO - Redirigir a creación de PIN en lugar de creación silenciosa
+                    window.tempOAuthUser = { uid, email, name, photo };
                     
-                    await setDoc(docRef, newUserProfile, { merge: true });
-                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
+                    const loader = $id('oauth-loader'); if(loader) loader.remove();
                     
-                    userProfile = newUserProfile;
-                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
+                    $id('login-initial-choice').classList.add('hidden');
+                    $id('login-new-section').classList.remove('hidden');
+                    $id('login-new-methods').classList.add('hidden');
+                    $id('login-new-form').classList.remove('hidden');
+                    
+                    $id('login-new-name').value = name;
+                    $id('login-new-email').value = email;
+                    $id('login-new-email').readOnly = true;
+                    $id('login-new-email').classList.add('opacity-70', 'cursor-not-allowed');
+                    
+                    const subtitle = $id('new-section-subtitle');
+                    if(subtitle) subtitle.innerText = 'Establece un PIN de seguridad para tu nueva bóveda';
+                    const title = $id('auth-main-title');
+                    if(title) title.innerText = 'Completar Registro';
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
+                const loader = $id('oauth-loader'); if(loader) loader.remove();
                 window.alert("⚠️ Error de red validando identidad. Inténtalo nuevamente.");
                 throw e; // APEX FIX: Forzar la captura del error en la capa superior para reiniciar el botón visual
             }
@@ -3840,9 +3862,9 @@
 
         // APEX FIX: Lógica de navegación del bloque de Login
         function showInitialLoginChoice() {
-            $id('login-initial-choice').classList.remove('hidden');
-            $id('login-pin-section').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
+            const initSec = $id('login-initial-choice'); if(initSec) initSec.classList.remove('hidden');
+            const pinSec = $id('login-pin-section'); if(pinSec) pinSec.classList.add('hidden');
+            const newSec = $id('login-new-section'); if(newSec) newSec.classList.add('hidden');
             
             const title = $id('auth-main-title');
             if(title) title.innerText = 'Acceder';
@@ -3943,9 +3965,9 @@
         
         function selectUserForLogin(userId, name, realEmail) {
             loginSelectedEmail = userId; // APEX FIX: Conservamos nombre variable pero aloja UID o Email
-            $id('login-initial-choice').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
-            $id('login-pin-section').classList.remove('hidden');
+            const initSec = $id('login-initial-choice'); if(initSec) initSec.classList.add('hidden');
+            const newSec = $id('login-new-section'); if(newSec) newSec.classList.add('hidden');
+            const pinSec = $id('login-pin-section'); if(pinSec) pinSec.classList.remove('hidden');
             
             const title = $id('auth-main-title');
             if(title) title.innerText = 'Te damos la bienvenida';
@@ -3972,8 +3994,8 @@
 
         function cancelUserSelection() {
             loginSelectedEmail = null;
-            $id('login-pin-section').classList.add('hidden');
-            $id('login-initial-choice').classList.remove('hidden');
+            const pinSec = $id('login-pin-section'); if(pinSec) pinSec.classList.add('hidden');
+            const initSec = $id('login-initial-choice'); if(initSec) initSec.classList.remove('hidden');
             
             const title = $id('auth-main-title');
             if(title) title.innerText = 'Acceder';
@@ -3981,9 +4003,9 @@
 
         function toggleNewUserForm(show) {
             if(show) {
-                $id('login-initial-choice').classList.add('hidden');
-                $id('login-pin-section').classList.add('hidden');
-                $id('login-new-section').classList.remove('hidden');
+                const initSec = $id('login-initial-choice'); if(initSec) initSec.classList.add('hidden');
+                const pinSec = $id('login-pin-section'); if(pinSec) pinSec.classList.add('hidden');
+                const newSec = $id('login-new-section'); if(newSec) newSec.classList.remove('hidden');
                 
                 // APEX FIX: Reseteo visual del flujo desplegable
                 if($id('login-new-methods')) $id('login-new-methods').classList.remove('hidden');
@@ -3992,7 +4014,7 @@
                 if(subtitle) subtitle.innerText = 'Elige cómo deseas registrarte';
 
                 const title = $id('auth-main-title');
-                if(title) title.innerText = 'Crear tu cuenta';
+                if(title) title.innerText = 'Crear cuenta';
             } else {
                 showInitialLoginChoice();
             }
@@ -4080,37 +4102,51 @@
         }
 
         async function handleLoginNew() {
-            const email = $id('login-new-email').value.trim().toLowerCase();
+            const emailInput = $id('login-new-email').value.trim().toLowerCase();
             const name = $id('login-new-name').value.trim();
             const pin = $id('login-new-pin').value.trim();
             const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
             
-            if(!email || !name || !passRegex.test(pin)) return alert("Todos los campos son requeridos. La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
+            if(!emailInput || !name || !passRegex.test(pin)) return window.alert("⚠️ Todos los campos son requeridos.\n\nLa contraseña debe tener al menos 8 caracteres, e incluir mayúsculas, minúsculas, números y un símbolo.");
             
-            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
+            sessionStorage.removeItem('nexus_logged_out'); 
+            
+            // APEX FIX: Heredar datos de OAuth si provienen de Google/Apple
+            let uid = emailInput;
+            let avatar = window.tempOAuthAvatar || null;
+            let isOAuth = false;
+            
+            if (window.tempOAuthUser && window.tempOAuthUser.email === emailInput) {
+                uid = window.tempOAuthUser.uid;
+                avatar = window.tempOAuthUser.photo || avatar;
+                isOAuth = true;
+            }
             
             let existingProfile = null;
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key.startsWith('nexus_profile_')) {
                     const p = JSON.parse(localStorage.getItem(key));
-                    if (p && p.email && p.email.toLowerCase() === email) existingProfile = p;
+                    if (p && (p.uid === uid || p.email.toLowerCase() === emailInput)) existingProfile = p;
                 }
             }
-            if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
+            if (existingProfile) return window.alert("⚠️ Esta cuenta ya tiene una bóveda registrada. Por favor, usa la opción de acceder.");
             
-            userProfile = { uid: email, name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now(), isCloud: true }; 
-            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+            userProfile = { uid: uid, name, email: emailInput, pin, avatar: avatar, lastSeen: Date.now(), isCloud: true, isOAuth: isOAuth }; 
+            localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(userProfile));
+            localStorage.setItem('nexus_last_email', uid); // Auto-llena para el próximo acceso FaceID
             
-            await initCloud(); // APEX FIX: Forzar enlace de red para subir nuevo perfil
+            await initCloud(); 
             
             if (window.db) {
                 try {
                     const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid), userProfile, { merge: true });
                 } catch(e) {}
             }
-            await processLoginSuccess(email);
+            
+            window.tempOAuthUser = null; // Clean up memory
+            await processLoginSuccess(uid);
         }
 
         async function bootApp() {
