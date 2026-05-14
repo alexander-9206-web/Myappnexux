@@ -158,6 +158,20 @@
             
             <!-- Elección Inicial (Social vs Manual) -->
             <div id="login-initial-choice" class="space-y-6">
+                
+                <!-- APEX FIX: Módulo de Cuentas Recientes (Avatar Login) -->
+                <div id="recent-accounts-wrapper" class="hidden mb-2 animate-slideUp">
+                    <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center mb-4">Selecciona tu Bóveda</p>
+                    <div id="recent-accounts-list" class="flex gap-4 overflow-x-auto hide-scrollbar pb-2 justify-center">
+                        <!-- Los avatares se inyectan dinámicamente aquí -->
+                    </div>
+                    <div class="relative flex items-center py-2 mt-4 mb-2">
+                        <div class="flex-grow border-t border-slate-700/50"></div>
+                        <span class="flex-shrink-0 mx-4 text-[9px] font-bold text-slate-600 uppercase tracking-widest">Otras opciones de acceso</span>
+                        <div class="flex-grow border-t border-slate-700/50"></div>
+                    </div>
+                </div>
+                
                 <!-- Login Social -->
                 <button onclick="window.loginWithGoogle(event)" class="w-full btn-social-auth">
                     <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg>
@@ -3277,49 +3291,60 @@
         }
 
         async function fetchLoginUsers(scanCloud = false) {
-            const list = $id('login-users-list');
-            if(!list) return;
+            const wrapper = $id('recent-accounts-wrapper');
+            const list = $id('recent-accounts-list');
+            if(!list || !wrapper) return;
             
             let usersMap = new Map();
             
-            // 1. Cargar de caché local instantáneamente
+            // 1. Cargar de caché local instantáneamente (Perfiles Guardados)
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key.startsWith('nexus_profile_')) {
-                    const p = JSON.parse(localStorage.getItem(key));
-                    p.isLocal = true;
-                    const userId = p.uid || p.email; // APEX FIX: Soporte para UID
-                    usersMap.set(userId, p);
+                    try {
+                        const p = JSON.parse(localStorage.getItem(key));
+                        p.isLocal = true;
+                        const userId = p.uid || p.email; // APEX FIX: Soporte para UID
+                        if(userId) usersMap.set(userId, p);
+                    } catch(e) {}
                 }
             }
             
             // 2. Función de pintado aislada para ejecución inmediata
             const renderList = () => {
-                let html = '';
-                Array.from(usersMap.values()).forEach(p => {
-                    const userId = p.uid || p.email; // APEX FIX
-                    const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
-                    html += `<div onclick="selectUserForLogin('${userId}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
-                        <div class="flex items-center gap-3 overflow-hidden">
-                            <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
-                            <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
-                        </div>
-                        <div class="flex items-center gap-2 shrink-0 ml-2">
-                            <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
-                        </div>
-                    </div>`;
-                    localStorage.setItem(`nexus_profile_${userId}`, JSON.stringify(p));
-                });
-                if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
-                else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
-                list.innerHTML = html;
-                if(typeof filterLoginUsers === 'function') filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
+                if(usersMap.size > 0) {
+                    wrapper.classList.remove('hidden');
+                    let html = '';
+                    Array.from(usersMap.values()).forEach(p => {
+                        const userId = p.uid || p.email;
+                        const firstName = p.name ? p.name.split(' ')[0] : 'Usuario';
+                        const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-slate-400 text-xl"></i>`;
+                        const cloudBadge = p.isCloud ? `<div class="absolute bottom-0 right-0 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-800 flex items-center justify-center shadow-sm" title="Sincronizado"><i class="fa-solid fa-cloud text-[7px] text-white"></i></div>` : '';
+
+                        // Diseño de "Burbuja" al estilo Netflix / Cuentas Google
+                        html += `
+                        <div onclick="selectUserForLogin('${userId}', '${p.name}')" class="flex flex-col items-center gap-2 cursor-pointer group w-[72px] shrink-0 transition-transform active:scale-90">
+                            <div class="relative">
+                                <div class="w-16 h-16 rounded-full border-[3px] border-slate-700 group-hover:border-indigo-500 overflow-hidden shadow-xl bg-slate-800 flex items-center justify-center transition-colors">
+                                    ${avatarHtml}
+                                </div>
+                                ${cloudBadge}
+                            </div>
+                            <p class="text-[10px] font-black text-slate-300 w-full text-center truncate group-hover:text-indigo-400 transition-colors uppercase tracking-widest">${firstName}</p>
+                        </div>`;
+                        localStorage.setItem(`nexus_profile_${userId}`, JSON.stringify(p));
+                    });
+                    list.innerHTML = html;
+                } else {
+                    wrapper.classList.add('hidden');
+                    list.innerHTML = '';
+                }
             };
 
             // Ejecutar pintado a latencia cero
             renderList();
 
-            // 3. Consulta en segundo plano a la Nube (Solo a petición)
+            // 3. Consulta en segundo plano a la Nube (Solo a petición para refrescar)
             if (scanCloud && window.db) {
                 try {
                     const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -3328,13 +3353,14 @@
                     
                     snap.forEach(doc => {
                         const data = doc.data();
-                        const userId = data.uid || data.email; // APEX FIX
+                        const userId = data.uid || data.email; 
                         if(usersMap.has(userId)) {
                             const existing = usersMap.get(userId);
-                            if(!existing.isCloud || existing.name !== data.name || existing.pin !== data.pin) {
+                            if(!existing.isCloud || existing.name !== data.name || existing.pin !== data.pin || existing.avatar !== data.avatar) {
                                 existing.isCloud = true;
                                 existing.name = data.name; 
                                 existing.pin = data.pin; 
+                                if (data.avatar) existing.avatar = data.avatar;
                                 hasChanges = true;
                             }
                         } else {
@@ -3345,11 +3371,9 @@
                     });
                     
                     if (hasChanges) renderList();
-                    else if (usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No se encontraron bóvedas en la red.</p>';
                     
                 } catch(e) { 
-                    console.warn("[APEX] Fallo leyendo usuarios en login", e); 
-                    if(usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión a la red.</p>';
+                    console.warn("[APEX] Fallo sincronizando perfiles desde la nube en login", e); 
                 }
             }
         }
