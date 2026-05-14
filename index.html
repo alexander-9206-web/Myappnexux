@@ -3771,25 +3771,28 @@
                     const loader = $id('oauth-loader'); if(loader) loader.remove();
                     await processLoginSuccess(finalUserId); 
                 } else {
-                    // REGISTRO SILENCIOSO DE NUEVO USUARIO (Fricción Cero)
-                    const newUserProfile = { 
-                        uid: uid, 
-                        name: name, 
-                        email: email, 
-                        pin: "AutoGen@1234!", // PIN Falso, protegido y respaldado por Google OAuth
-                        avatar: photo, 
-                        lastSeen: Date.now(),
-                        isOAuth: true,
-                        isCloud: true
-                    };
-                    
-                    await setDoc(docRef, newUserProfile, { merge: true });
-                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
-                    localStorage.setItem('nexus_last_email', uid);
-                    
-                    userProfile = newUserProfile;
+                    // APEX FIX: NUEVO USUARIO - Híbrido (Hereda datos Google y pide PIN para acceso Offline)
+                    window.tempOAuthUser = { uid: uid, email: email, name: name, photo: photo };
+
                     const loader = $id('oauth-loader'); if(loader) loader.remove();
-                    await processLoginSuccess(uid); 
+
+                    const initSec = $id('login-initial-choice'); if(initSec) initSec.classList.add('hidden');
+                    const newSec = $id('login-new-section'); if(newSec) newSec.classList.remove('hidden');
+                    const newMeth = $id('login-new-methods'); if(newMeth) newMeth.classList.add('hidden');
+                    const newForm = $id('login-new-form'); if(newForm) newForm.classList.remove('hidden');
+
+                    const nameInput = $id('login-new-name'); if(nameInput) nameInput.value = name;
+                    const emailInput = $id('login-new-email');
+                    if(emailInput) {
+                        emailInput.value = email;
+                        emailInput.readOnly = true;
+                        emailInput.classList.add('opacity-70', 'cursor-not-allowed');
+                    }
+
+                    const subtitle = $id('new-section-subtitle');
+                    if(subtitle) subtitle.innerText = 'Crea una contraseña para acceder sin internet';
+                    const title = $id('auth-main-title');
+                    if(title) title.innerText = 'Completar Registro';
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
