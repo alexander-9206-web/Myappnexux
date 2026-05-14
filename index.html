@@ -70,7 +70,9 @@
         #login-screen > div,
         #ui-confirm-modal > div,
         #ui-delete-modal > div,
-        #ui-prompt-modal > div {
+        #ui-prompt-modal > div,
+        #root-recovery-modal > div,
+        #root-security-modal > div {
             max-height: 100% !important; /* Nunca exceder el 100% del espacio con padding */
             max-width: 100% !important;
             margin: auto !important; /* Centrado gravitacional estricto */
@@ -925,6 +927,8 @@
                         <button onclick="verifyAdminRoot()" class="bg-red-600 text-white px-6 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-unlock"></i></button>
                     </div>
                     <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
+                    <!-- APEX FIX: Botón de Recuperación de Contraseña Root -->
+                    <button onclick="openRootRecovery()" class="text-[9px] text-slate-500 hover:text-white underline mt-2 transition-colors text-center uppercase font-bold tracking-widest">¿Recuperar Contraseña?</button>
                 </div>
             </div>
 
@@ -935,6 +939,15 @@
                     <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
                 </div>
                 <div id="admin-global-users-list" class="space-y-2 max-h-64 overflow-y-auto hide-scrollbar"></div>
+
+                <!-- APEX FIX: Configuración de Seguridad Root (Recuperación) -->
+                <div class="mt-6 pt-5 border-t border-red-200/50">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest"><i class="fa-solid fa-shield-halved mr-2"></i>Seguridad Root</h3>
+                        <button type="button" onclick="openRootSecuritySettings()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-pen mr-1"></i> Configurar</button>
+                    </div>
+                    <p class="text-[9px] text-slate-500 font-bold leading-relaxed">Configura tu contraseña maestra y las 2 preguntas de seguridad para recuperarla en caso de olvido.</p>
+                </div>
 
                 <!-- NUEVO: Módulo de Feature Flags (Encendido/Apagado de Apps) -->
                 <div class="mt-6 pt-5 border-t border-red-200/50">
@@ -1997,6 +2010,69 @@
 
                     <button type="submit" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Enlace</button>
                 </form>
+            </div>
+        </div>
+
+        <!-- MODAL RECUPERACION ROOT -->
+        <div id="root-recovery-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase text-red-600 tracking-tighter"><i class="fa-solid fa-unlock-keyhole mr-2"></i>Recuperar Root</h3>
+                    <button type="button" onclick="closeRootRecovery()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                
+                <div id="recovery-step-1" class="space-y-4">
+                    <p class="text-[10px] text-slate-500 font-bold leading-relaxed">Responde las preguntas de seguridad para verificar tu identidad como administrador.</p>
+                    <div>
+                        <p id="rec-q1-label" class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-1"></p>
+                        <input type="text" id="rec-a1-input" class="form-input text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200" placeholder="Tu respuesta">
+                    </div>
+                    <div>
+                        <p id="rec-q2-label" class="text-[10px] font-black uppercase text-slate-400 ml-2 mb-1"></p>
+                        <input type="text" id="rec-a2-input" class="form-input text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200" placeholder="Tu respuesta">
+                    </div>
+                    <button onclick="verifyRootRecoveryAnswers()" class="w-full bg-red-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform mt-2">Verificar Respuestas</button>
+                    <p id="rec-error-msg" class="text-[9px] text-red-500 font-bold hidden text-center uppercase tracking-widest mt-2">Respuestas incorrectas.</p>
+                </div>
+
+                <div id="recovery-step-2" class="space-y-4 hidden animate-slideUp">
+                    <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl mb-2 text-center">
+                        <i class="fa-solid fa-check-circle text-emerald-500 text-2xl mb-1"></i>
+                        <p class="text-[10px] font-black text-emerald-700 uppercase">Identidad Verificada</p>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nueva Contraseña Root</label>
+                        <input type="password" id="rec-new-pin" class="form-input text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 tracking-widest text-center" placeholder="••••••••">
+                    </div>
+                    <button onclick="saveRecoveredRootPin()" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform mt-2">Guardar y Desbloquear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL CONFIGURACION SEGURIDAD ROOT -->
+        <div id="root-security-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto hide-scrollbar">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase text-red-600 tracking-tighter"><i class="fa-solid fa-shield-halved mr-2"></i>Seguridad Root</h3>
+                    <button type="button" onclick="closeRootSecuritySettings()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Contraseña Root Activa</label>
+                        <input type="text" id="sec-new-pin" class="form-input text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200" placeholder="Ej: A920621">
+                    </div>
+                    <div class="border-t border-slate-100/50 pt-4 mt-2">
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Pregunta de Seguridad 1</label>
+                        <input type="text" id="sec-q1" class="form-input text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 mb-2" placeholder="¿Nombre de tu primera mascota?">
+                        <input type="text" id="sec-a1" class="form-input text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200" placeholder="Respuesta (Ej: nexus)">
+                    </div>
+                    <div class="border-t border-slate-100/50 pt-4 mt-2">
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Pregunta de Seguridad 2</label>
+                        <input type="text" id="sec-q2" class="form-input text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 mb-2" placeholder="¿Ciudad de nacimiento?">
+                        <input type="text" id="sec-a2" class="form-input text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200" placeholder="Respuesta (Ej: nexus)">
+                    </div>
+                    <button onclick="saveRootSecuritySettings()" class="w-full bg-red-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform mt-4">Guardar Configuración</button>
+                </div>
             </div>
         </div>
 
@@ -3394,7 +3470,7 @@
             } catch(e) {}
             
             if (!userProfile) {
-                userProfile = { name: 'Administrador', email: currentUser, pin: 'Admin@1234!' };
+                userProfile = { name: 'Administrador', email: currentUser, pin: 'A920621' };
                 try { localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile)); } catch(e) {}
             }
             
@@ -3588,7 +3664,7 @@
             const pinInput = $id('session-pin-input');
             
             if (!isBiometric) {
-                const userPin = (userProfile && userProfile.pin) ? userProfile.pin : "Admin@1234!";
+                const userPin = (userProfile && userProfile.pin) ? userProfile.pin : "A920621";
                 if (!pinInput || pinInput.value !== userPin) {
                     alert("⚠️ Contraseña de bóveda incorrecta.");
                     if(pinInput) pinInput.value = '';
@@ -9247,7 +9323,7 @@
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
             const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
-            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
+            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "A920621") || isRootAdminUnlocked);
             const adminBlock = $id('admin-users-block');
             const unlockCont = $id('admin-unlock-container');
             const supportMailbox = $id('admin-support-mailbox-container'); // APEX FIX: Candado UI Buzón
@@ -9288,7 +9364,7 @@
         function verifyAdminRoot() {
             if (!(userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) return; // APEX FIX: Bloqueo estricto por UID
             const pin = $id('admin-master-pin').value;
-            if (pin === "Admin@1234!" || (userProfile && userProfile.pin === "Admin@1234!")) {
+            if (pin === "A920621" || (userProfile && userProfile.pin === "A920621")) {
                 isRootAdminUnlocked = true;
                 $id('admin-unlock-container').classList.add('hidden');
                 const err = $id('admin-auth-error'); if(err) err.classList.add('hidden');
@@ -9619,25 +9695,22 @@
                 const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1" title="En Nube"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1" title="Solo Local"></i>';
                 const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[14px]"></i>`;
                 
-                netHtml += `<div class="flex justify-between items-center p-4 rounded-[1.5rem] border ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'} mb-2 shadow-sm transition-all hover:shadow-md">
-                    <div class="flex items-center gap-3">
+                // APEX FIX: Estandarización de alturas y prevención de desbordamiento (Fricción Cero en UI)
+                netHtml += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100'} mb-2 shadow-sm transition-all hover:border-blue-300">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
                         <div class="w-10 h-10 rounded-full ${isCurrent && !p.avatar ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
-                        <div>
-                            <p class="text-xs font-black uppercase text-slate-800">${p.name} ${cloudBadge}</p>
-                            <p class="text-[9px] font-bold text-slate-400 mt-1">ID: ${p.email}</p>
+                        <div class="flex flex-col truncate pr-2">
+                            <p class="text-[11px] font-black uppercase text-slate-800 truncate">${p.name} ${cloudBadge}</p>
+                            <p class="text-[9px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p>
                         </div>
                     </div>
-                    <div class="flex flex-col gap-2 items-end">
+                    <div class="flex items-center justify-end gap-1.5 shrink-0">
                         ${isCurrent ? 
-                        `<div class="flex items-center gap-2">
-                            <span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1.5 rounded shadow-sm">TU CUENTA</span>
-                            <button onclick="openUserEdit('${p.email}')" class="w-7 h-7 bg-white border border-blue-200 text-blue-600 rounded-full flex items-center justify-center shadow-sm hover:bg-blue-100 transition-colors"><i class="fa-solid fa-pen text-[8px]"></i></button>
-                        </div>` 
+                        `<span class="hidden sm:inline-block text-[8px] font-black bg-blue-500 text-white px-2 py-1 rounded shadow-sm">TU CUENTA</span>
+                        <button onclick="openUserEdit('${p.email}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm shrink-0" title="Editar"><i class="fa-solid fa-pen text-[10px]"></i></button>` 
                         : 
-                        `<div class="flex items-center gap-2">
-                            <button onclick="document.getElementById('edit-user-original-email').value='${p.email}'; controlUserVault();" class="text-[9px] font-black bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 px-3 py-1.5 rounded-xl transition-colors active:scale-95 border border-slate-200 shadow-sm"><i class="fa-solid fa-key mr-1"></i> Acceder</button>
-                            <button onclick="openDeleteUserModal('${p.email}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm"><i class="fa-solid fa-trash text-[8px]"></i></button>
-                        </div>`}
+                        `<button onclick="document.getElementById('edit-user-original-email').value='${p.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm shrink-0" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                        <button onclick="openDeleteUserModal('${p.email}')" class="w-8 h-8 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm shrink-0" title="Eliminar"><i class="fa-solid fa-trash text-[10px]"></i></button>`}
                     </div>
                 </div>`;
 
@@ -9703,44 +9776,65 @@
 
             // APEX FIX: Validar si mostramos o no el botón de Takeover
             const isSuperAdmin = userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2';
-            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "Admin@1234!") || isRootAdminUnlocked);
+            const isMaster = isSuperAdmin && ((userProfile && userProfile.pin === "A920621") || isRootAdminUnlocked);
             const btnTakeover = $id('btn-admin-takeover');
             if (btnTakeover) {
-                if (isMaster && email !== currentUser) btnTakeover.classList.remove('hidden');
+                if (isMaster) btnTakeover.classList.remove('hidden');
                 else btnTakeover.classList.add('hidden');
             }
-
-            // Scroll suave hacia el panel de edición
-            $id('edit-user-panel').scrollIntoView({behavior: 'smooth', block: 'center'});
         }
-        
-        function closeUserEdit() { const pnl = $id('edit-user-panel'); if(pnl) pnl.classList.add('hidden'); }
-        
-        async function saveUserEdit() {
-            const email = $id('edit-user-original-email').value; const name = $id('edit-user-name').value.trim(); const pin = $id('edit-user-pin').value.trim();
-            const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
-            if(!name || !passRegex.test(pin)) return alert("Nombre requerido. La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
-            const key = 'nexus_profile_' + email; 
-            const p = JSON.parse(localStorage.getItem(key)) || { email }; 
-            p.name = name; p.pin = pin; p.lastSeen = Date.now();
-            if (currentEditAvatar) p.avatar = currentEditAvatar;
 
-            localStorage.setItem(key, JSON.stringify(p));
+        function closeUserEdit() {
+            const pnl = $id('edit-user-panel');
+            if(pnl) pnl.classList.add('hidden');
+            const pinInput = $id('edit-user-pin');
+            if(pinInput) pinInput.type = 'password';
+        }
+
+        async function saveUserEdit() {
+            const email = $id('edit-user-original-email').value;
+            const newName = $id('edit-user-name').value.trim();
+            const newPin = $id('edit-user-pin').value.trim();
             
-            if(email === currentUser) { userProfile = p; $id('header-user-badge').innerText = p.name; } 
+            if(!newName) return alert("El nombre es obligatorio");
             
-            // APEX FIX: Sincronizar edición en nube
-            if (window.db) {
+            const p = JSON.parse(localStorage.getItem('nexus_profile_' + email));
+            if(!p) return;
+
+            p.name = newName;
+            if(newPin) p.pin = newPin;
+            if(currentEditAvatar) p.avatar = currentEditAvatar;
+
+            localStorage.setItem('nexus_profile_' + email, JSON.stringify(p));
+            
+            if (p.isCloud && window.db) {
                 try {
                     const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), p, { merge: true });
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), { 
+                        name: newName, 
+                        pin: p.pin,
+                        avatar: p.avatar 
+                    }, { merge: true });
                 } catch(e) {}
             }
             
-            closeUserEdit(); updateLocalUsersList();
-            if ($id('admin-users-block') && !$id('admin-users-block').classList.contains('hidden')) {
-                loadAdminGlobalUsers();
+            if (email === currentUser) {
+                userProfile = p;
+                const hb = $id('header-user-badge'); if(hb) hb.innerText = p.name;
+                const ha = $id('header-avatar');
+                if (ha) {
+                    if (p.avatar) {
+                        ha.src = p.avatar;
+                        ha.classList.remove('rounded-lg');
+                        ha.classList.add('rounded-full');
+                    }
+                }
             }
+            
+            closeUserEdit();
+            updateLocalUsersList();
+            if(isRootAdminUnlocked && typeof loadAdminGlobalUsers === 'function') loadAdminGlobalUsers();
+            alert("✅ Perfil actualizado exitosamente.");
         }
 
         // APEX FIX: Función para tomar control administrativo de otra bóveda (Fricción Cero iOS)
@@ -9794,7 +9888,7 @@
             const errMsg = $id('takeover-error-msg');
             
             // Validar que la contraseña coincida con la del Admin actual
-            if((inputPin === userProfile.pin || inputPin === "Admin@1234!") && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
+            if((inputPin === userProfile.pin || inputPin === "A920621") && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 if(errMsg) errMsg.classList.add('hidden');
                 
                 // Efectuar el cambio de bóveda de forma transparente
@@ -9880,7 +9974,7 @@
             const targetPin = targetProfile ? targetProfile.pin : null;
             
             // Validar Contraseña, Checklist y Keyword de seguridad
-            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "Admin@1234!") && isChecked && kw === 'RESET' && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
+            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "A920621") && isChecked && kw === 'RESET' && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -10346,8 +10440,8 @@
             const pinEl = $id('reset-pin');
             const pin = pinEl ? pinEl.value.trim() : '';
             
-            // APEX FIX: Admin Password forzado a Admin@1234! y Keyword RESET. Exige ser Root Admin.
-            if (kw === 'RESET' && pin === "Admin@1234!" && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
+            // APEX FIX: Admin Password forzado a A920621 y Keyword RESET. Exige ser Root Admin.
+            if (kw === 'RESET' && pin === "A920621" && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 
                 // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
@@ -10469,6 +10563,122 @@
             const mod = $id('task-vault-modal'); if(!mod) return;
             mod.classList.add('opacity-0', 'transition-opacity');
             setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity'); }, 300);
+        }
+
+        // APEX FIX: Lógica de Recuperación y Seguridad Root
+        function getRootSecurity() {
+            const q1 = userProfile.rootSecQ1 || "¿Cuál es el nombre de tu primera mascota?";
+            const a1 = userProfile.rootSecA1 || "nexus";
+            const q2 = userProfile.rootSecQ2 || "¿En qué ciudad naciste?";
+            const a2 = userProfile.rootSecA2 || "nexus";
+            return {q1, a1, q2, a2};
+        }
+
+        function openRootRecovery() {
+            const mod = $id('root-recovery-modal'); if(!mod) return;
+            const sec = getRootSecurity();
+            $id('rec-q1-label').innerText = sec.q1;
+            $id('rec-q2-label').innerText = sec.q2;
+            $id('rec-a1-input').value = '';
+            $id('rec-a2-input').value = '';
+            $id('rec-new-pin').value = '';
+            $id('rec-error-msg').classList.add('hidden');
+            $id('recovery-step-1').classList.remove('hidden');
+            $id('recovery-step-2').classList.add('hidden');
+            mod.classList.remove('hidden');
+        }
+
+        function closeRootRecovery() {
+            const mod = $id('root-recovery-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function verifyRootRecoveryAnswers() {
+            const sec = getRootSecurity();
+            const a1 = $id('rec-a1-input').value.trim().toLowerCase();
+            const a2 = $id('rec-a2-input').value.trim().toLowerCase();
+            
+            if (a1 === sec.a1.toLowerCase() && a2 === sec.a2.toLowerCase()) {
+                $id('rec-error-msg').classList.add('hidden');
+                $id('recovery-step-1').classList.add('hidden');
+                $id('recovery-step-2').classList.remove('hidden');
+            } else {
+                $id('rec-error-msg').classList.remove('hidden');
+            }
+        }
+
+        async function saveRecoveredRootPin() {
+            const newPin = $id('rec-new-pin').value.trim();
+            if(!newPin || newPin.length < 6) return alert("La contraseña debe tener al menos 6 caracteres.");
+            
+            userProfile.pin = newPin;
+            localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile));
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser), { pin: newPin }, { merge: true });
+                } catch(e) {}
+            }
+            
+            closeRootRecovery();
+            alert("✅ Contraseña Root recuperada y actualizada con éxito.");
+            
+            isRootAdminUnlocked = true;
+            $id('admin-unlock-container').classList.add('hidden');
+            renderSettingsTab();
+            setTimeout(() => {
+                const block = $id('admin-users-block');
+                if(block) block.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }, 100);
+        }
+
+        function openRootSecuritySettings() {
+            const mod = $id('root-security-modal'); if(!mod) return;
+            const sec = getRootSecurity();
+            $id('sec-new-pin').value = userProfile.pin || "A920621";
+            $id('sec-q1').value = sec.q1;
+            $id('sec-a1').value = sec.a1;
+            $id('sec-q2').value = sec.q2;
+            $id('sec-a2').value = sec.a2;
+            mod.classList.remove('hidden');
+        }
+
+        function closeRootSecuritySettings() {
+            const mod = $id('root-security-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        async function saveRootSecuritySettings() {
+            const newPin = $id('sec-new-pin').value.trim();
+            const q1 = $id('sec-q1').value.trim();
+            const a1 = $id('sec-a1').value.trim();
+            const q2 = $id('sec-q2').value.trim();
+            const a2 = $id('sec-a2').value.trim();
+            
+            if (!newPin || !q1 || !a1 || !q2 || !a2) return alert("Completa todos los campos de seguridad.");
+            
+            userProfile.pin = newPin;
+            userProfile.rootSecQ1 = q1;
+            userProfile.rootSecA1 = a1;
+            userProfile.rootSecQ2 = q2;
+            userProfile.rootSecA2 = a2;
+            
+            localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile));
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser), { 
+                        pin: newPin, rootSecQ1: q1, rootSecA1: a1, rootSecQ2: q2, rootSecA2: a2 
+                    }, { merge: true });
+                } catch(e) {}
+            }
+            
+            closeRootSecuritySettings();
+            alert("✅ Configuración de Seguridad Root guardada correctamente.");
         }
 
         function createTaskVault() {
