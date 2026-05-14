@@ -2863,12 +2863,13 @@
             updateCloudBadge(true, true);
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, signInAnonymously, signInWithCustomToken } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"); // APEX FIX: Importado Custom Token
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                const firebaseConfig = {
+                // APEX FIX: Adaptación dinámica de Entorno (Evita choques de credenciales en Canvas/Vercel)
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
                     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
                     authDomain: "nexus-jr.firebaseapp.com",
                     projectId: "nexus-jr",
@@ -2891,15 +2892,22 @@
                     window.db = getFirestore(app);
                 }
                 
-                window.appId = 'nexus-jr'; 
+                // APEX FIX: Adaptación de App ID para reglas dinámicas
+                window.appId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-jr'; 
                 
-                import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
+                // APEX FIX: Telemetría Analytics purgada. Evita el Crash 404 (App not found / UnhandledRejection)
+                /* import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
+                */
 
                 if (!skipAuth) {
-                    // APEX FIX: Fallback Cero Fricción para Firebase Auth si Anonymous no está habilitado
+                    // APEX FIX: Fallback Autorizado y Priorización de Tokens
                     try {
-                        await signInAnonymously(auth);
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
                     } catch (err) {
                         console.warn("[APEX SYS] Firebase Auth Anónimo desactivado o bloqueado. Forzando conexión SSoT pura.");
                     }
@@ -9515,8 +9523,20 @@
                 list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay usuarios registrados en Firebase.</p>';
             } catch(e) {
                 console.error("[APEX SYS] Error listando usuarios SSoT:", e);
-                // Inyectamos el mensaje del error dinámicamente para depuración si algo más está fallando
-                list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
+                // APEX FIX: Diagnóstico UI amigable en caso de bloqueo de reglas de Firebase
+                if (e.code === 'permission-denied' || (e.message && e.message.includes('permission'))) {
+                    list.innerHTML = `<div class="p-5 bg-slate-900 rounded-[1.5rem] border border-red-500/50 mt-2 text-left shadow-lg">
+                        <h4 class="text-[11px] font-black text-red-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-shield-halved mr-2"></i>Permisos Denegados en Firebase</h4>
+                        <p class="text-[9px] text-slate-300 mb-3 font-bold leading-relaxed">Tu base de datos está bloqueando la lectura por seguridad. Ve a <b class="text-white">Firebase Console &rarr; Firestore Database &rarr; Reglas</b> e inyecta esta regla maestra:</p>
+                        <div class="bg-black p-3 rounded-xl border border-slate-700 overflow-x-auto">
+                            <code class="text-[9px] text-emerald-400 font-mono whitespace-pre">match /artifacts/{appId}/public/data/{document=**} {
+  allow read, write: if request.auth != null && request.auth.uid == '${userProfile.uid}';
+}</code>
+                        </div>
+                    </div>`;
+                } else {
+                    list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
+                }
             }
         }
 
@@ -10273,7 +10293,15 @@
                 list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">Buzón vacío. No hay mensajes nuevos.</p>';
             } catch(e) {
                 console.error("[APEX SYS] Error cargando tickets:", e);
-                list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al cargar los tickets.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
+                // APEX FIX: Diagnóstico visual si las Reglas de Firestore bloquean la lectura del Buzón
+                if (e.code === 'permission-denied' || (e.message && e.message.includes('permission'))) {
+                    list.innerHTML = `<div class="p-4 bg-slate-900 rounded-2xl border border-blue-500/50 mt-2 text-left">
+                        <h4 class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2"><i class="fa-solid fa-shield-halved mr-2"></i>Permisos Denegados</h4>
+                        <p class="text-[9px] text-slate-300 mb-3 font-bold">Asegúrate de agregar la regla de seguridad sugerida arriba en tu consola de Firebase para desbloquear la lectura del buzón.</p>
+                    </div>`;
+                } else {
+                    list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al cargar los tickets.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
+                }
             }
         }
 
