@@ -2536,7 +2536,7 @@
         let lastCloudSyncHash = {}; // APEX FIX: Caché de firmas para Optimización Extrema de Escrituras en Firebase
 
         // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
-        function attachP2PListener() {
+        async function attachTaskP2PListener() {
             if (!window.db) return;
             if (!window.sharedUnsubscribers) window.sharedUnsubscribers = {}; // Diccionario de Listeners
             
@@ -2733,82 +2733,12 @@
             });
         }
 
-        // APEX FIX: Canal Aislado WebSocket para Tareas Compartidas
-        function attachTaskP2PListener() {
-            if (!window.db) return;
-            if (!window.sharedTaskUnsubscribers) window.sharedTaskUnsubscribers = {};
-
-            const sharedTaskVaults = state.taskVaults ? state.taskVaults.filter(v => v.isShared && v.remoteId) : [];
-            const activeIds = sharedTaskVaults.map(v => v.remoteId);
-
-            for (const rId in window.sharedTaskUnsubscribers) {
-                if (!activeIds.includes(rId)) {
-                    window.sharedTaskUnsubscribers[rId]();
-                    delete window.sharedTaskUnsubscribers[rId];
-                }
-            }
-
-            if (sharedTaskVaults.length === 0) return;
-
-            import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
-                sharedTaskVaults.forEach(vault => {
-                    if (window.sharedTaskUnsubscribers[vault.remoteId]) return;
-                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
-
-                    window.sharedTaskUnsubscribers[vault.remoteId] = onSnapshot(docRef, (docSnap) => {
-                        if (!docSnap.exists()) return;
-                        const data = docSnap.data();
-                        let hasChanges = false;
-
-                        if (data.deletedTasks && Array.isArray(data.deletedTasks)) {
-                            if (!state.deletedSharedTasks) state.deletedSharedTasks = [];
-                            data.deletedTasks.forEach(delId => {
-                                const exTx = state.tasks.find(t => t.id === delId);
-                                if (exTx) {
-                                    state.tasks = state.tasks.filter(t => t.id !== delId);
-                                    hasChanges = true;
-                                }
-                                if (!state.deletedSharedTasks.includes(delId)) state.deletedSharedTasks.push(delId);
-                            });
-                        }
-
-                        if (data.tasks && Array.isArray(data.tasks)) {
-                            data.tasks.forEach(netTask => {
-                                if (state.deletedSharedTasks && state.deletedSharedTasks.includes(netTask.id)) return;
-                                const mappedTask = { ...netTask, vaultId: vault.remoteId }; 
-                                const idx = state.tasks.findIndex(t => t.id === mappedTask.id);
-
-                                if (idx === -1) {
-                                    state.tasks.push(mappedTask);
-                                    hasChanges = true;
-                                } else {
-                                    const ex = state.tasks[idx];
-                                    if (JSON.stringify(ex) !== JSON.stringify(mappedTask)) {
-                                        state.tasks[idx] = mappedTask;
-                                        hasChanges = true;
-                                    }
-                                }
-                            });
-                        }
-                        if (hasChanges) {
-                            state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
-                            if(currentUser) NexusIDB.saveState(currentUser, state);
-                            if (sessionUnlocked) {
-                                if(state.activeTab === 'tasks') renderTasksTab();
-                                updateDashboard();
-                            }
-                        }
-                    });
-                });
-            });
-        }
-
-        async function initCloud() {
+        async function initCloud(skipAuth = false) {
             if (window.db) {
                 updateCloudBadge(true, false);
                 return true;
             }
-            updateCloudBadge(true, true); 
+            updateCloudBadge(true, true);
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
                 const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
@@ -2835,7 +2765,7 @@
                         localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
                     });
                 } catch (cacheErr) {
-                    console.warn("[APEX SYS] Modo restringido (Incógnito/iOS). Fallback a Firestore estándar.");
+                    console.warn("[APEX SYS] Mode restringit (Incògnit/iOS). Fallback a Firestore estàndard.");
                     window.db = getFirestore(app);
                 }
                 
@@ -2844,18 +2774,20 @@
                 import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
-                // APEX FIX: Fallback Cero Fricción para Firebase Auth si Anonymous no está habilitado
-                try {
-                    await signInAnonymously(auth);
-                } catch (err) {
-                    console.warn("[APEX SYS] Firebase Auth Anónimo desactivado o bloqueado. Se fuerza conexión SSoT pura de base de datos.");
+                if (!skipAuth) {
+                    // APEX FIX: Fallback Cero Fricción para Firebase Auth si Anonymous no está habilitado
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (err) {
+                        console.warn("[APEX SYS] Firebase Auth Anònim desactivat o bloquejat. Forçant connexió SSoT pura.");
+                    }
                 }
                 
                 updateCloudBadge(true, false);
                 return true;
 
             } catch(e) {
-                console.warn("[APEX SYS] Error de red. Trabajando en modo Local-First.", e);
+                console.warn("[APEX SYS] Error de xarxa. Treballant en mode Local-First.", e);
                 updateCloudBadge(false);
                 return false;
             }
@@ -3135,8 +3067,41 @@
                 }
             });
 
+            // APEX FIX: Interceptar el resultat del Redirect de Google per a contenidors iOS
+            let isRedirectResolved = false;
+            try {
+                await initCloud(true); // Inicialitzar sense Login Anònim per no trencar el flux
+                const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth();
+                const result = await getRedirectResult(auth);
+                if (result && result.user) {
+                    isRedirectResolved = true;
+                    const ls = $id('login-screen');
+                    if (ls) {
+                        ls.classList.remove('hidden');
+                        const title = $id('auth-main-title');
+                        if (title) title.innerText = 'Validant identitat...';
+                        const btn = document.querySelector('.btn-social-auth');
+                        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronitzant dades...';
+                    }
+                    await finalizeAuth(result.user);
+                }
+            } catch(e) {
+                console.error("Fricció amb el Redirect de Google:", e);
+                if (e.code !== 'auth/redirect-cancelled-by-user') {
+                    alert("⚠️ Error en validar l'autenticació de Google. Si us plau, torna a intentar-ho.");
+                }
+            }
+
+            if (isRedirectResolved) return; // Evita executar la càrrega doble
+
+            // Iniciem mode anònim si no hi ha redirect pendent
+            try { 
+                const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await signInAnonymously(getAuth()); 
+            } catch(e) {}
+
             // APEX FIX: Inicio de Sesión Estándar (Persistencia Real SSoT)
-            // Eliminada la regla destructiva 'isColdBoot' que borraba la sesión al cerrar la app
             try { currentUser = localStorage.getItem('nexus_current_user'); } catch(e) {}
             
             if (!currentUser) {
@@ -3250,18 +3215,19 @@
 
         window.performGoogleLogin = async function() {
             try {
-                const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                await initCloud();
+                // APEX FIX: Canvi de Popup a Redirect per suport natiu en contenidors iOS (WKWebView)
+                const { getAuth, GoogleAuthProvider, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await initCloud(true);
                 const auth = getAuth();
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' }); 
                 
-                const cred = await signInWithPopup(auth, provider);
-                await finalizeAuth(cred.user);
+                const btn = document.querySelector('.btn-social-auth');
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Redirigint a Google...';
+
+                await signInWithRedirect(auth, provider);
             } catch(e) {
-                if(e.code !== 'auth/popup-closed-by-user') {
-                    alert("⚠️ Error de autenticación con Google: " + e.message);
-                }
+                alert("⚠️ Error d'autenticació amb Google: " + e.message);
             }
         };
 
