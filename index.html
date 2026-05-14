@@ -280,6 +280,7 @@
             <div class="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl"><i class="fa-solid fa-lock"></i></div><div><h2 class="text-xl font-black uppercase tracking-widest" id="lock-name">Usuario</h2><p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Ingrese Contraseña de Bóveda</p></div>
             <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors">
             <button onclick="unlockSession()" type="button" class="w-64 bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform">Desbloquear</button>
+            <button onclick="triggerBiometricAuth()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Usar Face ID</button>
             <button onclick="logout()" type="button" class="block w-full text-[10px] text-slate-500 uppercase font-bold mt-8 hover:text-white">Cambiar de Cuenta</button>
         </div>
     </div>
@@ -3549,7 +3550,18 @@
             const reqPin = savedState && savedState.settings ? savedState.settings.requirePin : false;
             if(!sessionUnlocked && reqPin && !bypass) {
                 const lock = $id('session-lock-screen');
-                if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(ln) ln.innerText = userProfile.name; } return;
+                if(lock) { 
+                    lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); 
+                    const ln = $id('lock-name'); if(ln) ln.innerText = userProfile.name; 
+                    
+                    // APEX FIX: Autodisparo Biométrico en Contenedor iOS
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                        const bioBtn = $id('btn-bio-auth');
+                        if (bioBtn) bioBtn.classList.remove('hidden');
+                        setTimeout(() => triggerBiometricAuth(), 400); // Retardo sutil para que el Modal renderice antes del prompt nativo
+                    }
+                } 
+                return;
             }
             if(bypass) sessionStorage.removeItem('nexus_admin_bypass');
             sessionUnlocked = true; 
@@ -3647,6 +3659,54 @@
             initNexus();
             
             setTimeout(() => { checkDailyBriefing(); }, 800);
+        }
+
+        // APEX FIX: Motor Biométrico y Manejador de Bloqueo de Bóveda
+        function triggerBiometricAuth() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                window.webkit.messageHandlers.biometricAuthHandler.postMessage("");
+            }
+        }
+
+        window.onBiometricSuccess = function() {
+            console.log("¡Face ID Exitoso!");
+            unlockSession(true); 
+        };
+
+        window.onBiometricFailure = function(reason) {
+            console.log("Falló el Face ID o fue cancelado. Razón:", reason);
+            const bioBtn = $id('btn-bio-auth');
+            if (bioBtn) bioBtn.classList.remove('hidden');
+            const pinInput = $id('session-pin-input');
+            if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+        };
+
+        function unlockSession(isBiometric = false) {
+            const pinInput = $id('session-pin-input');
+            
+            if (!isBiometric) {
+                const userPin = (userProfile && userProfile.pin) ? userProfile.pin : "Admin@1234!";
+                if (!pinInput || pinInput.value !== userPin) {
+                    alert("⚠️ Contraseña de bóveda incorrecta.");
+                    if(pinInput) pinInput.value = '';
+                    return;
+                }
+            }
+
+            sessionUnlocked = true;
+            if(pinInput) pinInput.value = '';
+            
+            const lock = $id('session-lock-screen');
+            if (lock) {
+                lock.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => { 
+                    lock.classList.add('hidden'); 
+                    lock.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); 
+                    // Reanudar el ciclo de vida de la aplicación
+                    initNexus();
+                    setTimeout(() => { checkDailyBriefing(); }, 800);
+                }, 300);
+            }
         }
 
         // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
