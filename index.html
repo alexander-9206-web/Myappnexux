@@ -9462,9 +9462,10 @@
             if(bulkBtn) bulkBtn.classList.add('hidden');
 
             try {
-                const { collection, getDocs, query } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                // APEX FIX: Usar query() explícito para máxima compatibilidad con las reglas de Firestore
-                const snap = await getDocs(query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users')));
+                // APEX FIX: Consulta cruda y directa sin envolturas query() restrictivas
+                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const usersRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users');
+                const snap = await getDocs(usersRef);
                 let html = '';
                 
                 // Convertir a array para ordenar
@@ -9475,12 +9476,12 @@
                 const MAX_QUOTA_KB = 10240; // Cuota teórica de 10MB para perfil SSoT
 
                 users.forEach(data => {
-                    // APEX FIX: Protección Anti-Undefined para usuarios muy antiguos con esquemas rotos
+                    // Protección Anti-Undefined para usuarios muy antiguos con esquemas rotos
                     const userEmail = data.email || data.uid;
                     if(!userEmail) return;
 
-                    // Auto-Caché Forzado para estabilizar la Edición de Usuarios (Fricción Cero)
-                    localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(data));
+                    // APEX FIX: Escudo Anti-Colapso. Si la memoria caché está llena, no romperá el ciclo
+                    try { localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(data)); } catch(e) {}
                     
                     const isCurrent = userEmail === currentUser;
                     const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
@@ -9489,7 +9490,6 @@
                     
                     const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
                     
-                    // APEX FIX: Inyectar Checkbox para Borrado en Masa (Fricción Cero)
                     const checkboxHtml = !isCurrent ? `<input type="checkbox" value="${userEmail}" class="admin-user-cb w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shadow-sm shrink-0 mr-1" onchange="handleAdminUserSelect()">` : `<div class="w-4 h-4 shrink-0 mr-1"></div>`;
 
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
@@ -9515,7 +9515,8 @@
                 list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay usuarios registrados en Firebase.</p>';
             } catch(e) {
                 console.error("[APEX SYS] Error listando usuarios SSoT:", e);
-                list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.</p>';
+                // Inyectamos el mensaje del error dinámicamente para depuración si algo más está fallando
+                list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
             }
         }
 
@@ -10190,6 +10191,181 @@
             } else {
                 if(err) err.classList.remove('hidden');
                 $id('del-user-pin').value = '';
+            }
+        }
+
+        // APEX FIX: MOTOR DE SOPORTE TÉCNICO AL USUARIO Y CAMBIO DE CONTRASEÑAS (Restaurado)
+        function adminChangePasswordPrompt(email, name) {
+            triggerUIPrompt(`Modificar contraseña de ${name} (${email}):\nRequisito: Mín. 8 caracteres (Mayúscula, minúscula, número y símbolo).`, '', 'admin_pwd', email);
+        }
+
+        async function executeAdminPwdChange(email, newPin) {
+            const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+            if(!passRegex.test(newPin)) {
+                return alert("⚠️ La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
+            }
+            if(!window.db) return alert("⚠️ Sin conexión a la red SSoT.");
+            
+            try {
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                const snap = await getDoc(userRef);
+                
+                if(snap.exists()) {
+                    const userData = snap.data();
+                    userData.pin = newPin; 
+                    await setDoc(userRef, { pin: newPin }, { merge: true });
+                    localStorage.setItem('nexus_profile_' + email, JSON.stringify(userData));
+                    alert(`✅ Contraseña de ${email} modificada exitosamente en la nube.`);
+                } else {
+                    alert("⚠️ Usuario no encontrado en la base de datos.");
+                }
+            } catch(e) {
+                console.error(e);
+                alert("⚠️ Error al intentar modificar la contraseña.");
+            }
+        }
+
+        async function loadSupportTickets() {
+            const list = $id('admin-support-tickets-list');
+            if(!list || !window.db) return;
+            
+            list.innerHTML = '<p class="text-[10px] text-center text-blue-400 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Recuperando mensajes de la red...</p>';
+            
+            try {
+                // APEX FIX: Extirpada la envoltura 'query()' corrupta que causaba 'Invalid query constraint'
+                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ticketsRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_tickets');
+                const snap = await getDocs(ticketsRef);
+                
+                let html = '';
+                const tickets = [];
+                snap.forEach(doc => tickets.push(doc.data()));
+                
+                // Ordenar más recientes primero localmente (Fricción Cero en Consultas)
+                tickets.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+                tickets.forEach(tk => {
+                    const dDate = new Date(tk.createdAt);
+                    const isResolved = tk.resolved;
+                    const borderCls = isResolved ? 'border-emerald-200 bg-emerald-50/30 opacity-70' : 'border-blue-200 bg-white shadow-sm';
+                    const iconCls = isResolved ? 'fa-check text-emerald-500' : 'fa-envelope-open-text text-blue-500';
+                    
+                    html += `
+                    <div class="p-4 rounded-[1.2rem] border transition-all ${borderCls}">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200"><i class="fa-solid ${iconCls} text-[10px]"></i></div>
+                                <div>
+                                    <p class="text-[10px] font-black uppercase text-slate-800">${tk.userName}</p>
+                                    <p class="text-[8px] font-bold text-slate-500">${tk.userId} • ${dDate.toLocaleDateString('es-CO')} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')}</p>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                ${!isResolved ? `<button onclick="resolveSupportTicket('${tk.id}')" class="w-7 h-7 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center hover:bg-emerald-100 transition-colors shadow-sm" title="Marcar Resuelto"><i class="fa-solid fa-check text-[9px]"></i></button>` : ''}
+                                <button onclick="deleteSupportTicket('${tk.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Eliminar Ticket"><i class="fa-solid fa-trash text-[9px]"></i></button>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-600 font-medium leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100 mt-2">"${tk.message}"</p>
+                    </div>`;
+                });
+                
+                list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">Buzón vacío. No hay mensajes nuevos.</p>';
+            } catch(e) {
+                console.error("[APEX SYS] Error cargando tickets:", e);
+                list.innerHTML = `<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al cargar los tickets.<br><span class="text-[8px] font-normal text-red-400">${e.message}</span></p>`;
+            }
+        }
+
+        async function resolveSupportTicket(id) {
+            if(!window.db) return;
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_tickets', id);
+                await setDoc(ref, { resolved: true }, { merge: true });
+                loadSupportTickets();
+            } catch(e) { console.error(e); }
+        }
+
+        async function deleteSupportTicket(id) {
+            if(!window.db) return;
+            if(confirm("¿Estás seguro de eliminar permanentemente este mensaje del usuario?")) {
+                try {
+                    const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_tickets', id);
+                    await deleteDoc(ref);
+                    loadSupportTickets();
+                } catch(e) { console.error(e); }
+            }
+        }
+
+        function openSupportTicketModal() {
+            const mod = $id('support-ticket-modal');
+            if(!mod) return;
+            $id('support-ticket-text').value = '';
+            countTicketWords();
+            mod.classList.remove('hidden');
+        }
+
+        function closeSupportTicketModal() {
+            const mod = $id('support-ticket-modal');
+            if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity'); }, 300);
+        }
+
+        function countTicketWords() {
+            const txt = $id('support-ticket-text').value.trim();
+            const counter = $id('ticket-word-count');
+            const alertDot = $id('ticket-word-alert');
+            
+            let words = 0;
+            if(txt.length > 0) words = txt.split(/\s+/).filter(word => word.length > 0).length;
+
+            if (counter) counter.innerText = `${words} / 50 palabras`;
+
+            if(words > 50) {
+                if (counter) { counter.classList.replace('text-slate-400', 'text-red-600'); counter.classList.add('border-red-200', 'bg-red-50'); }
+                if (alertDot) alertDot.classList.remove('hidden');
+            } else {
+                if (counter) { counter.classList.replace('text-red-600', 'text-slate-400'); counter.classList.remove('border-red-200', 'bg-red-50'); }
+                if (alertDot) alertDot.classList.add('hidden');
+            }
+        }
+
+        async function sendSupportTicket() {
+            const text = $id('support-ticket-text').value.trim();
+            let words = 0;
+            if(text.length > 0) words = text.split(/\s+/).filter(w => w.length > 0).length;
+
+            if(words === 0) return alert("⚠️ No puedes enviar un mensaje vacío.");
+            if(words > 50) return alert("⚠️ Tu mensaje excede el límite de 50 palabras. Por favor, sé más breve.");
+
+            if (!window.db || !currentUser) return alert("⚠️ Error de conexión a la red. No se pudo enviar el mensaje.");
+
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ticketId = 'ticket_' + Date.now();
+                const userName = userProfile && userProfile.name ? userProfile.name : 'Usuario';
+                
+                const ticketData = {
+                    id: ticketId,
+                    userId: currentUser,
+                    userName: userName,
+                    message: text,
+                    createdAt: new Date().toISOString(),
+                    resolved: false
+                };
+
+                const ticketRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_tickets', ticketId);
+                await setDoc(ticketRef, ticketData);
+                
+                closeSupportTicketModal();
+                alert("✅ Mensaje enviado al Administrador exitosamente. Te contactaremos pronto.");
+
+            } catch (error) {
+                console.error("Error enviando ticket:", error);
+                alert("⚠️ Error de sistema al intentar enviar el mensaje.");
             }
         }
 
