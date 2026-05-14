@@ -324,12 +324,13 @@
         </div>
     </div>
 
-<!-- =========================================================
-     APEX FIX: SUSTITUYE EL BLOQUE DE SCRIPTS DE JS DESDE AQUI HASTA ABAJO
-     ========================================================= -->
-            <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors">
+    <!-- PANTALLA DE BLOQUEO POR INACTIVIDAD -->
+    <div id="session-lock-screen" class="fixed inset-0 z-[90] bg-slate-900/95 backdrop-blur-md text-white flex flex-col items-center justify-center p-8 transition-opacity duration-300 hidden">
+        <div class="text-center space-y-6 animate-slideUp">
+            <div class="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl"><i class="fa-solid fa-lock"></i></div><div><h2 class="text-xl font-black uppercase tracking-widest" id="lock-name">Usuario</h2><p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Ingrese Contraseña de Bóveda</p></div>
+            <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors" autocomplete="current-password">
             <button onclick="unlockSession()" type="button" class="w-64 bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform">Desbloquear</button>
-            <button onclick="triggerBiometricAuth()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Usar Face ID</button>
+            <button onclick="triggerFaceID()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Face ID / Llavero</button>
             <button onclick="logout()" type="button" class="block w-full text-[10px] text-slate-500 uppercase font-bold mt-8 hover:text-white">Cambiar de Cuenta</button>
         </div>
     </div>
@@ -2453,11 +2454,16 @@
             
             const pinInput = $id('session-pin-input');
             const loginPinInput = $id('login-existing-pin');
+            const manualPinInput = $id('login-manual-pin'); // APEX FIX: Agregamos el selector correcto
             
             if (pinInput && !$id('session-lock-screen').classList.contains('hidden')) { 
                 pinInput.value = ''; pinInput.focus(); 
-            } else if (loginPinInput && !$id('login-screen').classList.contains('hidden')) {
-                loginPinInput.value = ''; loginPinInput.focus();
+            } else if (!$id('login-screen').classList.contains('hidden')) {
+                if (!$id('login-pin-section').classList.contains('hidden') && loginPinInput) {
+                    loginPinInput.value = ''; loginPinInput.focus();
+                } else if (!$id('login-initial-choice').classList.contains('hidden') && manualPinInput) {
+                    manualPinInput.value = ''; manualPinInput.focus();
+                }
             }
         };
 
@@ -3176,30 +3182,29 @@
                 }
             });
 
-            // APEX FIX: Candado Estricto (Cold Boot Forzado si se presionó Salir)
-            const isColdBoot = !sessionStorage.getItem('nexus_session_active');
-
-            if (!isColdBoot) {
+            // APEX FIX: Inicio de Sesión Persistente (No forzar salida al cerrar la app)
+            try {
+                currentUser = localStorage.getItem('nexus_current_user');
+            } catch(e) {}
+            
+            if (!currentUser) {
+                currentUser = await NexusIDB.getSession();
+                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+            }
+            
+            if (!currentUser) {
                 try {
-                    currentUser = localStorage.getItem('nexus_current_user');
+                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                    if (match) {
+                        currentUser = match[2];
+                        localStorage.setItem('nexus_current_user', currentUser);
+                    }
                 } catch(e) {}
-                
-                if (!currentUser) {
-                    currentUser = await NexusIDB.getSession();
-                    if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-                }
-                
-                if (!currentUser) {
-                    try {
-                        const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                        if (match) {
-                            currentUser = match[2];
-                            localStorage.setItem('nexus_current_user', currentUser);
-                        }
-                    } catch(e) {}
-                }
-            } else {
-                currentUser = null; // Fuerza a mostrar la pantalla de Acceso
+            }
+
+            // Candado estricto solo si el usuario tocó explícitamente el botón "Salir"
+            if (sessionStorage.getItem('nexus_logged_out')) {
+                currentUser = null;
             }
 
             if (!currentUser) {
@@ -3355,7 +3360,7 @@
         // APEX FIX: Motor de Inicio de Sesión Tradicional Consolidado (Fricción Cero)
         async function processTraditionalLogin(event) {
             const emailInput = $id('login-manual-email');
-            const pinInput = $id('login-existing-pin');
+            const pinInput = $id('login-manual-pin'); // APEX FIX: Estaba leyendo el ID equivocado
             if(!emailInput || !pinInput) return;
 
             const email = emailInput.value.trim().toLowerCase();
