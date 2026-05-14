@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -3707,7 +3707,7 @@
             const name = user.displayName || 'Usuario';
             // Extraer foto en alta resolución si es de Google
             const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
-            const uid = user.uid; // APEX FIX: Capturar el UID único
+            const primaryId = email; // APEX FIX: Forzar el correo electrónico como ID absoluto SSoT
 
             // APEX FIX: Autenticación 100% Directa "One-Tap" y Motor de Enlace SSoT
             try {
@@ -3716,31 +3716,31 @@
 
                 const { collection, doc, getDoc, getDocs, query, where, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                // 1. Lógica de enlace (Link). Busca por UID, si no, busca por Email para enlazar bóvedas antiguas.
-                let docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
+                // 1. Lógica de enlace (Link). Busca primero por el correo como ID de documento (Nuevo estándar SSoT)
+                let docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', primaryId);
                 let docSnap = await getDoc(docRef);
-                let finalUserId = uid;
+                let finalUserId = primaryId;
                 let existingProfile = null;
                 
                 if (docSnap.exists()) {
                     existingProfile = docSnap.data();
                 } else {
-                    // Buscar si existe una cuenta manual previa con el mismo correo
+                    // Fallback 1: Buscar si el correo está guardado dentro de un documento con ID alfanumérico antiguo
                     const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("email", "==", email));
                     const emailSnap = await getDocs(q);
                     
                     if (!emailSnap.empty) {
                         existingProfile = emailSnap.docs[0].data();
-                        finalUserId = emailSnap.docs[0].id; // Conservar el ID de la bóveda antigua (usualmente el correo)
+                        finalUserId = emailSnap.docs[0].id; 
                         docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', finalUserId);
                     } else {
-                        // Respaldo para versiones muy antiguas donde el correo era el ID del documento
-                        const emailDocRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
-                        const emailDocSnap = await getDoc(emailDocRef);
-                        if (emailDocSnap.exists()) {
-                            existingProfile = emailDocSnap.data();
-                            finalUserId = email;
-                            docRef = emailDocRef;
+                        // Fallback 2: Buscar por el UID de Firebase antiguo
+                        const q2 = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("uid", "==", user.uid));
+                        const uidSnap = await getDocs(q2);
+                        if (!uidSnap.empty) {
+                            existingProfile = uidSnap.docs[0].data();
+                            finalUserId = uidSnap.docs[0].id;
+                            docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', finalUserId);
                         }
                     }
                 }
@@ -3749,7 +3749,8 @@
                     // LOGIN EXISTENTE (Carga o Enlaza Bóveda Antigua)
                     const cloudProfile = existingProfile;
                     cloudProfile.isCloud = true;
-                    if (!cloudProfile.uid) cloudProfile.uid = uid; // Sella el enlace criptográfico
+                    if (!cloudProfile.uid) cloudProfile.uid = user.uid; // Sella el metadata nativo, pero operamos con el correo
+                    if (!cloudProfile.email) cloudProfile.email = email;
                     cloudProfile.isOAuth = true;
 
                     let needsUpdate = false;
@@ -3760,8 +3761,8 @@
                         cloudProfile.avatar = photo; needsUpdate = true;
                     }
 
-                    if (needsUpdate || !existingProfile.uid || !existingProfile.isOAuth) {
-                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid, isOAuth: true }, { merge: true });
+                    if (needsUpdate || !existingProfile.uid || !existingProfile.isOAuth || !existingProfile.email) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, email: cloudProfile.email, uid: cloudProfile.uid, isOAuth: true }, { merge: true });
                     }
 
                     localStorage.setItem(`nexus_profile_${finalUserId}`, JSON.stringify(cloudProfile));
@@ -3831,7 +3832,8 @@
                     }
                 } else {
                     // APEX FIX: NUEVO USUARIO - Híbrido (Hereda datos Google y pide PIN para acceso Offline)
-                    window.tempOAuthUser = { uid: uid, email: email, name: name, photo: photo };
+                    // Pasa el primaryId (correo) como ID forzado para la nueva bóveda
+                    window.tempOAuthUser = { uid: primaryId, email: email, name: name, photo: photo, nativeUid: user.uid };
 
                     const loader = $id('oauth-loader'); if(loader) loader.remove();
 
