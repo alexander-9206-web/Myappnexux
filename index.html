@@ -3816,8 +3816,8 @@
             }
         }
 
-        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
-        function logout() { 
+        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria y Cierre de Nube
+        async function logout() { 
             sessionUnlocked = false; 
             
             if(unsubscribeSnapshot) unsubscribeSnapshot();
@@ -3831,6 +3831,16 @@
             localStorage.removeItem('nexus_current_user'); 
             NexusIDB.saveSession(null);
             document.cookie = "nexus_current_user=; max-age=0; path=/";
+            
+            // APEX FIX: Destrucción formal de la credencial en Firebase Auth
+            try {
+                const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth();
+                if (auth) await signOut(auth);
+            } catch(e) {
+                console.warn("[APEX] Fricción cerrando sesión en Firebase", e);
+            }
+
             location.reload(); 
         }
         
