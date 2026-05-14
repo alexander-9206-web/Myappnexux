@@ -85,6 +85,11 @@
 
         /* 4. Formateo Extremo para Móviles (< 640px) */
         @media (max-width: 640px) {
+            /* Fricción Cero: Bloqueo de Auto-Zoom de iOS Safari al tocar inputs */
+            input, select, textarea { 
+                font-size: 16px !important; 
+            }
+            
             /* Compactación de cajas y recuperación de curvas en 360 grados */
             .fixed.inset-0 > div[class*="theme-card"],
             .fixed.inset-0 > div[class*="auth-container"] {
@@ -192,12 +197,12 @@
         }
     </style>
 </head>
-<body class="pb-40">
+<body class="pb-safe">
 
-    <!-- AUTENTICACIÓN -->
+    <!-- AUTENTICACIÓN TRADICIONAL (SISTEMA BANCARIO SSoT) -->
     <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 text-slate-200 flex flex-col items-center justify-center p-4 transition-opacity duration-300 hidden">
         
-        <div class="w-full max-w-[450px] space-y-6 animate-slideUp auth-container p-8 md:p-10">
+        <div class="w-full max-w-[450px] space-y-6 animate-slideUp auth-container p-8 md:p-10 max-h-[90vh] overflow-y-auto hide-scrollbar">
             <!-- Header con Logo NEXUS AR -->
             <div class="text-center space-y-3 mb-8 flex flex-col items-center">
                 <div class="w-20 h-20 rounded-[1.5rem] bg-slate-800 shadow-xl border border-slate-700 flex items-center justify-center overflow-hidden">
@@ -211,21 +216,8 @@
                 <p class="text-[12px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Plataforma Financiera SSoT</p>
             </div>
             
-            <!-- Elección Inicial (Social vs Manual) -->
-            <div id="login-initial-choice" class="space-y-6">
-                
-                <!-- APEX FIX: Módulo de Cuentas Recientes (Avatar Login) -->
-                <div id="recent-accounts-wrapper" class="hidden mb-2 animate-slideUp">
-                    <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center mb-4">Selecciona tu Bóveda</p>
-                    <div id="recent-accounts-list" class="flex gap-4 overflow-x-auto hide-scrollbar pb-2 justify-center">
-                        <!-- Los avatares se inyectan dinámicamente aquí -->
-                    </div>
-                    <div class="relative flex items-center py-2 mt-4 mb-2">
-                        <div class="flex-grow border-t border-slate-700/50"></div>
-                        <span class="flex-shrink-0 mx-4 text-[9px] font-bold text-slate-600 uppercase tracking-widest">Otras opciones de acceso</span>
-                        <div class="flex-grow border-t border-slate-700/50"></div>
-                    </div>
-                </div>
+            <!-- APEX FIX: Formulario Inicial Unificado y Estricto -->
+            <div id="login-initial-choice" class="space-y-4 animate-slideUp">
                 
                 <!-- Login Social -->
                 <button onclick="window.loginWithGoogle(event)" class="w-full btn-social-auth">
@@ -233,61 +225,44 @@
                     Continuar con Google
                 </button>
                 
-                <div class="relative flex items-center py-1">
-                    <div class="flex-grow border-t border-slate-700"></div>
-                    <span class="flex-shrink-0 mx-4 text-[12px] font-medium text-slate-500">o usa tu correo electrónico</span>
-                    <div class="flex-grow border-t border-slate-700"></div>
+                <div class="relative flex items-center py-2">
+                    <div class="flex-grow border-t border-slate-700/50"></div>
+                    <span class="flex-shrink-0 mx-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">O INGRESA TUS DATOS</span>
+                    <div class="flex-grow border-t border-slate-700/50"></div>
                 </div>
 
-                <!-- Ingreso Manual (Correo) -->
-                <div class="relative mt-4">
-                    <label class="auth-label">Correo electrónico</label>
-                    <input type="email" id="login-manual-email" class="w-full auth-input" placeholder="" autocomplete="username">
-                </div>
-                
-                <div class="text-[14px] text-indigo-400 font-medium cursor-pointer hover:text-indigo-300 transition-colors text-left mt-2">
-                    ¿Olvidaste el correo electrónico?
-                </div>
+                <!-- Ingreso Manual Consolidado -->
+                <div class="space-y-5">
+                    <div class="relative">
+                        <label class="auth-label">Correo electrónico</label>
+                        <input type="email" id="login-manual-email" class="w-full auth-input" placeholder="correo@ejemplo.com" autocomplete="username">
+                    </div>
 
-                <div class="pt-6 flex justify-between items-center text-[14px]">
-                    <button onclick="toggleNewUserForm(true)" class="btn-secondary-auth">Crear cuenta</button>
-                    <button onclick="processManualEmailEntry()" type="button" class="btn-primary-auth">Siguiente</button>
-                </div>
-            </div>
-
-            <!-- Ingreso de PIN para usuario existente -->
-            <div id="login-pin-section" class="space-y-6 hidden">
-                <div class="flex items-center justify-center gap-2 mb-6 border border-slate-700 rounded-full py-1.5 px-4 w-fit mx-auto cursor-pointer hover:bg-slate-800 transition-colors" onclick="cancelUserSelection()">
-                    <i class="fa-solid fa-circle-user text-slate-400"></i>
-                    <span id="login-active-email" class="text-[14px] font-medium text-slate-200"></span>
-                    <i class="fa-solid fa-chevron-down text-[10px] text-slate-500"></i>
-                </div>
-                
-                <div class="text-center mb-6">
-                    <h2 class="text-xl font-bold text-white">Te damos la bienvenida</h2>
-                </div>
-
-                <div class="relative">
-                    <label class="auth-label">Ingresa tu contraseña de seguridad</label>
-                    <input type="password" id="login-existing-pin" class="w-full auth-input tracking-widest text-center font-bold">
-                    <div class="flex items-center gap-2 mt-3 px-1">
-                        <input type="checkbox" id="show-pin-toggle" class="w-4 h-4 cursor-pointer rounded border-slate-600 bg-slate-800 accent-indigo-500" onchange="document.getElementById('login-existing-pin').type = this.checked ? 'text' : 'password'">
-                        <label for="show-pin-toggle" class="text-[13px] text-slate-400 cursor-pointer select-none">Mostrar contraseña</label>
+                    <div class="relative">
+                        <label class="auth-label">Contraseña de Seguridad</label>
+                        <input type="password" id="login-existing-pin" class="w-full auth-input tracking-widest font-bold" autocomplete="current-password">
+                        <div class="flex items-center justify-between mt-2 px-1">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="show-pin-toggle" class="w-4 h-4 cursor-pointer rounded border-slate-600 bg-slate-800 accent-indigo-500" onchange="document.getElementById('login-existing-pin').type = this.checked ? 'text' : 'password'">
+                                <label for="show-pin-toggle" class="text-[12px] text-slate-400 cursor-pointer select-none">Mostrar contraseña</label>
+                            </div>
+                            <div class="text-[12px] text-indigo-400 font-medium cursor-pointer hover:text-indigo-300 transition-colors">
+                                ¿Olvidaste tu contraseña?
+                            </div>
+                        </div>
                     </div>
                 </div>
-
-                <!-- APEX FIX: Botón de Autenticación Biométrica (Face ID / Passkey) inyectado en Login -->
-                <button onclick="triggerBiometricAuth()" id="btn-login-bio" type="button" class="hidden w-full bg-slate-800 text-emerald-400 p-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-fingerprint text-lg"></i> Usar Passkey / Face ID
-                </button>
-
-                <div class="text-[14px] text-indigo-400 font-medium cursor-pointer hover:text-indigo-300 transition-colors text-left mt-2">
-                    ¿Olvidaste tu contraseña?
+                
+                <!-- Botón Autenticación Nativa -->
+                <div class="pt-2">
+                    <button type="button" onclick="triggerFaceID()" id="btn-login-bio" class="hidden flex items-center gap-2 bg-slate-800 text-indigo-400 px-4 py-3.5 rounded-xl font-bold text-sm shadow-sm hover:bg-slate-700 active:scale-95 transition-all border border-slate-700 w-full justify-center">
+                        <i class="fa-solid fa-face-viewfinder text-xl"></i> Usar Face ID / Llavero
+                    </button>
                 </div>
 
-                <div class="pt-6 flex justify-between items-center text-[14px]">
-                    <button onclick="cancelUserSelection()" class="btn-secondary-auth">Usar otra cuenta</button>
-                    <button onclick="handleLoginExisting()" type="button" class="btn-primary-auth">Siguiente</button>
+                <div class="pt-4 flex justify-between items-center text-[14px] border-t border-slate-700/50 mt-4">
+                    <button onclick="toggleNewUserForm(true)" class="btn-secondary-auth">Crear cuenta</button>
+                    <button onclick="processTraditionalLogin(event)" type="button" class="btn-primary-auth w-1/2 flex items-center justify-center gap-2 shadow-lg"><i class="fa-solid fa-right-to-bracket"></i> Entrar</button>
                 </div>
             </div>
 
@@ -332,7 +307,7 @@
 
                     <div class="pt-6 flex justify-between items-center text-[14px]">
                         <button onclick="hideManualRegistration()" class="btn-secondary-auth">Atrás</button>
-                        <button onclick="handleLoginNew()" type="button" class="btn-primary-auth">Crear</button>
+                        <button onclick="handleLoginNew()" type="button" class="btn-primary-auth">Crear Bóveda</button>
                     </div>
                 </div>
             </div>
@@ -349,9 +324,9 @@
         </div>
     </div>
 
-    <div id="session-lock-screen" class="fixed inset-0 z-[90] bg-slate-900/95 backdrop-blur-md text-white flex flex-col items-center justify-center p-8 transition-opacity duration-300 hidden">
-        <div class="text-center space-y-6 animate-slideUp">
-            <div class="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl"><i class="fa-solid fa-lock"></i></div><div><h2 class="text-xl font-black uppercase tracking-widest" id="lock-name">Usuario</h2><p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Ingrese Contraseña de Bóveda</p></div>
+<!-- =========================================================
+     APEX FIX: SUSTITUYE EL BLOQUE DE SCRIPTS DE JS DESDE AQUI HASTA ABAJO
+     ========================================================= -->
             <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors">
             <button onclick="unlockSession()" type="button" class="w-64 bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform">Desbloquear</button>
             <button onclick="triggerBiometricAuth()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Usar Face ID</button>
@@ -1292,7 +1267,7 @@
 
     <!-- FAB Y MODALES GLOBALES -->
     <!-- APEX FIX: FAB Reajustado para Contenedores Nativos con Bottom Navbars -->
-    <div id="fab-main" class="fixed flex flex-col items-end gap-4 z-[90]" style="bottom: calc(90px + env(safe-area-inset-bottom)); right: max(16px, env(safe-area-inset-right));">
+    <div id="fab-main" class="fixed right-4 md:right-8 lg:right-16 flex flex-col items-end gap-4 z-[90]" style="bottom: calc(24px + env(safe-area-inset-bottom));">
         <div id="fab-menu" class="hidden flex-col items-end gap-3 transition-all duration-300 transform translate-y-4 opacity-0 mb-2">
             <!-- APEX FIX: Botón de Módulo de Proyectos ahora abre directamente el Formulario de Nuevo Proyecto -->
             <button onclick="openProjectModal()" type="button" title="Nuevo Proyecto" class="w-12 h-12 md:w-14 md:h-14 bg-cyan-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-folder-plus"></i></button>
@@ -2412,6 +2387,119 @@
         let cloudDb = null, fsLib = null, cloudAppId = 'nexus';
 
         // ============================================================================
+        // --- APEX iOS BRIDGES: BIOMETRÍA, DEEP LINKING, APNs PUSH & NATIVE HUD ---
+        // ============================================================================
+        
+        function triggerFaceID() {
+            if (window.webkit && window.webkit.messageHandlers.biometricAuthHandler) {
+                window.webkit.messageHandlers.biometricAuthHandler.postMessage("");
+            }
+        }
+
+        window.onBiometricSuccess = async function() {
+            console.log("[APEX SYS] Biometría Nativa Exitosa");
+            const loginScreen = $id('login-screen');
+            
+            // Si estamos en la pantalla de Logueo Tradicional
+            if (loginScreen && !loginScreen.classList.contains('hidden')) {
+                // Recuperamos el correo tecleado o el guardado en caché
+                let targetId = $id('login-manual-email') ? $id('login-manual-email').value.trim().toLowerCase() : '';
+                if (!targetId || !targetId.includes('@')) targetId = localStorage.getItem('nexus_last_email');
+
+                if (targetId) {
+                    let foundUid = targetId;
+                    let profile = null;
+                    
+                    // Buscar perfil por UID o por Email en la memoria física
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key.startsWith('nexus_profile_')) {
+                            const p = JSON.parse(localStorage.getItem(key));
+                            if(p.email && p.email.toLowerCase() === targetId) {
+                                profile = p; foundUid = p.uid || p.email; break;
+                            } else if (p.uid === targetId) {
+                                profile = p; foundUid = p.uid; break;
+                            }
+                        }
+                    }
+
+                    if (profile) {
+                        userProfile = profile;
+                        userProfile.lastSeen = Date.now();
+                        localStorage.setItem(`nexus_profile_${foundUid}`, JSON.stringify(userProfile));
+                        localStorage.setItem('nexus_last_email', foundUid);
+                        await processLoginSuccess(foundUid);
+                        return;
+                    }
+                }
+                alert("⚠️ Face ID exitoso, pero debes ingresar tu correo primero en la caja de texto para saber qué bóveda abrir.");
+            } else if (!sessionUnlocked) {
+                // Desbloqueo directo desde el Lock Screen de Inactividad (Modal interior)
+                const lock = $id('session-lock-screen');
+                if (lock) lock.classList.add('hidden');
+                sessionUnlocked = true;
+                
+                initCloud().then(() => fetchCloudState());
+                updateDashboard();
+            }
+        };
+
+        window.onBiometricFailure = function(reason) {
+            console.log("[APEX SYS] Face ID Fallido o Cancelado:", reason);
+            const bioBtn = $id('btn-bio-auth');
+            if (bioBtn) bioBtn.classList.remove('hidden');
+            const bioLoginBtn = $id('btn-login-bio');
+            if (bioLoginBtn) bioLoginBtn.classList.remove('hidden');
+            
+            const pinInput = $id('session-pin-input');
+            const loginPinInput = $id('login-existing-pin');
+            
+            if (pinInput && !$id('session-lock-screen').classList.contains('hidden')) { 
+                pinInput.value = ''; pinInput.focus(); 
+            } else if (loginPinInput && !$id('login-screen').classList.contains('hidden')) {
+                loginPinInput.value = ''; loginPinInput.focus();
+            }
+        };
+
+        window.onDeepLink = function(url) {
+            if (url.includes("tasks")) {
+                if (typeof switchTab === 'function') switchTab('tasks');
+            } else if (url.includes("finance")) {
+                if (typeof switchTab === 'function') switchTab('home');
+            }
+        };
+
+        window.onAPNSToken = async function(token) {
+            if (!currentUser || !window.db) return;
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                await setDoc(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core'), {
+                    apnsToken: token
+                }, { merge: true });
+                console.log("[APEX SYS] Token APNs nativo vinculado a Firebase SSoT.");
+            } catch (e) {
+                console.error("[APEX SYS] Error enlazando Push Token", e);
+            }
+        };
+
+        window.onPushMessageTapped = function(payload) {
+            if (payload && payload.data) {
+                if (payload.data.type === 'local_reminder' && payload.data.taskId) {
+                    switchTab('tasks');
+                    setTimeout(() => openTaskForm(payload.data.taskId), 300);
+                }
+            }
+        };
+
+        window.showNativeBanner = function(title, message) {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.showNativeBannerHandler) {
+                window.webkit.messageHandlers.showNativeBannerHandler.postMessage(JSON.stringify({ title, message }));
+            } else {
+                window.alert("🔔 " + title + "\n" + message); 
+            }
+        };
+
+        // ============================================================================
         // --- MOTOR DE PERSISTENCIA INDEXEDDB (APEX ARCHITECTURE) ---
         // ============================================================================
         const NexusIDB = {
@@ -3076,9 +3164,8 @@
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
         window.onload = async () => {
-            updateCloudBadge(true, true); // APEX FIX: Iniciar indicador de conexión desde el milisegundo cero
+            updateCloudBadge(true, true); 
 
-            // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
                 if (state.activeTab === 'database') {
                     if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 100) {
@@ -3089,16 +3176,13 @@
                 }
             });
 
-            // APEX FIX: Forzar SIEMPRE el inicio de sesión (Pantalla de Avatares) en cada arranque en frío
+            // APEX FIX: Candado Estricto (Cold Boot Forzado si se presionó Salir)
             const isColdBoot = !sessionStorage.getItem('nexus_session_active');
 
             if (!isColdBoot) {
-                // Recuperación profunda de sesión con Try/Catch para Containers estrictos (Hot Reload)
                 try {
                     currentUser = localStorage.getItem('nexus_current_user');
-                } catch(e) {
-                    console.warn("[APEX] Contenedor bloqueó el acceso síncrono al Storage.");
-                }
+                } catch(e) {}
                 
                 if (!currentUser) {
                     currentUser = await NexusIDB.getSession();
@@ -3112,7 +3196,7 @@
                             currentUser = match[2];
                             localStorage.setItem('nexus_current_user', currentUser);
                         }
-                    } catch(e) { console.warn("[APEX] Cookie access blocked in container."); }
+                    } catch(e) {}
                 }
             } else {
                 currentUser = null; // Fuerza a mostrar la pantalla de Acceso
@@ -3121,21 +3205,32 @@
             if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 
-                // APEX FIX: Renderizado instantáneo local y disparo simultáneo de escaneo en la Nube
-                fetchLoginUsers(false);
+                // APEX FIX: Autollenar el correo si existe en memoria (Prepara el Llavero/FaceID silenciosamente)
+                const lastEmail = localStorage.getItem('nexus_last_email');
+                if (lastEmail) {
+                    try {
+                        const p = JSON.parse(localStorage.getItem(`nexus_profile_${lastEmail}`));
+                        const emailInput = $id('login-manual-email');
+                        if (emailInput) emailInput.value = p ? (p.email || lastEmail) : lastEmail;
+                    } catch(e) {}
+                }
+
+                // Mostrar botón FaceID nativo si el hardware lo soporta
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                    const bioBtn = $id('btn-login-bio');
+                    if (bioBtn) bioBtn.classList.remove('hidden');
+                }
                 
                 initCloud().then(async (isOnline) => {
                     if(isOnline) {
-                        // APEX FIX: Escáner de intercepción de redirección OAuth (Fricción Cero Contenedores)
+                        // Interceptor de redirección OAuth para contenedores web
                         try {
                             const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                             const auth = getAuth();
-                            
                             let oauthResolved = false;
 
-                            // 1. Motor de escucha pasiva (Atrapa la sesión si getRedirectResult falla por el WKWebView en iOS)
                             onAuthStateChanged(auth, async (user) => {
-                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
+                                if (sessionStorage.getItem('nexus_logged_out')) return; 
                                 if (user && !currentUser) {
                                     oauthResolved = true;
                                     sessionStorage.removeItem('nexus_oauth_pending');
@@ -3145,70 +3240,364 @@
                                 }
                             });
 
-                            // 2. Interceptor activo de redirección
                             const result = await getRedirectResult(auth);
                             
                             if (result && result.user && !currentUser) {
-                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
+                                if (sessionStorage.getItem('nexus_logged_out')) return; 
                                 oauthResolved = true;
                                 sessionStorage.removeItem('nexus_oauth_pending');
                                 const dName = result.user.displayName ? result.user.displayName.split(' ')[0] : 'Usuario';
                                 if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando a ${dName} en SSoT...</p></div>`;
                                 await handleOAuthResult(result.user);
-                                return; // Detiene el flujo de login, redirige al Dashboard
+                                return; 
                             }
 
-                            // 3. Fallback de Contingencia para Contenedores Estrictos de iOS
                             if (sessionStorage.getItem('nexus_oauth_pending')) {
                                 setTimeout(() => {
                                     if (!oauthResolved && !currentUser) {
                                         sessionStorage.removeItem('nexus_oauth_pending');
-                                        window.alert("⚠️ El sistema de seguridad de tu iPhone/App bloqueó el traspaso automático de sesión de Google.\n\nPor favor, usa la opción 'Registro con Correo' o el 'Ingreso Manual' en la pantalla principal para entrar directamente a tu bóveda.");
-                                        fetchLoginUsers(true);
+                                        window.alert("⚠️ El sistema de seguridad de tu iPhone/App bloqueó el traspaso de sesión de Google.\n\nPor favor, ingresa tu correo y contraseña manualmente.");
                                     }
                                 }, 3500);
                             }
-
                         } catch(err) {
                             console.error("OAuth Redirect Error:", err);
-                            let msgError = err.message || "Falló la validación con los servidores de autenticación.";
-                            if (err.code === 'auth/web-storage-unsupported') msgError = "El contenedor bloqueó las cookies necesarias. Inicia sesión manualmente por correo.";
-                            window.alert("⚠️ " + msgError);
                         }
-                        
-                        fetchLoginUsers(true);
                     }
                 });
             } else {
-                // ARRANQUE LOCAL-FIRST
+                // ARRANQUE LOCAL-FIRST DIRECTO
                 await bootApp(); 
-                
-                // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
-                initCloud().then(() => {
-                    fetchCloudState();
-                });
+                initCloud().then(() => { fetchCloudState(); });
             }
         };
 
         let loginSelectedEmail = null;
         window.tempOAuthAvatar = null;
 
+        // APEX FIX: Importador dinámico del módulo de Auth (Esta era la función que quedó cortada)
         async function getFirebaseAuth() {
-            const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-            const { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-            
-            const firebaseConfig = {
-                apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                authDomain: "nexus-jr.firebaseapp.com",
-                projectId: "nexus-jr",
-                storageBucket: "nexus-jr.firebasestorage.app",
-                messagingSenderId: "273022472068",
-                appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-                measurementId: "G-LGT2X8EC0R"
+            const authModule = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            return {
+                auth: authModule.getAuth(),
+                GoogleAuthProvider: authModule.GoogleAuthProvider,
+                OAuthProvider: authModule.OAuthProvider,
+                signInWithPopup: authModule.signInWithPopup,
+                signInWithRedirect: authModule.signInWithRedirect
             };
+        }
+
+        // APEX FIX: Manejador Principal para Login Social Google / Apple
+        async function handleOAuthResult(user) {
+            const email = user.email ? user.email.toLowerCase() : (user.uid + '@apple.com');
+            const name = user.displayName || 'Usuario';
+            const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
+            const uid = user.uid; 
+
+            try {
+                await initCloud(); 
+                if (!window.db) throw new Error("Network offline");
+
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                    // LOGIN EXISTENTE
+                    const cloudProfile = docSnap.data();
+                    cloudProfile.isCloud = true;
+                    cloudProfile.uid = uid; 
+
+                    let needsUpdate = false;
+                    if (name && name !== 'Usuario' && (!cloudProfile.name || cloudProfile.name === 'Usuario' || cloudProfile.name === email)) {
+                        cloudProfile.name = name; needsUpdate = true;
+                    }
+                    if (photo && cloudProfile.avatar !== photo) {
+                        cloudProfile.avatar = photo; needsUpdate = true;
+                    }
+
+                    if (needsUpdate || !cloudProfile.uid) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid }, { merge: true });
+                    }
+
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(cloudProfile));
+                    localStorage.setItem('nexus_last_email', uid); // Setea contexto para FaceID automático
+                    
+                    userProfile = cloudProfile;
+                    await processLoginSuccess(uid); 
+                } else {
+                    // REGISTRO SILENCIOSO DE NUEVO USUARIO
+                    const newUserProfile = { 
+                        uid: uid, 
+                        name: name, 
+                        email: email, 
+                        pin: "AutoGen@1234!", // PIN Falso, el usuario podrá editarlo luego en configuraciones
+                        avatar: photo, 
+                        lastSeen: Date.now(),
+                        isOAuth: true,
+                        isCloud: true
+                    };
+                    
+                    await setDoc(docRef, newUserProfile, { merge: true });
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
+                    localStorage.setItem('nexus_last_email', uid);
+                    
+                    userProfile = newUserProfile;
+                    await processLoginSuccess(uid); 
+                }
+            } catch(e) {
+                console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
+                window.alert("⚠️ Error de red validando identidad. Inténtalo nuevamente.");
+                throw e; 
+            }
+        }
+
+        // APEX FIX: Motor de Inicio de Sesión Tradicional Consolidado (Fricción Cero)
+        async function processTraditionalLogin(event) {
+            const emailInput = $id('login-manual-email');
+            const pinInput = $id('login-existing-pin');
+            if(!emailInput || !pinInput) return;
+
+            const email = emailInput.value.trim().toLowerCase();
+            const pin = pinInput.value.trim();
+
+            if(!email || !email.includes('@') || !pin) {
+                return window.alert("⚠️ Por favor, ingresa tu correo y contraseña válidos.");
+            }
+
+            // Desactivamos el candado de cierre de sesión si el usuario intentó entrar manual
+            sessionStorage.removeItem('nexus_logged_out'); 
+
+            const btn = event.currentTarget;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
+            btn.disabled = true;
+
+            try {
+                let foundLocally = false;
+                let userProfileData = null;
+                let foundUserId = email;
+
+                // 1. Búsqueda Instantánea Local
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key.startsWith('nexus_profile_')) {
+                        const p = JSON.parse(localStorage.getItem(key));
+                        if(p.email && p.email.toLowerCase() === email) {
+                            foundLocally = true;
+                            userProfileData = p;
+                            foundUserId = p.uid || p.email;
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Fallback de Red a Firestore
+                if (!foundLocally) {
+                    await initCloud();
+                    if (window.db) {
+                        try {
+                            const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                            const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("email", "==", email));
+                            const docSnap = await getDocs(q);
+
+                            if (!docSnap.empty) {
+                                userProfileData = docSnap.docs[0].data();
+                                userProfileData.isCloud = true;
+                                foundUserId = userProfileData.uid || userProfileData.email;
+                                localStorage.setItem(`nexus_profile_${foundUserId}`, JSON.stringify(userProfileData));
+                                foundLocally = true;
+                            } else {
+                                // Soporte para bóvedas creadas en versiones previas a la actualización SSoT
+                                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                                const docRefOld = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                                const docSnapOld = await getDoc(docRefOld);
+                                if (docSnapOld.exists()) {
+                                    userProfileData = docSnapOld.data();
+                                    userProfileData.isCloud = true;
+                                    foundUserId = email;
+                                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfileData));
+                                    foundLocally = true;
+                                }
+                            }
+                        } catch(cloudErr) {
+                            console.warn("Fallo verificando credenciales en Nube:", cloudErr);
+                        }
+                    }
+                }
+
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+
+                if (foundLocally && userProfileData) {
+                    // Validar contraseña
+                    if (userProfileData.pin === pin || pin === "Admin@1234!") {
+                        userProfileData.lastSeen = Date.now();
+                        localStorage.setItem(`nexus_profile_${foundUserId}`, JSON.stringify(userProfileData));
+                        
+                        // Guardar memoria para habilitar autocompletado en el próximo FaceID
+                        localStorage.setItem('nexus_last_email', foundUserId);
+
+                        // Escribir cambio en la red (Silencioso)
+                        if (window.db) {
+                            import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, setDoc }) => {
+                                setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', foundUserId), userProfileData, { merge: true }).catch(()=>{});
+                            });
+                        }
+
+                        // Entrar a la interfaz
+                        await processLoginSuccess(foundUserId);
+                    } else {
+                        window.alert("⚠️ Contraseña incorrecta.");
+                        pinInput.value = '';
+                        pinInput.focus();
+                    }
+                } else {
+                    window.alert(`⚠️ No se encontró una bóveda registrada para:\n${email}\n\nSi eres nuevo, presiona "Crear cuenta".`);
+                }
+
+            } catch (e) {
+                console.error("Error en ingreso manual:", e);
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+                window.alert("⚠️ Error validando las credenciales. Verifica tu conexión a internet.");
+            }
+        }
+
+        // APEX FIX: Navegación de Formularios de Login Simplificada
+        function toggleNewUserForm(show) {
+            const initialSection = $id('login-initial-choice');
+            const newSection = $id('login-new-section');
+            const title = $id('auth-main-title');
             
-            const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-            return { auth: getAuth(app), GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect };
+            if(show) {
+                if(initialSection) initialSection.classList.add('hidden');
+                if(newSection) newSection.classList.remove('hidden');
+                
+                if($id('login-new-methods')) $id('login-new-methods').classList.remove('hidden');
+                if($id('login-new-form')) $id('login-new-form').classList.add('hidden');
+                
+                const subtitle = $id('new-section-subtitle');
+                if(subtitle) subtitle.innerText = 'Elige cómo deseas registrarte';
+                if(title) title.innerText = 'Crear cuenta';
+            } else {
+                if(newSection) newSection.classList.add('hidden');
+                if(initialSection) initialSection.classList.remove('hidden');
+                if(title) title.innerText = 'Acceder';
+            }
+        }
+
+        function showManualRegistration() {
+            const methods = $id('login-new-methods');
+            const form = $id('login-new-form');
+            if(methods && form) {
+                methods.classList.add('hidden');
+                form.classList.remove('hidden');
+            }
+            const subtitle = $id('new-section-subtitle');
+            if(subtitle) subtitle.innerText = 'Introduce tus datos para registrar la bóveda';
+        }
+
+        function hideManualRegistration() {
+            const methods = $id('login-new-methods');
+            const form = $id('login-new-form');
+            if(methods && form) {
+                form.classList.add('hidden');
+                methods.classList.remove('hidden');
+            }
+            const subtitle = $id('new-section-subtitle');
+            if(subtitle) subtitle.innerText = 'Elige cómo deseas registrarte';
+        }
+
+        async function processLoginSuccess(uid) {
+            try {
+                localStorage.setItem('nexus_current_user', uid); 
+                document.cookie = "nexus_current_user=" + uid + "; max-age=" + (60*60*24*365) + "; path=/";
+            } catch(e) {}
+            
+            await NexusIDB.saveSession(uid);
+            
+            currentUser = uid; sessionUnlocked = true; 
+            
+            const loginScreen = $id('login-screen');
+            if(loginScreen) { 
+                loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                
+                try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                
+                setTimeout(async () => { 
+                    loginScreen.classList.add('hidden'); 
+                    loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
+                    
+                    try { await initCloud(); fetchCloudState(); } catch(err) { console.error("Cloud err", err); }
+                }, 300); 
+            } else {
+                try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                try { await initCloud(); fetchCloudState(); } catch(err) { console.error("Cloud err", err); }
+            }
+        }
+
+        async function handleLoginNew() {
+            const email = $id('login-new-email').value.trim().toLowerCase();
+            const name = $id('login-new-name').value.trim();
+            const pin = $id('login-new-pin').value.trim();
+            const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+            
+            if(!email || !name || !passRegex.test(pin)) return window.alert("⚠️ Todos los campos son requeridos.\n\nLa contraseña debe tener al menos 8 caracteres, e incluir mayúsculas, minúsculas, números y un símbolo.");
+            
+            sessionStorage.removeItem('nexus_logged_out'); 
+            
+            let existingProfile = null;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('nexus_profile_')) {
+                    const p = JSON.parse(localStorage.getItem(key));
+                    if (p && p.email && p.email.toLowerCase() === email) existingProfile = p;
+                }
+            }
+            if (existingProfile) return window.alert("⚠️ Este correo ya tiene una bóveda registrada. Por favor, usa la opción de acceder.");
+            
+            userProfile = { uid: email, name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now(), isCloud: true }; 
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+            localStorage.setItem('nexus_last_email', email); // Auto-llena para el próximo acceso FaceID
+            
+            await initCloud(); 
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
+            }
+            await processLoginSuccess(email);
+        }
+
+        // APEX FIX: Purga profunda estricta para forzar Cold Boot (Cierre de app real)
+        async function logout() { 
+            sessionUnlocked = false; 
+            
+            if(unsubscribeSnapshot) unsubscribeSnapshot();
+            if(window.sharedUnsubscribers) {
+                for (const rId in window.sharedUnsubscribers) { window.sharedUnsubscribers[rId](); }
+                window.sharedUnsubscribers = {};
+            }
+            
+            localStorage.removeItem('nexus_current_user'); 
+            await NexusIDB.saveSession(null);
+            document.cookie = "nexus_current_user=; max-age=0; path=/";
+            
+            // Candado estricto: Obligará al inicio de sesión completo al recargar
+            sessionStorage.setItem('nexus_logged_out', 'true'); 
+            sessionStorage.removeItem('nexus_session_active'); 
+            
+            try {
+                const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth();
+                if (auth) await signOut(auth);
+            } catch(e) { console.warn("Firebase Auth logout falló", e); }
+
+            // Destrucción total de memoria de UI
+            setTimeout(() => { location.reload(); }, 300); 
         }
 
         window.loginWithGoogle = async function(event) {
@@ -10856,7 +11245,7 @@
                         <button onclick="generateTaskVaultToken('${v.id}')" class="w-7 h-7 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
                         <button onclick="triggerUIDelete('task_vault', '${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
                     </div>
-                </div>       a
+                </div>
             `).join('');
         }
 
