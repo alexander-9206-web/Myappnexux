@@ -3079,53 +3079,59 @@
                 }
             });
 
-            // APEX FIX: Interceptar el resultat del Redirect de Google per a contenidors iOS
-            let isRedirectResolved = false;
+            // APEX FIX: Arquitectura de Arranque Auth Estricta y Bloqueante (Elimina Bucle de Amnesia en iOS)
             try {
-                await initCloud(true); // Inicialitzar sense Login Anònim per no trencar el flux
-                const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await initCloud(true); // Inicializar sin Login Anónimo preventivamente
+                const { getAuth, getRedirectResult, onAuthStateChanged, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth();
 
-                // APEX FIX: Escudo de intercepción activo. Atrapa la sesión si getRedirectResult falla por el ciclo de vida del WebView
-                onAuthStateChanged(auth, async (user) => {
-                    if (user && !user.isAnonymous) {
-                        if (!currentUser || currentUser !== user.uid) {
-                            const ls = $id('login-screen');
-                            if (ls && !ls.classList.contains('hidden')) {
-                                const title = $id('auth-main-title');
-                                if (title) title.innerText = 'Construyendo Bóveda...';
-                                const btns = document.querySelectorAll('.btn-social-auth');
-                                btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...');
-                            }
-                            await finalizeAuth(user);
-                        }
-                    }
-                });
+                // 1. Forzar persistencia profunda (Evita que el WebView de iOS olvide quién hizo el Redirect)
+                await setPersistence(auth, browserLocalPersistence);
 
-                const result = await getRedirectResult(auth);
-                if (result && result.user) {
-                    isRedirectResolved = true;
-                    // Ya manejado por onAuthStateChanged, pero por redundancia de seguridad:
-                    if (!currentUser || currentUser !== result.user.uid) {
-                        await finalizeAuth(result.user);
+                let activeUser = null;
+
+                // 2. Evaluar Redirect (Prioridad Absoluta)
+                try {
+                    const result = await getRedirectResult(auth);
+                    if (result && result.user) activeUser = result.user;
+                } catch(e) {
+                    console.error("[APEX SYS] Fricción con el Redirect de Google:", e);
+                }
+
+                // 3. Si no hay redirect, evaluar el estado de la caché en la nube (Promesa Única)
+                if (!activeUser) {
+                    activeUser = await new Promise((resolve) => {
+                        const unsubscribe = onAuthStateChanged(auth, (user) => {
+                            unsubscribe(); // Se auto-destruye tras el primer aviso, evitando loops
+                            resolve(user);
+                        });
+                        // Timeout de seguridad extrema por si la red está colgada
+                        setTimeout(() => resolve(auth.currentUser), 3000);
+                    });
+                }
+
+                // 4. Si detectamos un usuario válido, finalizar autenticación y bloquear continuación
+                if (activeUser && !activeUser.isAnonymous) {
+                    const ls = $id('login-screen');
+                    if (ls && !ls.classList.contains('hidden')) {
+                        const title = $id('auth-main-title');
+                        if (title) title.innerText = 'Construyendo Bóveda...';
+                        document.querySelectorAll('.btn-social-auth').forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...');
                     }
+                    await finalizeAuth(activeUser);
+                    return; // Fin de la ejecución. ProcessLoginSuccess arrancará la UI.
                 }
+
             } catch(e) {
-                console.error("Fricción con el Redirect de Google:", e);
-                if (e.code !== 'auth/redirect-cancelled-by-user') {
-                    alert("⚠️ Error al validar la autenticación de Google. Por favor, intenta de nuevo.");
-                }
+                console.error("[APEX SYS] Error crítico en el motor de arranque Auth:", e);
             }
 
-            if (isRedirectResolved) return; // Evita executar la càrrega doble
-
-            // Iniciem mode anònim si no hi ha redirect pendent
-            try { 
-                const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                await signInAnonymously(getAuth()); 
-            } catch(e) {}
-
-            // APEX FIX: Inicio de Sesión Estándar (Persistencia Real SSoT)
+            // ====================================================================
+            // 5. MODO FALLBACK / USUARIO DESCONECTADO
+            // Si el código llega hasta aquí, significa que NO hay sesión válida con Google/Email.
+            // Procedemos a buscar sesión en la base de datos local (Modo Offline / PWA)
+            // ====================================================================
+            
             try { currentUser = localStorage.getItem('nexus_current_user'); } catch(e) {}
             
             if (!currentUser) {
@@ -3149,20 +3155,28 @@
             }
 
             if (!currentUser) {
-                const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
+                // Usuario definitivamente desconectado -> Mostrar Pantalla de Login
+                const ls = $id('login-screen'); 
+                if(ls) { 
+                    ls.classList.add('opacity-0'); 
+                    ls.classList.remove('hidden'); 
+                    requestAnimationFrame(() => ls.classList.remove('opacity-0')); 
+                }
                 
-                // Pre-preencher email se existir
                 const lastEmail = localStorage.getItem('nexus_last_email');
                 if (lastEmail) {
                     const emailInput = $id('auth-email');
                     if (emailInput) emailInput.value = lastEmail;
                 }
 
-                // Iniciar motor da nuvem para preparar a autenticação
-                initCloud();
+                // Ahora sí es seguro invocar al usuario Anónimo para leer bases públicas (sin sobrescribir Google)
+                try { 
+                    const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    await signInAnonymously(getAuth()); 
+                } catch(e) {}
 
             } else {
-                // ARRANQUE LOCAL-FIRST DIRECTO
+                // ARRANQUE LOCAL-FIRST DIRECTO (Sesión recordada)
                 await bootApp(); 
                 initCloud().then(() => { fetchCloudState(); });
             }
@@ -3240,9 +3254,13 @@
         window.performGoogleLogin = async function() {
             try {
                 // APEX FIX: Canvi de Popup a Redirect per suport natiu en contenidors iOS (WKWebView)
-                const { getAuth, GoogleAuthProvider, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, GoogleAuthProvider, signInWithRedirect, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 await initCloud(true);
                 const auth = getAuth();
+                
+                // APEX FIX CRÍTICO: Anclar persistencia antes de redirigir para evitar amnesia en iOS WebView
+                await setPersistence(auth, browserLocalPersistence);
+                
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' }); 
                 
