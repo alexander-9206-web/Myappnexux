@@ -2,8 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <!-- APEX FIX: Removido interactive-widget=resizes-content que causaba bugs de ancho en iOS -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <title>NEXUS AR FINANCE</title>
     
     <!-- Meta etiquetas nativas para iOS (PWA Fullscreen) -->
@@ -46,20 +45,20 @@
            ========================================== */
         /* 1. Prevenir Desbordamiento Horizontal y Efecto Rebote */
         html, body {
-            max-width: 100% !important;
+            max-width: 100vw !important;
             overflow-x: hidden !important;
             width: 100% !important;
             -webkit-text-size-adjust: 100%;
-            overscroll-behavior-x: none;
         }
 
         /* 2. Restricción Absoluta de Contenedores Modales (Fondo Oscuro) */
-        /* Eliminamos height: 100dvh para evitar colapsos visuales al abrir el teclado en iOS */
         .fixed.inset-0:not(.hidden) {
+            height: 100dvh !important; /* Altura dinámica real del dispositivo nativo */
+            width: 100vw !important;
             padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) !important;
             box-sizing: border-box !important;
             display: flex !important;
-            align-items: center !important;
+            align-items: center !important; /* Forzar Burbuja Central, elimina el Bottom Sheet que se oculta */
             justify-content: center !important;
         }
 
@@ -71,18 +70,18 @@
         #ui-confirm-modal > div,
         #ui-delete-modal > div,
         #ui-prompt-modal > div {
-            max-height: 85vh !important; /* Se usa vh en vez de dvh para fluir orgánicamente con el teclado de iOS */
-            max-width: calc(100vw - 2rem) !important;
-            margin: auto !important;
+            max-height: 100% !important; /* Nunca exceder el 100% del espacio con padding */
+            max-width: 100% !important;
+            margin: auto !important; /* Centrado gravitacional estricto */
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
             overscroll-behavior: contain !important;
+            display: flex !important;
+            flex-direction: column !important;
         }
 
+        /* Ocultar barra de scroll para estética nativa */
         .fixed.inset-0 > div::-webkit-scrollbar { display: none; }
-
-        /* Espacio de seguridad inferior para evitar que el Menú Flotante (FAB) tape el último elemento */
-        .pb-safe { padding-bottom: calc(max(1.25rem, env(safe-area-inset-bottom)) + 5.5rem) !important; }
 
         /* 4. Formateo Extremo para Móviles (< 640px) */
         @media (max-width: 640px) {
@@ -91,26 +90,26 @@
                 font-size: 16px !important; 
             }
             
-            /* Compactación de cajas y recuperación de curvas */
+            /* Compactación de cajas y recuperación de curvas en 360 grados */
             .fixed.inset-0 > div[class*="theme-card"],
             .fixed.inset-0 > div[class*="auth-container"] {
-                padding: 1.25rem !important; 
-                border-radius: 1.5rem !important; 
+                padding: 1.25rem !important; /* Reducción de padding de 32px a 20px */
+                border-radius: 1.5rem !important; /* Forzar bordes redondos completos, anula el rounded-t */
             }
 
+            /* Compactación de formularios largos para evitar Scroll masivo */
             .space-y-6 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
             .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem !important; }
             .grid.gap-4 { gap: 0.75rem !important; }
 
-            /* Numpad (Calculadora): Anclada al bottom con respeto al Home Indicator */
+            /* Numpad (Calculadora): Excepción. Este SÍ debe ser Bottom Sheet */
             #numpad-modal {
                 align-items: flex-end !important;
-                padding: 0 !important; 
-                padding-bottom: env(safe-area-inset-bottom) !important;
+                padding: 0 !important; /* Sin márgenes para anclarse abajo */
             }
             #numpad-modal > div {
                 max-width: 100% !important;
-                max-height: 85vh !important;
+                max-height: 85dvh !important;
                 border-radius: 1.5rem 1.5rem 0 0 !important;
                 margin: 0 !important;
             }
@@ -325,13 +324,12 @@
         </div>
     </div>
 
-    <!-- PANTALLA DE BLOQUEO POR INACTIVIDAD -->
-    <div id="session-lock-screen" class="fixed inset-0 z-[90] bg-slate-900/95 backdrop-blur-md text-white flex flex-col items-center justify-center p-8 transition-opacity duration-300 hidden">
-        <div class="text-center space-y-6 animate-slideUp">
-            <div class="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl"><i class="fa-solid fa-lock"></i></div><div><h2 class="text-xl font-black uppercase tracking-widest" id="lock-name">Usuario</h2><p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Ingrese Contraseña de Bóveda</p></div>
-            <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors" autocomplete="current-password">
+<!-- =========================================================
+     APEX FIX: SUSTITUYE EL BLOQUE DE SCRIPTS DE JS DESDE AQUI HASTA ABAJO
+     ========================================================= -->
+            <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors">
             <button onclick="unlockSession()" type="button" class="w-64 bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform">Desbloquear</button>
-            <button onclick="triggerFaceID()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Face ID / Llavero</button>
+            <button onclick="triggerBiometricAuth()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Usar Face ID</button>
             <button onclick="logout()" type="button" class="block w-full text-[10px] text-slate-500 uppercase font-bold mt-8 hover:text-white">Cambiar de Cuenta</button>
         </div>
     </div>
@@ -359,24 +357,24 @@
             <div class="wealth-card md:p-10 md:rounded-[3rem]">
                 <div class="relative z-10 space-y-8 md:space-y-10">
                     <div class="flex justify-between items-start">
-                        <div class="flex-1 min-w-0 pr-4"> <!-- APEX FIX: min-w-0 anula el estiramiento provocado por cifras largas -->
+                        <div>
                             <div class="flex items-center gap-2 mb-1">
-                                <p id="wealth-title" class="text-[9px] md:text-xs font-black text-white/50 uppercase tracking-widest truncate">Patrimonio Global Unificado</p>
+                                <p id="wealth-title" class="text-[9px] md:text-xs font-black text-white/50 uppercase tracking-widest">Patrimonio Global Unificado</p>
                             </div>
-                            <!-- APEX FIX: Contenedor dividido para Patrimonio Dual con Text Truncation -->
+                            <!-- APEX FIX: Contenedor dividido para Patrimonio Dual -->
                             <div id="wealth-dual-container" class="flex items-end gap-6 mt-2">
-                                <div class="flex-1 min-w-0">
-                                    <h2 id="net-worth" class="text-2xl md:text-4xl lg:text-5xl font-black tabular-nums tracking-tighter truncate">$0</h2>
-                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Líquido en <span id="base-curr-label" class="text-white">COP</span></p>
+                                <div class="flex-1">
+                                    <h2 id="net-worth" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter">$0</h2>
+                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Líquido en <span id="base-curr-label" class="text-white">COP</span></p>
                                 </div>
-                                <div id="wealth-alt-block" class="flex-1 min-w-0 border-l border-white/20 pl-4 md:pl-6">
-                                    <h2 id="net-worth-alt" class="text-2xl md:text-4xl lg:text-5xl font-black tabular-nums tracking-tighter text-white/70 truncate">$0</h2>
-                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Líquido en <span id="alt-curr-label" class="text-white">USD</span></p>
+                                <div id="wealth-alt-block" class="flex-1 border-l border-white/20 pl-6">
+                                    <h2 id="net-worth-alt" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter text-white/70">$0</h2>
+                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Líquido en <span id="alt-curr-label" class="text-white">USD</span></p>
                                 </div>
                             </div>
-                            <div id="wealth-single-container" class="hidden mt-2 min-w-0 w-full">
-                                <h2 id="net-worth-single" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter truncate">$0</h2>
-                                <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Convertido a <span id="base-curr-label-single" class="text-white">COP</span></p>
+                            <div id="wealth-single-container" class="hidden mt-2">
+                                <h2 id="net-worth-single" class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter">$0</h2>
+                                <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Convertido a <span id="base-curr-label-single" class="text-white">COP</span></p>
                             </div>
                         </div>
                         <div class="text-right shrink-0"><button onclick="showScoreModal()" type="button" class="bg-white/10 hover:bg-white/20 transition-colors px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 shadow-sm">Score: <span id="nexus-score" class="text-emerald-400">--</span> <i class="fa-solid fa-circle-info text-[8px] ml-1 opacity-50"></i></button></div>
@@ -445,7 +443,7 @@
         <section id="tab-projects" class="tab-content space-y-8 pb-12">
             <div id="projects-main-view" class="space-y-6">
                 <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text hover:bg-slate-50 transition-colors"><i class="fa-solid fa-house text-cyan-600"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-cyan-600">Proyectos</h2></div>
+                    <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text hover:bg-slate-50 transition-colors"><i class="fa-solid fa-house text-cyan-600"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-cyan-600">Proyectos</h2></div>
                     <button onclick="openProjectModal()" type="button" class="w-10 h-10 bg-cyan-500 text-white rounded-full shadow-lg shadow-cyan-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div id="projects-kpi-container" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4"></div>
@@ -459,7 +457,7 @@
 
         <!-- 🟢 TAB ESCÁNER (RESTAURADO) -->
         <section id="tab-scanner" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-blue-400">Escáner IA</h2></div>
+            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-blue-400">Escáner IA</h2></div>
 
             <div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col items-center justify-center space-y-6 text-center">
                 <div class="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center text-3xl shadow-sm">
@@ -484,7 +482,7 @@
 
         <!-- 🟢 TAB IMPUESTOS -->
         <section id="tab-taxes" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-emerald-700">Impuestos Fiscales</h2></div>
+            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-emerald-700">Impuestos Fiscales</h2></div>
             
             <div class="bg-emerald-50 p-6 md:p-8 rounded-[2rem] border border-emerald-100 shadow-sm relative overflow-hidden">
                 <i class="fa-solid fa-scale-balanced absolute right-[-10px] bottom-[-10px] text-8xl md:text-[10rem] text-emerald-500 opacity-10"></i>
@@ -563,7 +561,7 @@
 
         <!-- 🟢 TAB AUDITORÍA SSoT -->
         <section id="tab-database" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-purple-600">Auditoría SSoT</h2></div>
+            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-purple-600">Auditoría SSoT</h2></div>
             <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4">
                 <div class="flex gap-2 bg-slate-50 p-1 rounded-xl"><button onclick="setDbQuickFilter('hoy')" type="button" id="db-qf-hoy" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Hoy</button><button onclick="setDbQuickFilter('semana')" type="button" id="db-qf-semana" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Sem.</button><button onclick="setDbQuickFilter('mes')" type="button" id="db-qf-mes" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Mes</button><button onclick="setDbQuickFilter('all')" type="button" id="db-qf-all" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-slate-400">Todo</button></div>
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 md:gap-4">
@@ -610,7 +608,7 @@
 
         <!-- 🟢 TAB ANALÍTICA -->
         <section id="tab-analysis" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-indigo-600">Analítica Pro</h2></div><select id="analysis-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 outline-none cursor-pointer shadow-sm"></select></div>
+            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-600">Analítica Pro</h2></div><select id="analysis-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 outline-none cursor-pointer shadow-sm"></select></div>
             <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Periodo de Análisis: <span id="stat-period-label" class="text-indigo-500"></span></p>
             
             <div id="stat-kpi-container" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
@@ -704,13 +702,13 @@
 
         <!-- 🟢 TAB FINANZAS UNIFICADAS -->
         <section id="tab-finances" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-blue-600">Finanzas Personales</h2></div><select id="finances-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-100 outline-none cursor-pointer shadow-sm"></select></div>
+            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-blue-600">Finanzas Personales</h2></div><select id="finances-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-100 outline-none cursor-pointer shadow-sm"></select></div>
             <div id="finances-unified-content" class="space-y-6"></div>
         </section>
 
         <!-- 🟢 TAB DIRECTIVA / REPORT -->
         <section id="tab-report" class="tab-content space-y-8 pb-12">
-            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-emerald-600">Junta Directiva</h2></div><select id="report-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 outline-none cursor-pointer shadow-sm"></select></div>
+            <div class="flex items-center justify-between mb-2"><div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-emerald-600">Junta Directiva</h2></div><select id="report-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-100 outline-none cursor-pointer shadow-sm"></select></div>
             <div class="bg-emerald-50 p-6 md:p-8 rounded-[2rem] border border-emerald-100 shadow-sm relative overflow-hidden"><i class="fa-solid fa-bullseye absolute right-[-10px] bottom-[-10px] text-8xl md:text-[10rem] text-emerald-500 opacity-10"></i><h3 class="text-[10px] md:text-xs font-black uppercase text-emerald-800 tracking-widest mb-4 relative z-10">Resumen Ejecutivo (<span id="rep-base-curr">COP</span>)</h3><div id="rep-narrative" class="text-xs md:text-sm text-emerald-900 font-medium leading-relaxed space-y-4 relative z-10"></div></div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div onclick="switchTab('accounts')" class="theme-card p-6 rounded-[2rem] border shadow-sm text-center flex flex-col justify-center cursor-pointer hover:border-emerald-300 transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-2 theme-text">Activos</p><h4 id="rep-assets" class="text-lg md:text-2xl font-black theme-text tabular-nums">--</h4><p id="rep-assets-text" class="text-[7px] md:text-[9px] text-slate-400 mt-2 leading-tight"></p></div>
@@ -727,7 +725,7 @@
         <!-- 🟢 TAB PRESUPUESTOS Y METAS -->
         <section id="tab-budget" class="tab-content space-y-8 pb-12">
             <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-orange-500">Presupuestos</h2></div>
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-orange-500">Presupuestos</h2></div>
                 <div class="flex gap-2 items-center">
                     <select id="budget-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-orange-50 text-orange-600 px-3 py-1.5 rounded-lg border border-orange-100 outline-none cursor-pointer shadow-sm"></select>
                     <button onclick="openCatBudgetForm()" type="button" title="Presupuesto por Categoría" class="w-10 h-10 bg-orange-100 text-orange-600 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-chart-pie"></i></button>
@@ -740,7 +738,7 @@
         <!-- 🟢 TAB CONFIGURACIÓN -->
         <section id="tab-settings" class="tab-content space-y-8 pb-20">
             <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter theme-text">Configuración</h2></div>
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase theme-text">Configuración</h2></div>
                 <button onclick="openForm('income')" type="button" class="w-10 h-10 bg-emerald-500 text-white rounded-full shadow-lg shadow-emerald-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1013,7 +1011,7 @@
         <!-- 🟢 TAB CUENTAS -->
         <section id="tab-accounts" class="tab-content space-y-8 pb-12">
             <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter theme-text">Bóvedas</h2></div>
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter theme-text">Bóvedas</h2></div>
                 <div class="flex gap-2">
                     <button onclick="openReorderModal()" type="button" title="Reordenar Bóvedas" class="w-10 h-10 bg-slate-100 text-slate-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-arrow-down-up-across-line"></i></button>
                     <button onclick="openLinkSharedModal()" type="button" class="w-10 h-10 bg-purple-600 text-white rounded-full shadow-lg shadow-purple-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-link"></i></button>
@@ -1028,7 +1026,7 @@
         <section id="tab-loans" class="tab-content space-y-8">
             <div id="loans-view-list" class="space-y-6">
                 <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase text-amber-600 tracking-tighter">Pasivos (<span class="currency-label">COP</span>)</h2></div>
+                    <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase text-amber-600 tracking-tighter">Pasivos (<span class="currency-label">COP</span>)</h2></div>
                     <div class="flex gap-2">
                         <button onclick="openPendingForm()" type="button" title="Añadir Pendiente Único" class="w-10 h-10 bg-rose-500 text-white rounded-full shadow-lg shadow-rose-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-bolt"></i></button>
                         <button onclick="openLoanForm()" type="button" class="w-10 h-10 bg-amber-500 text-white rounded-full shadow-lg shadow-amber-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
@@ -1096,7 +1094,7 @@
         <!-- 🟢 TAB AFTERPAY -->
         <section id="tab-afterpay" class="tab-content space-y-8">
             <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-teal-600">Afterpay Hub</h2></div>
+                <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase text-teal-600 tracking-tighter">Afterpay Hub</h2></div>
                 <div class="flex items-center gap-2">
                     <button onclick="openForm('afterpay')" type="button" class="w-10 h-10 bg-teal-500 text-white rounded-full shadow-lg shadow-teal-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
                 </div>
@@ -1130,7 +1128,7 @@
         </section>
         <!-- 🟢 TAB CALENDARIO -->
         <section id="tab-calendar" class="tab-content space-y-8 pb-20">
-            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-rose-600">Calendario Pro</h2></div>
+            <div class="flex items-center gap-4 mb-2"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-rose-600">Calendario Pro</h2></div>
             <div class="bg-rose-50 p-6 md:p-8 rounded-[2rem] border border-rose-100 shadow-sm">
                 <div class="flex justify-between items-center mb-1">
                     <p class="text-[9px] font-black uppercase text-rose-800 opacity-50">Análisis Multidivisa (Nativo)</p>
@@ -1192,13 +1190,13 @@
                 <div class="flex items-center gap-4">
                     <button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button>
                     <div class="flex flex-col">
-                        <h2 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-indigo-500">Mis Tareas</h2>
+                        <h2 class="text-2xl font-black uppercase italic tracking-tighter text-indigo-500">Mis Tareas</h2>
                         <div class="flex items-center gap-2 mt-1">
-                            <select id="active-task-vault" onchange="renderTasksTab()" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg outline-none cursor-pointer border border-indigo-100 shadow-sm max-w-[140px] truncate">
+                            <select id="active-task-vault" onchange="renderTasksTab()" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg outline-none cursor-pointer border border-indigo-100 shadow-sm max-w-[120px] truncate">
                                 <option value="all" selected>Ver Todas</option>
                                 <option value="personal">Privadas</option>
                             </select>
-                            <button onclick="openTaskVaultModal()" class="w-6 h-6 bg-purple-50 text-purple-600 rounded-full border border-purple-100 shadow-sm flex items-center justify-center hover:bg-purple-100 transition-colors active:scale-90 shrink-0" title="Bóvedas P2P"><i class="fa-solid fa-link text-[8px]"></i></button>
+                            <button onclick="openTaskVaultModal()" class="w-6 h-6 bg-purple-50 text-purple-600 rounded-full border border-purple-100 shadow-sm flex items-center justify-center hover:bg-purple-100 transition-colors active:scale-90" title="Bóvedas P2P"><i class="fa-solid fa-link text-[8px]"></i></button>
                         </div>
                     </div>
                 </div>
@@ -1269,7 +1267,7 @@
 
     <!-- FAB Y MODALES GLOBALES -->
     <!-- APEX FIX: FAB Reajustado para Contenedores Nativos con Bottom Navbars -->
-    <div id="fab-main" class="fixed flex flex-col items-end gap-4 z-[90]" style="right: 20px; bottom: max(24px, env(safe-area-inset-bottom) + 20px);">
+    <div id="fab-main" class="fixed right-4 md:right-8 lg:right-16 flex flex-col items-end gap-4 z-[90]" style="bottom: calc(24px + env(safe-area-inset-bottom));">
         <div id="fab-menu" class="hidden flex-col items-end gap-3 transition-all duration-300 transform translate-y-4 opacity-0 mb-2">
             <!-- APEX FIX: Botón de Módulo de Proyectos ahora abre directamente el Formulario de Nuevo Proyecto -->
             <button onclick="openProjectModal()" type="button" title="Nuevo Proyecto" class="w-12 h-12 md:w-14 md:h-14 bg-cyan-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-folder-plus"></i></button>
@@ -2455,16 +2453,11 @@
             
             const pinInput = $id('session-pin-input');
             const loginPinInput = $id('login-existing-pin');
-            const manualPinInput = $id('login-manual-pin'); // APEX FIX: Agregamos el selector correcto
             
             if (pinInput && !$id('session-lock-screen').classList.contains('hidden')) { 
                 pinInput.value = ''; pinInput.focus(); 
-            } else if (!$id('login-screen').classList.contains('hidden')) {
-                if (!$id('login-pin-section').classList.contains('hidden') && loginPinInput) {
-                    loginPinInput.value = ''; loginPinInput.focus();
-                } else if (!$id('login-initial-choice').classList.contains('hidden') && manualPinInput) {
-                    manualPinInput.value = ''; manualPinInput.focus();
-                }
+            } else if (loginPinInput && !$id('login-screen').classList.contains('hidden')) {
+                loginPinInput.value = ''; loginPinInput.focus();
             }
         };
 
@@ -3183,29 +3176,30 @@
                 }
             });
 
-            // APEX FIX: Inicio de Sesión Persistente (No forzar salida al cerrar la app)
-            try {
-                currentUser = localStorage.getItem('nexus_current_user');
-            } catch(e) {}
-            
-            if (!currentUser) {
-                currentUser = await NexusIDB.getSession();
-                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-            }
-            
-            if (!currentUser) {
-                try {
-                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                    if (match) {
-                        currentUser = match[2];
-                        localStorage.setItem('nexus_current_user', currentUser);
-                    }
-                } catch(e) {}
-            }
+            // APEX FIX: Candado Estricto (Cold Boot Forzado si se presionó Salir)
+            const isColdBoot = !sessionStorage.getItem('nexus_session_active');
 
-            // Candado estricto solo si el usuario tocó explícitamente el botón "Salir"
-            if (sessionStorage.getItem('nexus_logged_out')) {
-                currentUser = null;
+            if (!isColdBoot) {
+                try {
+                    currentUser = localStorage.getItem('nexus_current_user');
+                } catch(e) {}
+                
+                if (!currentUser) {
+                    currentUser = await NexusIDB.getSession();
+                    if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+                }
+                
+                if (!currentUser) {
+                    try {
+                        const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                        if (match) {
+                            currentUser = match[2];
+                            localStorage.setItem('nexus_current_user', currentUser);
+                        }
+                    } catch(e) {}
+                }
+            } else {
+                currentUser = null; // Fuerza a mostrar la pantalla de Acceso
             }
 
             if (!currentUser) {
@@ -3361,7 +3355,7 @@
         // APEX FIX: Motor de Inicio de Sesión Tradicional Consolidado (Fricción Cero)
         async function processTraditionalLogin(event) {
             const emailInput = $id('login-manual-email');
-            const pinInput = $id('login-manual-pin'); // APEX FIX: Estaba leyendo el ID equivocado
+            const pinInput = $id('login-existing-pin');
             if(!emailInput || !pinInput) return;
 
             const email = emailInput.value.trim().toLowerCase();
