@@ -241,6 +241,18 @@
             </div>
 
             <div id="register-form-view" class="space-y-4 hidden">
+                <!-- APEX FIX: Botón explícito de Google OAuth para la creación de cuenta -->
+                <button onclick="performGoogleLogin()" type="button" class="w-full btn-social-auth flex items-center justify-center gap-2 mb-2">
+                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg>
+                    Crear cuenta con Google
+                </button>
+
+                <div class="relative flex items-center py-2 mb-2">
+                    <div class="flex-grow border-t border-slate-700/50"></div>
+                    <span class="flex-shrink-0 mx-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">o registrar con correo</span>
+                    <div class="flex-grow border-t border-slate-700/50"></div>
+                </div>
+
                 <div class="space-y-4">
                     <div class="relative">
                         <label class="auth-label">Nombre Completo</label>
@@ -2765,7 +2777,7 @@
                         localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
                     });
                 } catch (cacheErr) {
-                    console.warn("[APEX SYS] Mode restringit (Incògnit/iOS). Fallback a Firestore estàndard.");
+                    console.warn("[APEX SYS] Modo restringido (Incógnito/iOS). Fallback a Firestore estándar.");
                     window.db = getFirestore(app);
                 }
                 
@@ -2779,7 +2791,7 @@
                     try {
                         await signInAnonymously(auth);
                     } catch (err) {
-                        console.warn("[APEX SYS] Firebase Auth Anònim desactivat o bloquejat. Forçant connexió SSoT pura.");
+                        console.warn("[APEX SYS] Firebase Auth Anónimo desactivado o bloqueado. Forzando conexión SSoT pura.");
                     }
                 }
                 
@@ -2787,7 +2799,7 @@
                 return true;
 
             } catch(e) {
-                console.warn("[APEX SYS] Error de xarxa. Treballant en mode Local-First.", e);
+                console.warn("[APEX SYS] Error de red. Trabajando en modo Local-First.", e);
                 updateCloudBadge(false);
                 return false;
             }
@@ -3080,16 +3092,16 @@
                     if (ls) {
                         ls.classList.remove('hidden');
                         const title = $id('auth-main-title');
-                        if (title) title.innerText = 'Validant identitat...';
+                        if (title) title.innerText = 'Validando identidad...';
                         const btn = document.querySelector('.btn-social-auth');
-                        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronitzant dades...';
+                        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...';
                     }
                     await finalizeAuth(result.user);
                 }
             } catch(e) {
-                console.error("Fricció amb el Redirect de Google:", e);
+                console.error("Fricción con el Redirect de Google:", e);
                 if (e.code !== 'auth/redirect-cancelled-by-user') {
-                    alert("⚠️ Error en validar l'autenticació de Google. Si us plau, torna a intentar-ho.");
+                    alert("⚠️ Error al validar la autenticación de Google. Por favor, intenta de nuevo.");
                 }
             }
 
@@ -3222,12 +3234,12 @@
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' }); 
                 
-                const btn = document.querySelector('.btn-social-auth');
-                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Redirigint a Google...';
+                const btns = document.querySelectorAll('.btn-social-auth');
+                btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Redirigiendo a Google...');
 
                 await signInWithRedirect(auth, provider);
             } catch(e) {
-                alert("⚠️ Error d'autenticació amb Google: " + e.message);
+                alert("⚠️ Error de autenticación con Google: " + e.message);
             }
         };
 
@@ -3243,6 +3255,8 @@
                 const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', primaryId);
                 const docSnap = await getDoc(docRef);
 
+                const isNewVault = !docSnap.exists(); // APEX FIX: Detector atómico de cuentas nuevas (Bóvedas)
+
                 let cloudProfile = {
                     uid: primaryId,
                     name: name,
@@ -3253,18 +3267,37 @@
                     isOAuth: user.providerData && user.providerData.some(p => p.providerId === 'google.com')
                 };
 
-                if (docSnap.exists()) {
+                if (!isNewVault) {
                     cloudProfile = { ...docSnap.data(), ...cloudProfile };
                     if (!cloudProfile.avatar && photo) cloudProfile.avatar = photo;
                 }
 
+                // Guardar perfil en SSoT Público
                 await setDoc(docRef, cloudProfile, { merge: true });
+
+                // APEX FIX: Creación estructural explícita de la Bóveda en Firestore para nuevos usuarios
+                if (isNewVault) {
+                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', primaryId, 'nexus_data', 'core');
+                    await setDoc(coreRef, { 
+                        vaultCreated: new Date().toISOString(), 
+                        ownerEmail: primaryId,
+                        ownerName: name,
+                        settings: {
+                            baseCurrency: 'COP',
+                            currencyCount: '2',
+                            secondaryCurrency: 'USD',
+                            requirePin: false,
+                            themePreset: 'default'
+                        }
+                    }, { merge: true });
+                    console.log("[APEX SYS] Nueva Bóveda SSoT inicializada en Firebase para:", primaryId);
+                }
 
                 localStorage.setItem(`nexus_profile_${primaryId}`, JSON.stringify(cloudProfile));
                 localStorage.setItem('nexus_last_email', primaryId);
                 
                 userProfile = cloudProfile;
-                await processLoginSuccess(primaryId);
+                await processLoginSuccess(primaryId, isNewVault);
 
             } catch (e) {
                 console.error("[APEX SYS] Fricción al validar identidad:", e);
@@ -3272,7 +3305,7 @@
             }
         }
         
-        async function processLoginSuccess(primaryId) {
+        async function processLoginSuccess(primaryId, isNewVault = false) {
             sessionStorage.removeItem('nexus_logged_out'); 
             sessionStorage.setItem('nexus_session_active', 'true');
 
@@ -3288,6 +3321,12 @@
             const loginScreen = $id('login-screen');
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+
+                // APEX FIX: Notificar visualmente la creación de la bóveda
+                if (isNewVault) {
+                    alert(`✅ Bóveda generada exitosamente para:\n${primaryId}\n\nBienvenido a NEXUS AR.`);
+                }
+
                 try { await bootApp(); } catch(err) { console.error("Boot err", err); }
                 setTimeout(async () => { 
                     loginScreen.classList.add('hidden'); 
