@@ -289,7 +289,7 @@
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top shadow-sm">
         <div class="max-w-5xl mx-auto w-full">
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
-                <div class="flex items-center gap-3"><img src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
+                <div class="flex items-center gap-3"><img id="header-avatar" src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
                 <div class="flex items-center gap-2">
                     <button onclick="manualCloudSync()" type="button" id="dash-cloud-badge" class="bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all cursor-pointer hover:bg-slate-200"><div id="dash-cloud-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Conectar</button>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
@@ -3056,7 +3056,8 @@
                                 if (user && !currentUser) {
                                     oauthResolved = true;
                                     sessionStorage.removeItem('nexus_oauth_pending');
-                                    if (ls) ls.innerHTML = '<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda...</p></div>';
+                                    const dName = user.displayName ? user.displayName.split(' ')[0] : 'Usuario';
+                                    if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda de ${dName}...</p></div>`;
                                     await handleOAuthResult(user);
                                 }
                             });
@@ -3067,7 +3068,8 @@
                             if (result && result.user && !currentUser) {
                                 oauthResolved = true;
                                 sessionStorage.removeItem('nexus_oauth_pending');
-                                if (ls) ls.innerHTML = '<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando Credenciales SSoT...</p></div>';
+                                const dName = result.user.displayName ? result.user.displayName.split(' ')[0] : 'Usuario';
+                                if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando a ${dName} en SSoT...</p></div>`;
                                 await handleOAuthResult(result.user);
                                 return; // Detiene el flujo de login, redirige al Dashboard
                             }
@@ -3134,8 +3136,10 @@
                 const { auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await getFirebaseAuth();
                 const provider = new GoogleAuthProvider();
                 
-                // APEX FIX: Forzar la selección de cuenta para limpiar estados fantasma en móviles/PWA
+                // APEX FIX: Forzar la selección de cuenta y extraer perfil completo
                 provider.setCustomParameters({ prompt: 'select_account' }); 
+                provider.addScope('profile');
+                provider.addScope('email');
                 
                 // APEX FIX: Detección estricta de contenedores iOS Swift / Android WebView
                 const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
@@ -3175,6 +3179,8 @@
                 
                 const { auth, OAuthProvider, signInWithPopup, signInWithRedirect } = await getFirebaseAuth();
                 const provider = new OAuthProvider('apple.com');
+                provider.addScope('name');
+                provider.addScope('email');
                 
                 const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
                 
@@ -3206,7 +3212,8 @@
         async function handleOAuthResult(user) {
             const email = user.email ? user.email.toLowerCase() : (user.uid + '@apple.com');
             const name = user.displayName || 'Usuario';
-            const photo = user.photoURL || '';
+            // Extraer foto en alta resolución si es de Google
+            const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
 
             // APEX FIX: Autenticación 100% Directa "One-Tap" Blindada contra congelamientos
             try {
@@ -3221,9 +3228,23 @@
                     // LOGIN DIRECTO: El usuario ya tiene bóveda en la nube
                     const cloudProfile = docSnap.data();
                     cloudProfile.isCloud = true;
-                    if(photo && !cloudProfile.avatar) cloudProfile.avatar = photo; // Actualizar foto si no tenía
+
+                    // APEX FIX: Forzar inyección de datos de Google si el perfil local/nube estaba incompleto o desactualizado
+                    let needsUpdate = false;
+                    if (name && name !== 'Usuario' && (!cloudProfile.name || cloudProfile.name === 'Usuario' || cloudProfile.name === email)) {
+                        cloudProfile.name = name;
+                        needsUpdate = true;
+                    }
+                    if (photo && cloudProfile.avatar !== photo) {
+                        cloudProfile.avatar = photo;
+                        needsUpdate = true;
+                    }
+
+                    if (needsUpdate) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar }, { merge: true });
+                    }
+
                     localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
-                    
                     userProfile = cloudProfile;
                     await processLoginSuccess(email); // Saltamos directo al Dashboard
                 } else {
@@ -3489,10 +3510,14 @@
             const loginScreen = $id('login-screen');
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                
+                // APEX FIX: Arrancar sistema ANTES de que termine la animación, para asegurar que la UI ya tenga los datos de Google
+                try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                
                 setTimeout(async () => { 
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
-                    try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                    
                     try { await initCloud(); fetchCloudState(); } catch(err) { console.error("Cloud err", err); }
                 }, 300); 
             } else {
@@ -3684,6 +3709,21 @@
             });
 
             const hb = $id('header-user-badge'); if(hb) hb.innerText = userProfile.name;
+            
+            // APEX FIX: Inyectar la foto de perfil de Google en el Avatar del Encabezado
+            const ha = $id('header-avatar');
+            if (ha) {
+                if (userProfile.avatar) {
+                    ha.src = userProfile.avatar;
+                    ha.classList.remove('rounded-lg');
+                    ha.classList.add('rounded-full');
+                } else {
+                    ha.src = 'icono.png';
+                    ha.classList.remove('rounded-full');
+                    ha.classList.add('rounded-lg');
+                }
+            }
+            
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
             initNexus();
