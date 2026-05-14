@@ -3083,20 +3083,32 @@
             let isRedirectResolved = false;
             try {
                 await initCloud(true); // Inicialitzar sense Login Anònim per no trencar el flux
-                const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth();
+
+                // APEX FIX: Escudo de intercepción activo. Atrapa la sesión si getRedirectResult falla por el ciclo de vida del WebView
+                onAuthStateChanged(auth, async (user) => {
+                    if (user && !user.isAnonymous) {
+                        if (!currentUser || currentUser !== user.uid) {
+                            const ls = $id('login-screen');
+                            if (ls && !ls.classList.contains('hidden')) {
+                                const title = $id('auth-main-title');
+                                if (title) title.innerText = 'Construyendo Bóveda...';
+                                const btns = document.querySelectorAll('.btn-social-auth');
+                                btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...');
+                            }
+                            await finalizeAuth(user);
+                        }
+                    }
+                });
+
                 const result = await getRedirectResult(auth);
                 if (result && result.user) {
                     isRedirectResolved = true;
-                    const ls = $id('login-screen');
-                    if (ls) {
-                        ls.classList.remove('hidden');
-                        const title = $id('auth-main-title');
-                        if (title) title.innerText = 'Validando identidad...';
-                        const btn = document.querySelector('.btn-social-auth');
-                        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...';
+                    // Ya manejado por onAuthStateChanged, pero por redundancia de seguridad:
+                    if (!currentUser || currentUser !== result.user.uid) {
+                        await finalizeAuth(result.user);
                     }
-                    await finalizeAuth(result.user);
                 }
             } catch(e) {
                 console.error("Fricción con el Redirect de Google:", e);
@@ -3243,8 +3255,17 @@
             }
         };
 
+        let isFinalizingAuth = false; // APEX FIX: Candado anti-doble ejecución
+
         async function finalizeAuth(user, providedName = null) {
-            const primaryId = user.email ? user.email.toLowerCase() : user.uid + '@nexus.local';
+            if (isFinalizingAuth) return;
+            isFinalizingAuth = true;
+
+            // APEX FIX CRÍTICO: Reglas de Seguridad SSoT
+            // Firebase Firestore bloquea por defecto cualquier escritura privada si la ruta no coincide exactamente con user.uid
+            // Anteriormente se usaba user.email, lo que causaba un "Permission Denied" silencioso y un bucle de reinicio.
+            const primaryId = user.uid; 
+            const displayEmail = user.email ? user.email.toLowerCase() : user.uid + '@nexus.local';
             const name = providedName || user.displayName || 'Usuario';
             const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
 
@@ -3255,12 +3276,12 @@
                 const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', primaryId);
                 const docSnap = await getDoc(docRef);
 
-                const isNewVault = !docSnap.exists(); // APEX FIX: Detector atómico de cuentas nuevas (Bóvedas)
+                const isNewVault = !docSnap.exists(); 
 
                 let cloudProfile = {
                     uid: primaryId,
                     name: name,
-                    email: primaryId,
+                    email: displayEmail,
                     avatar: photo,
                     lastSeen: Date.now(),
                     isCloud: true,
@@ -3275,12 +3296,12 @@
                 // Guardar perfil en SSoT Público
                 await setDoc(docRef, cloudProfile, { merge: true });
 
-                // APEX FIX: Creación estructural explícita de la Bóveda en Firestore para nuevos usuarios
+                // Creación estructural explícita de la Bóveda en Firestore para nuevos usuarios usando su UID
                 if (isNewVault) {
                     const coreRef = doc(window.db, 'artifacts', window.appId, 'users', primaryId, 'nexus_data', 'core');
                     await setDoc(coreRef, { 
                         vaultCreated: new Date().toISOString(), 
-                        ownerEmail: primaryId,
+                        ownerEmail: displayEmail,
                         ownerName: name,
                         settings: {
                             baseCurrency: 'COP',
@@ -3290,22 +3311,28 @@
                             themePreset: 'default'
                         }
                     }, { merge: true });
-                    console.log("[APEX SYS] Nueva Bóveda SSoT inicializada en Firebase para:", primaryId);
+                    console.log("[APEX SYS] Nueva Bóveda SSoT inicializada en Firebase para:", displayEmail);
                 }
 
                 localStorage.setItem(`nexus_profile_${primaryId}`, JSON.stringify(cloudProfile));
-                localStorage.setItem('nexus_last_email', primaryId);
+                localStorage.setItem('nexus_last_email', displayEmail); // Conservar para pre-llenado UX
                 
                 userProfile = cloudProfile;
-                await processLoginSuccess(primaryId, isNewVault);
+                await processLoginSuccess(primaryId, isNewVault, displayEmail);
 
             } catch (e) {
-                console.error("[APEX SYS] Fricción al validar identidad:", e);
-                alert("⚠️ Error de red al validar identidad. Intenta nuevamente.");
+                console.error("[APEX SYS] Fricción al validar identidad en Firestore:", e);
+                // Fallback de Emergencia: Si Firestore rechaza la escritura por reglas, iniciamos la app en Local-First
+                // para romper el bucle infinito y permitirte usar el sistema.
+                userProfile = { uid: primaryId, name: name, email: displayEmail, avatar: photo, isCloud: false };
+                localStorage.setItem(`nexus_profile_${primaryId}`, JSON.stringify(userProfile));
+                await processLoginSuccess(primaryId, false, displayEmail);
+            } finally {
+                isFinalizingAuth = false;
             }
         }
         
-        async function processLoginSuccess(primaryId, isNewVault = false) {
+        async function processLoginSuccess(primaryId, isNewVault = false, displayEmail = '') {
             sessionStorage.removeItem('nexus_logged_out'); 
             sessionStorage.setItem('nexus_session_active', 'true');
 
@@ -3322,9 +3349,8 @@
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
 
-                // APEX FIX: Notificar visualmente la creación de la bóveda
                 if (isNewVault) {
-                    alert(`✅ Bóveda generada exitosamente para:\n${primaryId}\n\nBienvenido a NEXUS AR.`);
+                    alert(`✅ Bóveda generada exitosamente para:\n${displayEmail || primaryId}\n\nBienvenido a NEXUS AR.`);
                 }
 
                 try { await bootApp(); } catch(err) { console.error("Boot err", err); }
