@@ -3079,47 +3079,36 @@
                 }
             });
 
-            // APEX FIX: Arquitectura de Arranque Auth Estricta y Bloqueante (Elimina Bucle de Amnesia en iOS)
+            // APEX FIX: Arquitectura de Arranque Auth Estricta (Erradicación del bucle de redirección en iOS)
             try {
                 await initCloud(true); // Inicializar sin Login Anónimo preventivamente
-                const { getAuth, getRedirectResult, onAuthStateChanged, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth();
 
-                // 1. Forzar persistencia profunda (Evita que el WebView de iOS olvide quién hizo el Redirect)
+                // 1. Forzar persistencia profunda de la sesión validada
                 await setPersistence(auth, browserLocalPersistence);
 
-                let activeUser = null;
-
-                // 2. Evaluar Redirect (Prioridad Absoluta)
-                try {
-                    const result = await getRedirectResult(auth);
-                    if (result && result.user) activeUser = result.user;
-                } catch(e) {
-                    console.error("[APEX SYS] Fricción con el Redirect de Google:", e);
-                }
-
-                // 3. Si no hay redirect, evaluar el estado de la caché en la nube (Promesa Única)
-                if (!activeUser) {
-                    activeUser = await new Promise((resolve) => {
-                        const unsubscribe = onAuthStateChanged(auth, (user) => {
-                            unsubscribe(); // Se auto-destruye tras el primer aviso, evitando loops
-                            resolve(user);
-                        });
-                        // Timeout de seguridad extrema por si la red está colgada
-                        setTimeout(() => resolve(auth.currentUser), 3000);
+                // 2. Evaluar estado de sesión directo (Sin Redirects propensos a fallos de memoria en PWAs)
+                let activeUser = await new Promise((resolve) => {
+                    const unsubscribe = onAuthStateChanged(auth, (user) => {
+                        unsubscribe(); // Se auto-destruye tras el primer aviso, evitando loops
+                        resolve(user);
                     });
-                }
+                    // Timeout de seguridad extrema por si la red está colgada
+                    setTimeout(() => resolve(auth.currentUser), 3000);
+                });
 
-                // 4. Si detectamos un usuario válido, finalizar autenticación y bloquear continuación
+                // 3. Si detectamos el Token ID validado por Google, finalizar autenticación y bloquear continuación
                 if (activeUser && !activeUser.isAnonymous) {
                     const ls = $id('login-screen');
                     if (ls && !ls.classList.contains('hidden')) {
                         const title = $id('auth-main-title');
-                        if (title) title.innerText = 'Construyendo Bóveda...';
+                        if (title) title.innerText = 'Abriendo Bóveda...';
                         document.querySelectorAll('.btn-social-auth').forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando datos...');
                     }
+                    // Ejecuta la validación y creación de cuenta con los datos de Google (Foto, ID, Nombre)
                     await finalizeAuth(activeUser);
-                    return; // Fin de la ejecución. ProcessLoginSuccess arrancará la UI.
+                    return; // Fin de la ejecución. processLoginSuccess arrancará la UI.
                 }
 
             } catch(e) {
@@ -3127,7 +3116,7 @@
             }
 
             // ====================================================================
-            // 5. MODO FALLBACK / USUARIO DESCONECTADO
+            // 4. MODO FALLBACK / USUARIO DESCONECTADO
             // Si el código llega hasta aquí, significa que NO hay sesión válida con Google/Email.
             // Procedemos a buscar sesión en la base de datos local (Modo Offline / PWA)
             // ====================================================================
@@ -3253,23 +3242,37 @@
 
         window.performGoogleLogin = async function() {
             try {
-                // APEX FIX: Canvi de Popup a Redirect per suport natiu en contenidors iOS (WKWebView)
-                const { getAuth, GoogleAuthProvider, signInWithRedirect, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                // APEX FIX: Restauración a Popup Híbrido. En PWAs de iOS esto invoca el portal seguro sin cerrar la app, erradicando el bucle de reinicio infinito.
+                const { getAuth, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 await initCloud(true);
                 const auth = getAuth();
                 
-                // APEX FIX CRÍTICO: Anclar persistencia antes de redirigir para evitar amnesia en iOS WebView
+                // Anclar persistencia estrictamente antes de abrir la ventana de Google
                 await setPersistence(auth, browserLocalPersistence);
                 
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' }); 
                 
                 const btns = document.querySelectorAll('.btn-social-auth');
-                btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Redirigiendo a Google...');
+                btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Abriendo Google...');
 
-                await signInWithRedirect(auth, provider);
+                // Invocamos la interfaz de Google (Abre, Inicia, y Regresa los datos validados al instante)
+                const result = await signInWithPopup(auth, provider);
+                
+                if (result && result.user) {
+                    btns.forEach(btn => btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Validando Bóveda...');
+                    // Envía la foto de usuario, ID token (uid) y nombre completo para crear la bóveda SSoT
+                    await finalizeAuth(result.user);
+                }
             } catch(e) {
-                alert("⚠️ Error de autenticación con Google: " + e.message);
+                console.error("Fricción Google Auth:", e);
+                if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+                    alert("⚠️ Error de autenticación con Google: " + e.message);
+                }
+                // Restaurar botones a su estado original si el usuario cancela
+                const btns = document.querySelectorAll('.btn-social-auth');
+                if(btns.length > 0) btns[0].innerHTML = `<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg> Continuar con Google`;
+                if(btns.length > 1) btns[1].innerHTML = `<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg> Crear cuenta con Google`;
             }
         };
 
