@@ -3214,6 +3214,7 @@
             const name = user.displayName || 'Usuario';
             // Extraer foto en alta resolución si es de Google
             const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
+            const uid = user.uid; // APEX FIX: Capturar el UID único
 
             // APEX FIX: Autenticación 100% Directa "One-Tap" Blindada contra congelamientos
             try {
@@ -3221,13 +3222,15 @@
                 if (!window.db) throw new Error("Network offline");
 
                 const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                // APEX FIX: Usar UID como llave maestra criptográfica en Firestore
+                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
                 const docSnap = await getDoc(docRef);
                 
                 if (docSnap.exists()) {
                     // LOGIN DIRECTO: El usuario ya tiene bóveda en la nube
                     const cloudProfile = docSnap.data();
                     cloudProfile.isCloud = true;
+                    cloudProfile.uid = uid; // Asegurar que el UID esté inyectado
 
                     // APEX FIX: Forzar inyección de datos de Google si el perfil local/nube estaba incompleto o desactualizado
                     let needsUpdate = false;
@@ -3240,16 +3243,17 @@
                         needsUpdate = true;
                     }
 
-                    if (needsUpdate) {
-                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar }, { merge: true });
+                    if (needsUpdate || !cloudProfile.uid) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid }, { merge: true });
                     }
 
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(cloudProfile));
                     userProfile = cloudProfile;
-                    await processLoginSuccess(email); // Saltamos directo al Dashboard
+                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
                 } else {
                     // CREACIÓN DIRECTA (Sign Up): Registrar bóveda en silencio sin pedir PIN
                     const newUserProfile = { 
+                        uid: uid, // APEX FIX: Guardar UID
                         name: name, 
                         email: email, 
                         pin: "AutoGen@1234!", // Contraseña de respaldo asignada automáticamente
@@ -3260,10 +3264,10 @@
                     };
                     
                     await setDoc(docRef, newUserProfile, { merge: true });
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(newUserProfile));
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
                     
                     userProfile = newUserProfile;
-                    await processLoginSuccess(email); // Saltamos directo al Dashboard
+                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
@@ -3284,7 +3288,8 @@
                 if (key.startsWith('nexus_profile_')) {
                     const p = JSON.parse(localStorage.getItem(key));
                     p.isLocal = true;
-                    usersMap.set(p.email, p);
+                    const userId = p.uid || p.email; // APEX FIX: Soporte para UID
+                    usersMap.set(userId, p);
                 }
             }
             
@@ -3292,8 +3297,9 @@
             const renderList = () => {
                 let html = '';
                 Array.from(usersMap.values()).forEach(p => {
+                    const userId = p.uid || p.email; // APEX FIX
                     const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
-                    html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
+                    html += `<div onclick="selectUserForLogin('${userId}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
                         <div class="flex items-center gap-3 overflow-hidden">
                             <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
                             <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
@@ -3302,12 +3308,12 @@
                             <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
                         </div>
                     </div>`;
-                    localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
+                    localStorage.setItem(`nexus_profile_${userId}`, JSON.stringify(p));
                 });
                 if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
                 else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
                 list.innerHTML = html;
-                filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
+                if(typeof filterLoginUsers === 'function') filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
             };
 
             // Ejecutar pintado a latencia cero
@@ -3322,8 +3328,9 @@
                     
                     snap.forEach(doc => {
                         const data = doc.data();
-                        if(usersMap.has(data.email)) {
-                            const existing = usersMap.get(data.email);
+                        const userId = data.uid || data.email; // APEX FIX
+                        if(usersMap.has(userId)) {
+                            const existing = usersMap.get(userId);
                             if(!existing.isCloud || existing.name !== data.name || existing.pin !== data.pin) {
                                 existing.isCloud = true;
                                 existing.name = data.name; 
@@ -3332,7 +3339,7 @@
                             }
                         } else {
                             data.isCloud = true;
-                            usersMap.set(data.email, data);
+                            usersMap.set(userId, data);
                             hasChanges = true;
                         }
                     });
@@ -3379,14 +3386,16 @@
                 // 1. Buscar primero en caché local (LocalStorage)
                 let foundLocally = false;
                 let userName = 'Usuario';
+                let foundUserId = email; // Fallback al email si no hay UID
                 
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (key.startsWith('nexus_profile_')) {
                         const p = JSON.parse(localStorage.getItem(key));
-                        if(p.email.toLowerCase() === email) {
+                        if(p.email && p.email.toLowerCase() === email) {
                             foundLocally = true;
                             userName = p.name || 'Usuario';
+                            foundUserId = p.uid || p.email; // APEX FIX: Prioridad a UID
                             break;
                         }
                     }
@@ -3397,16 +3406,30 @@
                     await initCloud(); // APEX FIX: Forzar inicialización de nube para validar cuentas remotas
                     if (window.db) {
                         try {
-                            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                            const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
-                            const docSnap = await getDoc(docRef);
+                            const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                            const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("email", "==", email));
+                            const docSnap = await getDocs(q);
                             
-                            if (docSnap.exists()) {
-                                const cloudProfile = docSnap.data();
+                            if (!docSnap.empty) {
+                                const cloudProfile = docSnap.docs[0].data();
                                 cloudProfile.isCloud = true;
-                                localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                                foundUserId = cloudProfile.uid || cloudProfile.email;
+                                localStorage.setItem(`nexus_profile_${foundUserId}`, JSON.stringify(cloudProfile));
                                 foundLocally = true;
                                 userName = cloudProfile.name || 'Usuario';
+                            } else {
+                                // Fallback para usuarios viejos
+                                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                                const docRefOld = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                                const docSnapOld = await getDoc(docRefOld);
+                                if (docSnapOld.exists()) {
+                                    const cloudProfile = docSnapOld.data();
+                                    cloudProfile.isCloud = true;
+                                    foundUserId = email;
+                                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                                    foundLocally = true;
+                                    userName = cloudProfile.name || 'Usuario';
+                                }
                             }
                         } catch(cloudErr) {
                             console.warn("Fallo verificando en la nube:", cloudErr);
@@ -3418,8 +3441,8 @@
                 btn.disabled = false;
 
                 if (foundLocally) {
-                    // Pasar a la sección de PIN
-                    selectUserForLogin(email, userName);
+                    // Pasar a la sección de PIN con el ID encontrado
+                    selectUserForLogin(foundUserId, userName);
                 } else {
                     alert(`No se encontró una bóveda registrada para:\n${email}\n\nSi eres nuevo, presiona "Crear cuenta".`);
                 }
@@ -3432,8 +3455,8 @@
             }
         }
         
-        function selectUserForLogin(email, name) {
-            loginSelectedEmail = email;
+        function selectUserForLogin(userId, name) {
+            loginSelectedEmail = userId; // APEX FIX: Conservamos nombre variable pero aloja UID o Email
             $id('login-initial-choice').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
             $id('login-pin-section').classList.remove('hidden');
@@ -3441,7 +3464,14 @@
             const title = $id('auth-main-title');
             if(title) title.innerText = 'Te damos la bienvenida';
 
-            $id('login-active-email').innerText = email; // Google muestra el email
+            // Mostrar el email real visualmente buscando el perfil
+            let displayEmail = userId;
+            try {
+                const p = JSON.parse(localStorage.getItem(`nexus_profile_${userId}`));
+                if (p && p.email) displayEmail = p.email;
+            } catch(e) {}
+            
+            $id('login-active-email').innerText = displayEmail;
             $id('login-existing-pin').value = '';
             setTimeout(() => $id('login-existing-pin').focus(), 100);
         }
@@ -3559,10 +3589,17 @@
             
             if(!email || !name || !passRegex.test(pin)) return alert("Todos los campos son requeridos. La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
             
-            let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
+            let existingProfile = null;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('nexus_profile_')) {
+                    const p = JSON.parse(localStorage.getItem(key));
+                    if (p && p.email && p.email.toLowerCase() === email) existingProfile = p;
+                }
+            }
             if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
             
-            userProfile = { name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now() }; 
+            userProfile = { uid: email, name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now(), isCloud: true }; 
             localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
             
             await initCloud(); // APEX FIX: Forzar enlace de red para subir nuevo perfil
