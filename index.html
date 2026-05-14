@@ -3067,6 +3067,7 @@
 
                             // 1. Motor de escucha pasiva (Atrapa la sesión si getRedirectResult falla por el WKWebView en iOS)
                             onAuthStateChanged(auth, async (user) => {
+                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
                                 if (user && !currentUser) {
                                     oauthResolved = true;
                                     sessionStorage.removeItem('nexus_oauth_pending');
@@ -3080,6 +3081,7 @@
                             const result = await getRedirectResult(auth);
                             
                             if (result && result.user && !currentUser) {
+                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
                                 oauthResolved = true;
                                 sessionStorage.removeItem('nexus_oauth_pending');
                                 const dName = result.user.displayName ? result.user.displayName.split(' ')[0] : 'Usuario';
@@ -3144,6 +3146,7 @@
         window.loginWithGoogle = async function(event) {
             const btn = event.currentTarget;
             const originalHtml = btn.innerHTML;
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
             try {
                 btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
                 
@@ -3401,6 +3404,8 @@
                 return alert("Por favor, ingresa un correo electrónico válido.");
             }
 
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
+            
             const btn = event.currentTarget;
             const originalHtml = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
@@ -3612,6 +3617,8 @@
             const passRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
             
             if(!email || !name || !passRegex.test(pin)) return alert("Todos los campos son requeridos. La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
+            
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
             
             let existingProfile = null;
             for (let i = 0; i < localStorage.length; i++) {
@@ -3853,8 +3860,10 @@
             }
             
             localStorage.removeItem('nexus_current_user'); 
-            NexusIDB.saveSession(null);
+            await NexusIDB.saveSession(null);
             document.cookie = "nexus_current_user=; max-age=0; path=/";
+            
+            sessionStorage.setItem('nexus_logged_out', 'true'); // APEX FIX: Candado estricto anti-bucle
             
             // APEX FIX: Destrucción formal de la credencial en Firebase Auth
             try {
@@ -3865,7 +3874,7 @@
                 console.warn("[APEX] Fricción cerrando sesión en Firebase", e);
             }
 
-            location.reload(); 
+            setTimeout(() => { location.reload(); }, 400); // APEX FIX: Retardo para asegurar purga de caché de Firebase
         }
         
         function setApMode(mode) {
