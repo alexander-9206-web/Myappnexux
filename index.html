@@ -945,7 +945,10 @@
             <div id="admin-users-block" class="theme-card p-6 md:p-8 rounded-[2rem] border shadow-sm md:col-span-2 hidden bg-red-50/20 border-red-200 md:max-w-2xl md:mx-auto mt-6">
                 <div class="flex justify-between items-center mb-4 border-b border-red-200/50 pb-3">
                     <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest"><i class="fa-solid fa-user-shield mr-2"></i>Gestión Total de Usuarios (SSoT)</h3>
-                    <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="btn-admin-bulk-delete" onclick="openDeleteUserModal('BULK')" class="hidden bg-red-600 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-trash-can mr-1"></i> Eliminar (<span id="admin-bulk-count">0</span>)</button>
+                        <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
+                    </div>
                 </div>
                 <div id="admin-global-users-list" class="space-y-2 max-h-64 overflow-y-auto hide-scrollbar"></div>
 
@@ -9433,14 +9436,35 @@
             }
         }
 
+        // APEX FIX: Controlador Lógico del Multi-Select de Eliminación
+        function handleAdminUserSelect() {
+            const checked = document.querySelectorAll('.admin-user-cb:checked');
+            const btn = $id('btn-admin-bulk-delete');
+            const count = $id('admin-bulk-count');
+            if (btn && count) {
+                if (checked.length > 0) {
+                    btn.classList.remove('hidden');
+                    count.innerText = checked.length;
+                } else {
+                    btn.classList.add('hidden');
+                }
+            }
+        }
+
         // APEX FIX: Motor de Carga Exclusivo para Administración Total SSoT
         async function loadAdminGlobalUsers() {
             const list = $id('admin-global-users-list');
             if(!list || !window.db) return;
             list.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Accediendo al Directorio Raíz de Firebase...</p>';
+            
+            // Ocultar botón de borrado masivo al recargar
+            const bulkBtn = $id('btn-admin-bulk-delete');
+            if(bulkBtn) bulkBtn.classList.add('hidden');
+
             try {
-                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
+                const { collection, getDocs, query } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                // APEX FIX: Usar query() explícito para máxima compatibilidad con las reglas de Firestore
+                const snap = await getDocs(query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users')));
                 let html = '';
                 
                 // Convertir a array para ordenar
@@ -9451,37 +9475,46 @@
                 const MAX_QUOTA_KB = 10240; // Cuota teórica de 10MB para perfil SSoT
 
                 users.forEach(data => {
-                    // APEX FIX: Auto-Caché Forzado para estabilizar la Edición de Usuarios (Fricción Cero)
-                    localStorage.setItem('nexus_profile_' + data.email, JSON.stringify(data));
+                    // APEX FIX: Protección Anti-Undefined para usuarios muy antiguos con esquemas rotos
+                    const userEmail = data.email || data.uid;
+                    if(!userEmail) return;
+
+                    // Auto-Caché Forzado para estabilizar la Edición de Usuarios (Fricción Cero)
+                    localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(data));
                     
-                    const isCurrent = data.email === currentUser;
+                    const isCurrent = userEmail === currentUser;
                     const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
                     const usagePct = Math.min(100, (sizeKB / MAX_QUOTA_KB) * 100).toFixed(2);
                     const lastSync = data.lastSyncSize ? new Date(data.lastSyncSize).toLocaleString('es-CO', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Sin actividad';
                     
                     const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
+                    
+                    // APEX FIX: Inyectar Checkbox para Borrado en Masa (Fricción Cero)
+                    const checkboxHtml = !isCurrent ? `<input type="checkbox" value="${userEmail}" class="admin-user-cb w-4 h-4 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shadow-sm shrink-0 mr-1" onchange="handleAdminUserSelect()">` : `<div class="w-4 h-4 shrink-0 mr-1"></div>`;
 
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
-                        <div class="flex items-center gap-3 min-w-0">
+                        <div class="flex items-center gap-2 min-w-0">
+                            ${checkboxHtml}
                             <div class="w-10 h-10 rounded-full ${isCurrent && !data.avatar ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
                             <div class="flex flex-col truncate">
-                                <p class="text-[11px] font-black uppercase text-slate-800 truncate">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
-                                <p class="text-[9px] font-bold text-slate-500 mt-0.5 truncate">${data.email}</p>
+                                <p class="text-[11px] font-black uppercase text-slate-800 truncate">${data.name || 'Usuario'} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
+                                <p class="text-[9px] font-bold text-slate-500 mt-0.5 truncate">${userEmail}</p>
                                 <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 truncate"><i class="fa-solid fa-database mr-1 text-blue-400"></i>Uso: ${usagePct}% (${sizeKB} KB) • Ult: ${lastSync}</p>
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center justify-end gap-2 flex-1 ml-2">
                             ${!isCurrent ? `
-                            <button onclick="openRemotePermissions('${data.email}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
-                            <button onclick="adminChangePasswordPrompt('${data.email}', '${data.name}')" class="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center hover:bg-emerald-100 transition-colors shadow-sm" title="Modificar Contraseña"><i class="fa-solid fa-unlock-keyhole text-[10px]"></i></button>
-                            <button onclick="openUserEdit('${data.email}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                            <button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
-                            <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                            <button onclick="openRemotePermissions('${userEmail}', '${data.name || 'Usuario'}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
+                            <button onclick="adminChangePasswordPrompt('${userEmail}', '${data.name || 'Usuario'}')" class="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center hover:bg-emerald-100 transition-colors shadow-sm" title="Modificar Contraseña"><i class="fa-solid fa-unlock-keyhole text-[10px]"></i></button>
+                            <button onclick="openUserEdit('${userEmail}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                            <button onclick="document.getElementById('edit-user-original-email').value='${userEmail}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                            <button onclick="openDeleteUserModal('${userEmail}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
                         </div>
                     </div>`;
                 });
                 list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay usuarios registrados en Firebase.</p>';
             } catch(e) {
+                console.error("[APEX SYS] Error listando usuarios SSoT:", e);
                 list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.</p>';
             }
         }
@@ -10017,10 +10050,23 @@
         // --- FUNCIONES DE MANTENIMIENTO RESTAURADAS ---
 
         function openDeleteUserModal(directEmail) {
-            const email = (typeof directEmail === 'string') ? directEmail : $id('edit-user-original-email').value;
-            if(!email) return;
+            let emailTarget = '';
+            let isBulk = false;
+
+            // APEX FIX: Rutear la lógica si es Borrado en Masa (Checklist) o Unitario
+            if (directEmail === 'BULK') {
+                const checked = document.querySelectorAll('.admin-user-cb:checked');
+                const emails = Array.from(checked).map(cb => cb.value);
+                if (emails.length === 0) return;
+                emailTarget = JSON.stringify(emails);
+                isBulk = true;
+            } else {
+                emailTarget = (typeof directEmail === 'string') ? directEmail : $id('edit-user-original-email').value;
+            }
+
+            if(!emailTarget) return;
             
-            if(email === currentUser) {
+            if(!isBulk && emailTarget === currentUser) {
                 const pnl = $id('edit-user-modal');
                 if (pnl && !pnl.classList.contains('hidden')) {
                     const msg = document.createElement('p');
@@ -10045,8 +10091,9 @@
             
             const mod = $id('delete-user-modal');
             if(mod) {
-                $id('del-user-target').innerText = email;
-                $id('del-user-email').value = email;
+                // Modificar el texto UI dependiendo de si es Múltiple o Único
+                $id('del-user-target').innerText = isBulk ? `${JSON.parse(emailTarget).length} Usuarios Seleccionados` : emailTarget;
+                $id('del-user-email').value = emailTarget;
                 $id('del-user-check').checked = false;
                 if($id('del-user-keyword')) $id('del-user-keyword').value = '';
                 if($id('del-user-pin')) $id('del-user-pin').value = '';
@@ -10071,35 +10118,55 @@
         }
 
         async function confirmDeleteUserVault() {
-            const email = $id('del-user-email').value;
+            const emailVal = $id('del-user-email').value;
+            let emailsToDelete = [];
+            
+            // Determinar si recibimos un JSON Array (Bulk) o String normal
+            try {
+                const parsed = JSON.parse(emailVal);
+                if (Array.isArray(parsed)) emailsToDelete = parsed;
+                else emailsToDelete = [emailVal];
+            } catch(e) {
+                emailsToDelete = [emailVal];
+            }
+
             const inputPin = $id('del-user-pin').value.trim();
             const isChecked = $id('del-user-check').checked;
             const kw = $id('del-user-keyword').value.toUpperCase();
             const err = $id('del-user-error');
             
-            const targetProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email));
-            const targetPin = targetProfile ? targetProfile.pin : null;
+            // APEX FIX: Validación Dinámica (Individual vs Bulk).
+            // En modo Bulk solo se acepta la contraseña Root Maestra.
+            let targetPin = null;
+            if (emailsToDelete.length === 1) {
+                const targetProfile = JSON.parse(localStorage.getItem('nexus_profile_' + emailsToDelete[0]));
+                targetPin = targetProfile ? targetProfile.pin : null;
+            }
             
-            // Validar Contraseña, Checklist y Keyword de seguridad
+            // Validar Contraseña (siempre permite la maestra), Checklist y Keyword de seguridad
             if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "A920621j") && isChecked && kw === 'RESET' && (userProfile && userProfile.uid === 'f1zo7eYYLQW1xVfcMZnwKcNzhzn2')) {
                 if(err) err.classList.add('hidden');
                 
-                // Borrado Local
-                localStorage.removeItem('nexus_profile_' + email);
-                localStorage.removeItem('nexus_db_' + email);
-                localStorage.removeItem('nexus_briefing_' + email);
-                
-                // Borrado Nube (Firebase)
                 if (window.db) {
                     try {
                         const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
                         
-                        // APEX FIX: Borrado de raíz profundo (Core y transacciones) para este usuario específico
-                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
-                        const currentYear = new Date().getFullYear();
-                        for (let y = currentYear - 3; y <= currentYear + 3; y++) {
-                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                        // Iterar y purgar cada usuario seleccionado (Fricción Cero en Masa)
+                        for (const email of emailsToDelete) {
+                            if (email === currentUser) continue; // Protección SSoT: El root no puede auto-eliminarse en masa
+
+                            // Borrado Local
+                            localStorage.removeItem('nexus_profile_' + email);
+                            localStorage.removeItem('nexus_db_' + email);
+                            localStorage.removeItem('nexus_briefing_' + email);
+                            
+                            // Borrado Nube (Firebase)
+                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
+                            const currentYear = new Date().getFullYear();
+                            for (let y = currentYear - 3; y <= currentYear + 3; y++) {
+                                await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                            }
                         }
                     } catch(e) {
                         console.warn("[APEX] Fricción purgada de Nube", e);
@@ -10108,13 +10175,14 @@
                 
                 closeDeleteUserModal();
                 updateLocalUsersList();
+                if (typeof loadAdminGlobalUsers === 'function') loadAdminGlobalUsers();
                 
                 // UI Feedback visual
                 const lc = $id('network-users-list');
                 if (lc) {
                     const msg = document.createElement('p');
                     msg.className = "text-[10px] text-center text-red-500 font-bold bg-red-50 p-3 rounded-2xl animate-slideUp mb-2";
-                    msg.innerHTML = `<i class="fa-solid fa-check-circle mr-1"></i> Bóveda ${email} destruida.`;
+                    msg.innerHTML = `<i class="fa-solid fa-check-circle mr-1"></i> ${emailsToDelete.length > 1 ? 'Bóvedas destruidas exitosamente' : 'Bóveda destruida'}.`;
                     lc.prepend(msg);
                     setTimeout(() => msg.remove(), 4000);
                 }
