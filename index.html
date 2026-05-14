@@ -40,50 +40,79 @@
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
         
-        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS (Fricción Cero en formularios) */
-        .fixed.inset-0.backdrop-blur-sm > div,
-        .fixed.inset-0.backdrop-blur-md > div,
+        /* ==========================================
+           APEX FIX: BLINDAJE NATIVO WKWEBVIEW (IOS/ANDROID)
+           ========================================== */
+        /* 1. Prevenir Desbordamiento Horizontal y Efecto Rebote */
+        html, body {
+            max-width: 100vw !important;
+            overflow-x: hidden !important;
+            width: 100% !important;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        /* 2. Restricción Absoluta de Contenedores Modales (Fondo Oscuro) */
+        .fixed.inset-0 {
+            height: 100dvh !important; /* Altura dinámica real del dispositivo nativo */
+            width: 100vw !important;
+            padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important; /* Forzar Burbuja Central, elimina el Bottom Sheet que se oculta */
+            justify-content: center !important;
+        }
+
+        /* 3. Restricción de la Tarjeta Interna (Evita que los botones queden fuera de pantalla) */
+        .fixed.inset-0 > div[class*="theme-card"],
+        .fixed.inset-0 > div[class*="auth-container"],
+        #session-lock-screen > div,
         #login-screen > div,
-        #session-lock-screen > div {
-            max-height: 85dvh !important;
-            overflow-y: auto;
-            overscroll-behavior: contain;
-        }
-        .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
-        .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
-        #login-screen > div::-webkit-scrollbar,
-        #session-lock-screen > div::-webkit-scrollbar { 
-            display: none; 
+        #ui-confirm-modal > div,
+        #ui-delete-modal > div,
+        #ui-prompt-modal > div {
+            max-height: 100% !important; /* Nunca exceder el 100% del espacio con padding */
+            max-width: 100% !important;
+            margin: auto !important; /* Centrado gravitacional estricto */
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+            display: flex !important;
+            flex-direction: column !important;
         }
 
-        /* APEX FIX: Optimización Estricta de Formularios para Móviles (Anti-Zoom y Desbordamiento) */
+        /* Ocultar barra de scroll para estética nativa */
+        .fixed.inset-0 > div::-webkit-scrollbar { display: none; }
+
+        /* 4. Formateo Extremo para Móviles (< 640px) */
         @media (max-width: 640px) {
-            /* 1. Fricción Cero: Evita que iOS Safari haga zoom automático al tocar inputs */
-            input, select, textarea { font-size: 16px !important; }
-            
-            /* 2. Compactación de Modales Pesados (Bottom Sheets) para encajar sobre el teclado */
-            #tx-modal > div, #loan-modal > div, #pending-modal > div, #new-account-modal > div, 
-            #shared-account-modal > div, #new-project-modal > div, #task-modal > div, #new-pse-modal > div, 
-            #takeover-user-modal > div, #delete-user-modal > div, #remote-permissions-modal > div,
-            #reorder-accounts-modal > div {
-                padding-left: 1.25rem !important; 
-                padding-right: 1.25rem !important;
-                padding-top: 1.5rem !important;
-                padding-bottom: max(1.5rem, env(safe-area-inset-bottom)) !important;
-                max-height: 85dvh !important; 
+            /* Fricción Cero: Bloqueo de Auto-Zoom de iOS Safari al tocar inputs */
+            input, select, textarea { 
+                font-size: 16px !important; 
             }
             
-            /* 3. Compactación de Modales Centrales Pequeños */
-            #ui-confirm-modal > div, #ui-delete-modal > div, #ui-prompt-modal > div, #cat-budget-modal > div, #goal-modal > div {
-                padding: 1.5rem !important;
-                max-height: 85dvh !important;
+            /* Compactación de cajas y recuperación de curvas en 360 grados */
+            .fixed.inset-0 > div[class*="theme-card"],
+            .fixed.inset-0 > div[class*="auth-container"] {
+                padding: 1.25rem !important; /* Reducción de padding de 32px a 20px */
+                border-radius: 1.5rem !important; /* Forzar bordes redondos completos, anula el rounded-t */
             }
 
-            /* 4. Reducción de espacios vacíos (Gaps/Margins) en formularios grandes */
+            /* Compactación de formularios largos para evitar Scroll masivo */
             .space-y-6 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
+            .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem !important; }
             .grid.gap-4 { gap: 0.75rem !important; }
-            
-            /* 5. Ajustes de Calculadora Numpad para que no rebase la pantalla */
+
+            /* Numpad (Calculadora): Excepción. Este SÍ debe ser Bottom Sheet */
+            #numpad-modal {
+                align-items: flex-end !important;
+                padding: 0 !important; /* Sin márgenes para anclarse abajo */
+            }
+            #numpad-modal > div {
+                max-width: 100% !important;
+                max-height: 85dvh !important;
+                border-radius: 1.5rem 1.5rem 0 0 !important;
+                margin: 0 !important;
+            }
             .numpad-key { height: 50px !important; font-size: 22px !important; }
         }
         
