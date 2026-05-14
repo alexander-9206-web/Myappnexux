@@ -22,18 +22,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>  
         :root { --app-bg: #f8fafc; --card-bg: #ffffff; --app-text: #0f172a; --val-inc: #10b981; --val-exp: #ef4444; --nexus-black: #000000; }
-        
-        /* APEX FIX: Candado de desbordamiento. Evita que la app se mueva o estire hacia los lados */
-        html, body { 
-            background-color: var(--app-bg); 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            -webkit-tap-highlight-color: transparent; 
-            transition: background-color 0.3s ease; 
-            overflow-x: hidden; 
-            width: 100%;
-            max-width: 100vw;
-        }
-        
+        body { background-color: var(--app-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; transition: background-color 0.3s ease; }
         .theme-bg { background-color: var(--app-bg) !important; } .theme-card { background-color: var(--card-bg) !important; transition: background-color 0.3s ease; } .theme-text { color: var(--app-text) !important; transition: color 0.3s ease; } .theme-val-inc { color: var(--val-inc) !important; transition: color 0.3s ease; } .theme-val-exp { color: var(--val-exp) !important; transition: color 0.3s ease; }
         .tab-content { display: none; } .tab-content.active { display: block; animation: slideIn 0.3s cubic-bezier(0, 0, 0.2, 1); } .tab-content.active.slide-back { animation: slideBack 0.3s cubic-bezier(0, 0, 0.2, 1); }
         @keyframes slideIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } } @keyframes slideBack { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } } @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } } @keyframes slideUpNumpad { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -45,31 +34,86 @@
         .safe-top { padding-top: env(safe-area-inset-top); } .hide-scrollbar::-webkit-scrollbar { display: none; }
         .numpad-key { background: #ffffff; border-radius: 14px; font-size: 24px; font-weight: 600; color: #0f172a; display: flex; align-items: center; justify-content: center; height: 60px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: background-color 0.05s; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; cursor: pointer; outline: none; } .numpad-key:active { background: #e2e8f0; }
         .numpad-modal-content { animation: slideUpNumpad 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); touch-action: none; overscroll-behavior: none; } .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
-        
-        /* APEX FIX: Espacio inferior dinámico para que el final de la lista siempre quede por encima del Botón "+" (FAB) */
-        .pb-safe { padding-bottom: calc(max(1.25rem, env(safe-area-inset-bottom)) + 6rem); } 
-        
+        .pb-safe { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
         input[readonly] { caret-color: transparent; -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
         #numpad-modal { touch-action: none; overscroll-behavior: none; }
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
         
-        /* APEX FIX: Modales acoplados al tamaño de pantalla real y separados del borde inferior (Notch / Home Indicator) */
-        .fixed.inset-0.backdrop-blur-sm > div,
-        .fixed.inset-0.backdrop-blur-md > div,
-        #login-screen > div,
-        #session-lock-screen > div {
-            max-height: 85dvh !important;
-            max-width: calc(100vw - 2rem) !important;
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            margin-bottom: env(safe-area-inset-bottom);
+        /* ==========================================
+           APEX FIX: BLINDAJE NATIVO WKWEBVIEW (IOS/ANDROID)
+           ========================================== */
+        /* 1. Prevenir Desbordamiento Horizontal y Efecto Rebote */
+        html, body {
+            max-width: 100vw !important;
+            overflow-x: hidden !important;
+            width: 100% !important;
+            -webkit-text-size-adjust: 100%;
         }
-        .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
-        .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
-        #login-screen > div::-webkit-scrollbar,
-        #session-lock-screen > div::-webkit-scrollbar { 
-            display: none; 
+
+        /* 2. Restricción Absoluta de Contenedores Modales (Fondo Oscuro) */
+        .fixed.inset-0:not(.hidden) {
+            height: 100dvh !important; /* Altura dinámica real del dispositivo nativo */
+            width: 100vw !important;
+            padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)) !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            align-items: center !important; /* Forzar Burbuja Central, elimina el Bottom Sheet que se oculta */
+            justify-content: center !important;
+        }
+
+        /* 3. Restricción de la Tarjeta Interna (Evita que los botones queden fuera de pantalla) */
+        .fixed.inset-0 > div[class*="theme-card"],
+        .fixed.inset-0 > div[class*="auth-container"],
+        #session-lock-screen > div,
+        #login-screen > div,
+        #ui-confirm-modal > div,
+        #ui-delete-modal > div,
+        #ui-prompt-modal > div {
+            max-height: 100% !important; /* Nunca exceder el 100% del espacio con padding */
+            max-width: 100% !important;
+            margin: auto !important; /* Centrado gravitacional estricto */
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            overscroll-behavior: contain !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        /* Ocultar barra de scroll para estética nativa */
+        .fixed.inset-0 > div::-webkit-scrollbar { display: none; }
+
+        /* 4. Formateo Extremo para Móviles (< 640px) */
+        @media (max-width: 640px) {
+            /* Fricción Cero: Bloqueo de Auto-Zoom de iOS Safari al tocar inputs */
+            input, select, textarea { 
+                font-size: 16px !important; 
+            }
+            
+            /* Compactación de cajas y recuperación de curvas en 360 grados */
+            .fixed.inset-0 > div[class*="theme-card"],
+            .fixed.inset-0 > div[class*="auth-container"] {
+                padding: 1.25rem !important; /* Reducción de padding de 32px a 20px */
+                border-radius: 1.5rem !important; /* Forzar bordes redondos completos, anula el rounded-t */
+            }
+
+            /* Compactación de formularios largos para evitar Scroll masivo */
+            .space-y-6 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
+            .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem !important; }
+            .grid.gap-4 { gap: 0.75rem !important; }
+
+            /* Numpad (Calculadora): Excepción. Este SÍ debe ser Bottom Sheet */
+            #numpad-modal {
+                align-items: flex-end !important;
+                padding: 0 !important; /* Sin márgenes para anclarse abajo */
+            }
+            #numpad-modal > div {
+                max-width: 100% !important;
+                max-height: 85dvh !important;
+                border-radius: 1.5rem 1.5rem 0 0 !important;
+                margin: 0 !important;
+            }
+            .numpad-key { height: 50px !important; font-size: 22px !important; }
         }
         
         /* Estilos específicos para replicar Google/GitHub Login (Adaptados a Dark Mode Apex) */
@@ -114,9 +158,46 @@
             transition: background-color 0.2s, transform 0.1s;
             text-transform: none;
         }
+        .btn-primary-auth:hover {
+            background-color: #4f46e5;
+            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
+        }
+        .btn-primary-auth:active {
+            transform: scale(0.95);
+        }
+        .btn-secondary-auth {
+            color: #818cf8;
+            background: transparent;
+            font-weight: 600;
+            border-radius: 8px;
+            padding: 10px 12px;
+            transition: background-color 0.2s;
+            text-transform: none;
+        }
+        .btn-secondary-auth:hover {
+            background-color: #334155;
+        }
+        .btn-social-auth {
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            font-weight: 600;
+            border-radius: 8px;
+            padding: 10px 24px;
+            transition: background-color 0.2s, border-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background-color: #1e293b;
+            text-transform: none;
+        }
+        .btn-social-auth:hover {
+            background-color: #334155;
+            border-color: #475569;
+        }
     </style>
 </head>
-<body class="pb-safe">
+<body class="pb-40">
 
     <!-- AUTENTICACIÓN -->
     <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 text-slate-200 flex flex-col items-center justify-center p-4 transition-opacity duration-300 hidden">
@@ -137,6 +218,20 @@
             
             <!-- Elección Inicial (Social vs Manual) -->
             <div id="login-initial-choice" class="space-y-6">
+                
+                <!-- APEX FIX: Módulo de Cuentas Recientes (Avatar Login) -->
+                <div id="recent-accounts-wrapper" class="hidden mb-2 animate-slideUp">
+                    <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center mb-4">Selecciona tu Bóveda</p>
+                    <div id="recent-accounts-list" class="flex gap-4 overflow-x-auto hide-scrollbar pb-2 justify-center">
+                        <!-- Los avatares se inyectan dinámicamente aquí -->
+                    </div>
+                    <div class="relative flex items-center py-2 mt-4 mb-2">
+                        <div class="flex-grow border-t border-slate-700/50"></div>
+                        <span class="flex-shrink-0 mx-4 text-[9px] font-bold text-slate-600 uppercase tracking-widest">Otras opciones de acceso</span>
+                        <div class="flex-grow border-t border-slate-700/50"></div>
+                    </div>
+                </div>
+                
                 <!-- Login Social -->
                 <button onclick="window.loginWithGoogle(event)" class="w-full btn-social-auth">
                     <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5"><g><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></g></svg>
@@ -185,6 +280,11 @@
                         <label for="show-pin-toggle" class="text-[13px] text-slate-400 cursor-pointer select-none">Mostrar contraseña</label>
                     </div>
                 </div>
+
+                <!-- APEX FIX: Botón de Autenticación Biométrica (Face ID / Passkey) inyectado en Login -->
+                <button onclick="triggerBiometricAuth()" id="btn-login-bio" type="button" class="hidden w-full bg-slate-800 text-emerald-400 p-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-fingerprint text-lg"></i> Usar Passkey / Face ID
+                </button>
 
                 <div class="text-[14px] text-indigo-400 font-medium cursor-pointer hover:text-indigo-300 transition-colors text-left mt-2">
                     ¿Olvidaste tu contraseña?
@@ -259,6 +359,7 @@
             <div class="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl"><i class="fa-solid fa-lock"></i></div><div><h2 class="text-xl font-black uppercase tracking-widest" id="lock-name">Usuario</h2><p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Ingrese Contraseña de Bóveda</p></div>
             <input type="password" id="session-pin-input" placeholder="••••••••" class="w-64 bg-slate-800 text-white p-4 rounded-2xl text-center text-xl tracking-widest outline-none border border-slate-700 focus:border-emerald-500 transition-colors">
             <button onclick="unlockSession()" type="button" class="w-64 bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform">Desbloquear</button>
+            <button onclick="triggerBiometricAuth()" id="btn-bio-auth" type="button" class="hidden mt-3 w-64 bg-slate-800 text-emerald-400 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform border border-slate-700 flex items-center justify-center gap-2"><i class="fa-solid fa-face-viewfinder text-lg"></i> Usar Face ID</button>
             <button onclick="logout()" type="button" class="block w-full text-[10px] text-slate-500 uppercase font-bold mt-8 hover:text-white">Cambiar de Cuenta</button>
         </div>
     </div>
@@ -267,7 +368,7 @@
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top shadow-sm">
         <div class="max-w-5xl mx-auto w-full">
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
-                <div class="flex items-center gap-3"><img src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
+                <div class="flex items-center gap-3"><img id="header-avatar" src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
                 <div class="flex items-center gap-2">
                     <button onclick="manualCloudSync()" type="button" id="dash-cloud-badge" class="bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all cursor-pointer hover:bg-slate-200"><div id="dash-cloud-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all"></div> Conectar</button>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
@@ -286,24 +387,24 @@
             <div class="wealth-card md:p-10 md:rounded-[3rem]">
                 <div class="relative z-10 space-y-8 md:space-y-10">
                     <div class="flex justify-between items-start">
-                        <div class="min-w-0 pr-4"> <!-- APEX FIX: min-w-0 para evitar estiramiento por textos largos -->
+                        <div>
                             <div class="flex items-center gap-2 mb-1">
-                                <p id="wealth-title" class="text-[9px] md:text-xs font-black text-white/50 uppercase tracking-widest truncate">Patrimonio Global Unificado</p>
+                                <p id="wealth-title" class="text-[9px] md:text-xs font-black text-white/50 uppercase tracking-widest">Patrimonio Global Unificado</p>
                             </div>
-                            <!-- APEX FIX: Truncado de saldos gigantes para evitar que la UI se deforme horizontalmente -->
+                            <!-- APEX FIX: Contenedor dividido para Patrimonio Dual -->
                             <div id="wealth-dual-container" class="flex items-end gap-6 mt-2">
-                                <div class="flex-1 min-w-0">
-                                    <h2 id="net-worth" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter truncate">$0</h2>
-                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Líquido en <span id="base-curr-label" class="text-white">COP</span></p>
+                                <div class="flex-1">
+                                    <h2 id="net-worth" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter">$0</h2>
+                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Líquido en <span id="base-curr-label" class="text-white">COP</span></p>
                                 </div>
-                                <div id="wealth-alt-block" class="flex-1 min-w-0 border-l border-white/20 pl-4 md:pl-6">
-                                    <h2 id="net-worth-alt" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter text-white/70 truncate">$0</h2>
-                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Líquido en <span id="alt-curr-label" class="text-white">USD</span></p>
+                                <div id="wealth-alt-block" class="flex-1 border-l border-white/20 pl-6">
+                                    <h2 id="net-worth-alt" class="text-3xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter text-white/70">$0</h2>
+                                    <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Líquido en <span id="alt-curr-label" class="text-white">USD</span></p>
                                 </div>
                             </div>
-                            <div id="wealth-single-container" class="hidden mt-2 min-w-0 w-full">
-                                <h2 id="net-worth-single" class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter truncate">$0</h2>
-                                <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 truncate">Convertido a <span id="base-curr-label-single" class="text-white">COP</span></p>
+                            <div id="wealth-single-container" class="hidden mt-2">
+                                <h2 id="net-worth-single" class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter">$0</h2>
+                                <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Convertido a <span id="base-curr-label-single" class="text-white">COP</span></p>
                             </div>
                         </div>
                         <div class="text-right shrink-0"><button onclick="showScoreModal()" type="button" class="bg-white/10 hover:bg-white/20 transition-colors px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 shadow-sm">Score: <span id="nexus-score" class="text-emerald-400">--</span> <i class="fa-solid fa-circle-info text-[8px] ml-1 opacity-50"></i></button></div>
@@ -1195,20 +1296,20 @@
     </main>
 
     <!-- FAB Y MODALES GLOBALES -->
-    <!-- APEX FIX: Desplazamiento dinámico del Botón "+" respetando la barra inferior (Home Indicator) de iOS -->
-    <div id="fab-main" class="fixed bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] right-6 md:right-12 lg:right-24 flex flex-col items-end gap-4 z-[40]">
-        <div id="fab-menu" class="hidden flex-col items-end gap-3 transition-all duration-300 transform translate-y-4 opacity-0">
+    <!-- APEX FIX: FAB Reajustado para Contenedores Nativos con Bottom Navbars -->
+    <div id="fab-main" class="fixed right-4 md:right-8 lg:right-16 flex flex-col items-end gap-4 z-[90]" style="bottom: calc(24px + env(safe-area-inset-bottom));">
+        <div id="fab-menu" class="hidden flex-col items-end gap-3 transition-all duration-300 transform translate-y-4 opacity-0 mb-2">
             <!-- APEX FIX: Botón de Módulo de Proyectos ahora abre directamente el Formulario de Nuevo Proyecto -->
-            <button onclick="openProjectModal()" type="button" title="Nuevo Proyecto" class="w-12 h-12 md:w-14 md:h-14 bg-cyan-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-folder-plus"></i></button>
-            <button onclick="openTaskForm()" type="button" title="Añadir Tarea" class="w-12 h-12 md:w-14 md:h-14 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-list-check"></i></button>
-            <button onclick="openLoanForm()" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-amber-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-file-signature"></i></button>
-            <button onclick="switchTab('calendar')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-rose-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-calendar-days"></i></button>
-            <button onclick="openForm('afterpay')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-teal-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-layer-group"></i></button>
-            <button onclick="openForm('transfer')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-indigo-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-right-left"></i></button>
-            <button onclick="openForm('expense')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-red-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-minus"></i></button>
-            <button onclick="openForm('income')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-emerald-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+            <button onclick="openProjectModal()" type="button" title="Nuevo Proyecto" class="w-12 h-12 md:w-14 md:h-14 bg-cyan-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-folder-plus"></i></button>
+            <button onclick="openTaskForm()" type="button" title="Añadir Tarea" class="w-12 h-12 md:w-14 md:h-14 bg-blue-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-list-check"></i></button>
+            <button onclick="openLoanForm()" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-amber-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-file-signature"></i></button>
+            <button onclick="switchTab('calendar')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-rose-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-calendar-days"></i></button>
+            <button onclick="openForm('afterpay')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-teal-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-layer-group"></i></button>
+            <button onclick="openForm('transfer')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-indigo-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-right-left"></i></button>
+            <button onclick="openForm('expense')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-red-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-minus"></i></button>
+            <button onclick="openForm('income')" type="button" class="w-12 h-12 md:w-14 md:h-14 bg-emerald-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform shrink-0"><i class="fa-solid fa-plus"></i></button>
         </div>
-        <button onclick="toggleFab()" type="button" id="fab-toggle-btn" class="w-14 h-14 md:w-16 md:h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl transition-transform duration-300 active:scale-90"><i class="fa-solid fa-plus"></i></button>
+        <button onclick="toggleFab()" type="button" id="fab-toggle-btn" class="w-14 h-14 md:w-16 md:h-16 bg-slate-900 text-white rounded-full shadow-[0_10px_25px_-5px_rgba(0,0,0,0.5)] flex items-center justify-center text-2xl transition-transform duration-300 active:scale-90 border-2 border-slate-700/50 shrink-0"><i class="fa-solid fa-plus"></i></button>
     </div>
 
     <!-- MODAL FORMULARIO TRANSACCIONES SSoT -->
@@ -1386,8 +1487,7 @@
 
     <!-- MODAL CALCULADORA NUMPAD -->
     <div id="numpad-modal" class="fixed inset-0 z-[120] hidden bg-slate-900/60 backdrop-blur-md flex flex-col justify-end sm:justify-center" style="-webkit-user-select: none;">
-        <!-- APEX FIX: Padding inferior automático (pb-[env(safe-area-inset-bottom)]) para que el botón Confirmar no se solape con la barra Home de iOS -->
-        <div class="bg-slate-100 w-full max-w-md md:max-w-lg mx-auto rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden numpad-modal-content shadow-2xl flex flex-col h-auto sm:max-h-[90vh] mt-auto pb-[env(safe-area-inset-bottom)]">
+        <div class="bg-slate-100 w-full max-w-md md:max-w-lg mx-auto rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden numpad-modal-content shadow-2xl flex flex-col h-auto sm:max-h-[90vh] mt-auto">
             <div class="bg-white p-5 pb-6 rounded-b-[2rem] shadow-sm shrink-0">
                 <div class="flex justify-between items-center mb-2"><p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Calculadora de Entrada</p><button type="button" onclick="closeNumpad()" class="text-slate-400 p-2 -m-2 active:scale-90 transition-transform"><i class="fa-solid fa-xmark text-xl"></i></button></div>
                 <p id="numpad-display" class="text-4xl font-black text-slate-800 text-center truncate py-3 min-h-[60px] flex items-center justify-center">$0</p>
@@ -1604,8 +1704,8 @@
         </div>
 
         <!-- MODAL CONFIRMACION GENERAL (Reemplazo window.confirm) -->
-        <div id="ui-confirm-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-            <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-amber-100 shadow-2xl">
+        <div id="ui-confirm-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 pb-safe">
+            <div class="theme-card w-full max-w-sm md:max-w-md rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 space-y-6 animate-slideUp border border-amber-100 shadow-2xl max-h-[90dvh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-xl font-black uppercase tracking-tighter text-amber-500"><i class="fa-solid fa-circle-question mr-2"></i>Confirmar</h3>
                     <button type="button" onclick="closeUIConfirmModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
@@ -1623,8 +1723,8 @@
         </div>
 
         <!-- MODAL CONFIRMACION ELIMINACION NATIVA (FRICCION CERO) -->
-        <div id="ui-delete-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-            <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-red-100 shadow-2xl">
+        <div id="ui-delete-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 pb-safe">
+            <div class="theme-card w-full max-w-sm md:max-w-md rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 space-y-6 animate-slideUp border border-red-100 shadow-2xl max-h-[90dvh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-xl font-black uppercase tracking-tighter text-red-500"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Confirmar</h3>
                     <button type="button" onclick="closeUIDeleteModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
@@ -1643,8 +1743,8 @@
         </div>
 
         <!-- MODAL PROMPT GENERAL (Reemplazo window.prompt) -->
-        <div id="ui-prompt-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-            <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
+        <div id="ui-prompt-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 pb-safe">
+            <div class="theme-card w-full max-w-sm md:max-w-md rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl max-h-[90dvh] overflow-y-auto">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-xl font-black uppercase tracking-tighter text-indigo-500"><i class="fa-solid fa-pen mr-2"></i>Editar</h3>
                     <button type="button" onclick="closeUIPromptModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
@@ -2994,26 +3094,33 @@
                 }
             });
 
-            // APEX FIX: Recuperación profunda de sesión con Try/Catch para Containers estrictos
-            try {
-                currentUser = localStorage.getItem('nexus_current_user');
-            } catch(e) {
-                console.warn("[APEX] Contenedor bloqueó el acceso síncrono al Storage.");
-            }
-            
-            if (!currentUser) {
-                currentUser = await NexusIDB.getSession();
-                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-            }
-            
-            if (!currentUser) {
+            // APEX FIX: Forzar SIEMPRE el inicio de sesión (Pantalla de Avatares) en cada arranque en frío
+            const isColdBoot = !sessionStorage.getItem('nexus_session_active');
+
+            if (!isColdBoot) {
+                // Recuperación profunda de sesión con Try/Catch para Containers estrictos (Hot Reload)
                 try {
-                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                    if (match) {
-                        currentUser = match[2];
-                        localStorage.setItem('nexus_current_user', currentUser);
-                    }
-                } catch(e) { console.warn("[APEX] Cookie access blocked in container."); }
+                    currentUser = localStorage.getItem('nexus_current_user');
+                } catch(e) {
+                    console.warn("[APEX] Contenedor bloqueó el acceso síncrono al Storage.");
+                }
+                
+                if (!currentUser) {
+                    currentUser = await NexusIDB.getSession();
+                    if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+                }
+                
+                if (!currentUser) {
+                    try {
+                        const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                        if (match) {
+                            currentUser = match[2];
+                            localStorage.setItem('nexus_current_user', currentUser);
+                        }
+                    } catch(e) { console.warn("[APEX] Cookie access blocked in container."); }
+                }
+            } else {
+                currentUser = null; // Fuerza a mostrar la pantalla de Acceso
             }
 
             if (!currentUser) {
@@ -3022,8 +3129,60 @@
                 // APEX FIX: Renderizado instantáneo local y disparo simultáneo de escaneo en la Nube
                 fetchLoginUsers(false);
                 
-                initCloud().then((isOnline) => {
-                    if(isOnline) fetchLoginUsers(true);
+                initCloud().then(async (isOnline) => {
+                    if(isOnline) {
+                        // APEX FIX: Escáner de intercepción de redirección OAuth (Fricción Cero Contenedores)
+                        try {
+                            const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                            const auth = getAuth();
+                            
+                            let oauthResolved = false;
+
+                            // 1. Motor de escucha pasiva (Atrapa la sesión si getRedirectResult falla por el WKWebView en iOS)
+                            onAuthStateChanged(auth, async (user) => {
+                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
+                                if (user && !currentUser) {
+                                    oauthResolved = true;
+                                    sessionStorage.removeItem('nexus_oauth_pending');
+                                    const dName = user.displayName ? user.displayName.split(' ')[0] : 'Usuario';
+                                    if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Sincronizando Bóveda de ${dName}...</p></div>`;
+                                    await handleOAuthResult(user);
+                                }
+                            });
+
+                            // 2. Interceptor activo de redirección
+                            const result = await getRedirectResult(auth);
+                            
+                            if (result && result.user && !currentUser) {
+                                if (sessionStorage.getItem('nexus_logged_out')) return; // APEX FIX: Bloquea Auto-Login fantasma tras cerrar sesión
+                                oauthResolved = true;
+                                sessionStorage.removeItem('nexus_oauth_pending');
+                                const dName = result.user.displayName ? result.user.displayName.split(' ')[0] : 'Usuario';
+                                if (ls) ls.innerHTML = `<div class="flex flex-col items-center justify-center h-full space-y-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl text-indigo-500"></i><p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-4">Validando a ${dName} en SSoT...</p></div>`;
+                                await handleOAuthResult(result.user);
+                                return; // Detiene el flujo de login, redirige al Dashboard
+                            }
+
+                            // 3. Fallback de Contingencia para Contenedores Estrictos de iOS
+                            if (sessionStorage.getItem('nexus_oauth_pending')) {
+                                setTimeout(() => {
+                                    if (!oauthResolved && !currentUser) {
+                                        sessionStorage.removeItem('nexus_oauth_pending');
+                                        window.alert("⚠️ El sistema de seguridad de tu iPhone/App bloqueó el traspaso automático de sesión de Google.\n\nPor favor, usa la opción 'Registro con Correo' o el 'Ingreso Manual' en la pantalla principal para entrar directamente a tu bóveda.");
+                                        fetchLoginUsers(true);
+                                    }
+                                }, 3500);
+                            }
+
+                        } catch(err) {
+                            console.error("OAuth Redirect Error:", err);
+                            let msgError = err.message || "Falló la validación con los servidores de autenticación.";
+                            if (err.code === 'auth/web-storage-unsupported') msgError = "El contenedor bloqueó las cookies necesarias. Inicia sesión manualmente por correo.";
+                            window.alert("⚠️ " + msgError);
+                        }
+                        
+                        fetchLoginUsers(true);
+                    }
                 });
             } else {
                 // ARRANQUE LOCAL-FIRST
@@ -3041,7 +3200,7 @@
 
         async function getFirebaseAuth() {
             const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-            const { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
             
             const firebaseConfig = {
                 apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
@@ -3054,25 +3213,36 @@
             };
             
             const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-            return { auth: getAuth(app), GoogleAuthProvider, OAuthProvider, signInWithPopup };
+            return { auth: getAuth(app), GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect };
         }
 
         window.loginWithGoogle = async function(event) {
             const btn = event.currentTarget;
             const originalHtml = btn.innerHTML;
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
             try {
                 btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
                 
-                const { auth, GoogleAuthProvider, signInWithPopup } = await getFirebaseAuth();
+                const { auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await getFirebaseAuth();
                 const provider = new GoogleAuthProvider();
                 
-                // APEX FIX: Forzar la selección de cuenta para limpiar estados fantasma en móviles/PWA
+                // APEX FIX: Forzar la selección de cuenta y extraer perfil completo
                 provider.setCustomParameters({ prompt: 'select_account' }); 
+                provider.addScope('profile');
+                provider.addScope('email');
                 
-                const result = await signInWithPopup(auth, provider);
-                await handleOAuthResult(result.user);
+                // APEX FIX: Detección estricta de contenedores iOS Swift / Android WebView
+                const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
                 
-                btn.innerHTML = originalHtml;
+                if (isMobileContainer) {
+                    sessionStorage.setItem('nexus_oauth_pending', 'true'); // APEX FIX: Flag de rastreo de redirección
+                    await signInWithRedirect(auth, provider);
+                    // No se restaura el botón porque el Frame navegará hacia Google
+                } else {
+                    const result = await signInWithPopup(auth, provider);
+                    await handleOAuthResult(result.user);
+                    btn.innerHTML = originalHtml;
+                }
             } catch(e) {
                 console.error("OAuth Error:", e);
                 let msg = "Fallo de comunicación con los servidores de Google.";
@@ -3097,12 +3267,21 @@
             try {
                 btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
                 
-                const { auth, OAuthProvider, signInWithPopup } = await getFirebaseAuth();
+                const { auth, OAuthProvider, signInWithPopup, signInWithRedirect } = await getFirebaseAuth();
                 const provider = new OAuthProvider('apple.com');
-                const result = await signInWithPopup(auth, provider);
-                await handleOAuthResult(result.user);
+                provider.addScope('name');
+                provider.addScope('email');
                 
-                btn.innerHTML = originalHtml;
+                const isMobileContainer = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(display-mode: standalone)').matches || window.webkit;
+                
+                if (isMobileContainer) {
+                    sessionStorage.setItem('nexus_oauth_pending', 'true'); // APEX FIX: Flag de rastreo de redirección
+                    await signInWithRedirect(auth, provider);
+                } else {
+                    const result = await signInWithPopup(auth, provider);
+                    await handleOAuthResult(result.user);
+                    btn.innerHTML = originalHtml;
+                }
             } catch(e) {
                 console.error("OAuth Error:", e);
                 let msg = "Fallo de comunicación con los servidores de Apple.";
@@ -3123,7 +3302,9 @@
         async function handleOAuthResult(user) {
             const email = user.email ? user.email.toLowerCase() : (user.uid + '@apple.com');
             const name = user.displayName || 'Usuario';
-            const photo = user.photoURL || '';
+            // Extraer foto en alta resolución si es de Google
+            const photo = user.photoURL ? user.photoURL.replace('=s96-c', '=s400-c') : '';
+            const uid = user.uid; // APEX FIX: Capturar el UID único
 
             // APEX FIX: Autenticación 100% Directa "One-Tap" Blindada contra congelamientos
             try {
@@ -3131,21 +3312,38 @@
                 if (!window.db) throw new Error("Network offline");
 
                 const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                // APEX FIX: Usar UID como llave maestra criptográfica en Firestore
+                const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', uid);
                 const docSnap = await getDoc(docRef);
                 
                 if (docSnap.exists()) {
                     // LOGIN DIRECTO: El usuario ya tiene bóveda en la nube
                     const cloudProfile = docSnap.data();
                     cloudProfile.isCloud = true;
-                    if(photo && !cloudProfile.avatar) cloudProfile.avatar = photo; // Actualizar foto si no tenía
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
-                    
+                    cloudProfile.uid = uid; // Asegurar que el UID esté inyectado
+
+                    // APEX FIX: Forzar inyección de datos de Google si el perfil local/nube estaba incompleto o desactualizado
+                    let needsUpdate = false;
+                    if (name && name !== 'Usuario' && (!cloudProfile.name || cloudProfile.name === 'Usuario' || cloudProfile.name === email)) {
+                        cloudProfile.name = name;
+                        needsUpdate = true;
+                    }
+                    if (photo && cloudProfile.avatar !== photo) {
+                        cloudProfile.avatar = photo;
+                        needsUpdate = true;
+                    }
+
+                    if (needsUpdate || !cloudProfile.uid) {
+                        await setDoc(docRef, { name: cloudProfile.name, avatar: cloudProfile.avatar, uid: uid }, { merge: true });
+                    }
+
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(cloudProfile));
                     userProfile = cloudProfile;
-                    await processLoginSuccess(email); // Saltamos directo al Dashboard
+                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
                 } else {
                     // CREACIÓN DIRECTA (Sign Up): Registrar bóveda en silencio sin pedir PIN
                     const newUserProfile = { 
+                        uid: uid, // APEX FIX: Guardar UID
                         name: name, 
                         email: email, 
                         pin: "AutoGen@1234!", // Contraseña de respaldo asignada automáticamente
@@ -3156,10 +3354,10 @@
                     };
                     
                     await setDoc(docRef, newUserProfile, { merge: true });
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(newUserProfile));
+                    localStorage.setItem(`nexus_profile_${uid}`, JSON.stringify(newUserProfile));
                     
                     userProfile = newUserProfile;
-                    await processLoginSuccess(email); // Saltamos directo al Dashboard
+                    await processLoginSuccess(uid); // Saltamos directo al Dashboard con el UID
                 }
             } catch(e) {
                 console.warn("[APEX SYS] Fricción en proceso OAuth Directo", e);
@@ -3169,47 +3367,60 @@
         }
 
         async function fetchLoginUsers(scanCloud = false) {
-            const list = $id('login-users-list');
-            if(!list) return;
+            const wrapper = $id('recent-accounts-wrapper');
+            const list = $id('recent-accounts-list');
+            if(!list || !wrapper) return;
             
             let usersMap = new Map();
             
-            // 1. Cargar de caché local instantáneamente
+            // 1. Cargar de caché local instantáneamente (Perfiles Guardados)
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key.startsWith('nexus_profile_')) {
-                    const p = JSON.parse(localStorage.getItem(key));
-                    p.isLocal = true;
-                    usersMap.set(p.email, p);
+                    try {
+                        const p = JSON.parse(localStorage.getItem(key));
+                        p.isLocal = true;
+                        const userId = p.uid || p.email; // APEX FIX: Soporte para UID
+                        if(userId) usersMap.set(userId, p);
+                    } catch(e) {}
                 }
             }
             
             // 2. Función de pintado aislada para ejecución inmediata
             const renderList = () => {
-                let html = '';
-                Array.from(usersMap.values()).forEach(p => {
-                    const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
-                    html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
-                        <div class="flex items-center gap-3 overflow-hidden">
-                            <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
-                            <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
-                        </div>
-                        <div class="flex items-center gap-2 shrink-0 ml-2">
-                            <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
-                        </div>
-                    </div>`;
-                    localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
-                });
-                if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
-                else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
-                list.innerHTML = html;
-                filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
+                if(usersMap.size > 0) {
+                    wrapper.classList.remove('hidden');
+                    let html = '';
+                    Array.from(usersMap.values()).forEach(p => {
+                        const userId = p.uid || p.email;
+                        const firstName = p.name ? p.name.split(' ')[0] : 'Usuario';
+                        const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-slate-400 text-xl"></i>`;
+                        const cloudBadge = p.isCloud ? `<div class="absolute bottom-0 right-0 w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-800 flex items-center justify-center shadow-sm" title="Sincronizado"><i class="fa-solid fa-cloud text-[7px] text-white"></i></div>` : '';
+
+                        // Diseño de "Burbuja" al estilo Netflix / Cuentas Google
+                        html += `
+                        <div onclick="selectUserForLogin('${userId}', '${p.name}', '${p.email}')" class="flex flex-col items-center gap-2 cursor-pointer group w-[72px] shrink-0 transition-transform active:scale-90">
+                            <div class="relative">
+                                <div class="w-16 h-16 rounded-full border-[3px] border-slate-700 group-hover:border-indigo-500 overflow-hidden shadow-xl bg-slate-800 flex items-center justify-center transition-colors">
+                                    ${avatarHtml}
+                                </div>
+                                ${cloudBadge}
+                            </div>
+                            <p class="text-[10px] font-black text-slate-300 w-full text-center truncate group-hover:text-indigo-400 transition-colors uppercase tracking-widest">${firstName}</p>
+                        </div>`;
+                        localStorage.setItem(`nexus_profile_${userId}`, JSON.stringify(p));
+                    });
+                    list.innerHTML = html;
+                } else {
+                    wrapper.classList.add('hidden');
+                    list.innerHTML = '';
+                }
             };
 
             // Ejecutar pintado a latencia cero
             renderList();
 
-            // 3. Consulta en segundo plano a la Nube (Solo a petición)
+            // 3. Consulta en segundo plano a la Nube (Solo a petición para refrescar)
             if (scanCloud && window.db) {
                 try {
                     const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -3218,27 +3429,25 @@
                     
                     snap.forEach(doc => {
                         const data = doc.data();
-                        if(usersMap.has(data.email)) {
-                            const existing = usersMap.get(data.email);
-                            if(!existing.isCloud || existing.name !== data.name || existing.pin !== data.pin) {
+                        const userId = data.uid || data.email; 
+                        if(usersMap.has(userId)) {
+                            const existing = usersMap.get(userId);
+                            if(!existing.isCloud || existing.name !== data.name || existing.pin !== data.pin || existing.avatar !== data.avatar) {
                                 existing.isCloud = true;
                                 existing.name = data.name; 
                                 existing.pin = data.pin; 
+                                if (data.avatar) existing.avatar = data.avatar;
                                 hasChanges = true;
                             }
-                        } else {
-                            data.isCloud = true;
-                            usersMap.set(data.email, data);
-                            hasChanges = true;
                         }
+                        // APEX FIX: Eliminada la inyección de cuentas ajenas. 
+                        // Solo se actualizan los datos de la nube si la cuenta ya existe en la memoria física de este dispositivo.
                     });
                     
                     if (hasChanges) renderList();
-                    else if (usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No se encontraron bóvedas en la red.</p>';
                     
                 } catch(e) { 
-                    console.warn("[APEX] Fallo leyendo usuarios en login", e); 
-                    if(usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión a la red.</p>';
+                    console.warn("[APEX] Fallo sincronizando perfiles desde la nube en login", e); 
                 }
             }
         }
@@ -3266,6 +3475,8 @@
                 return alert("Por favor, ingresa un correo electrónico válido.");
             }
 
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
+            
             const btn = event.currentTarget;
             const originalHtml = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
@@ -3275,14 +3486,16 @@
                 // 1. Buscar primero en caché local (LocalStorage)
                 let foundLocally = false;
                 let userName = 'Usuario';
+                let foundUserId = email; // Fallback al email si no hay UID
                 
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (key.startsWith('nexus_profile_')) {
                         const p = JSON.parse(localStorage.getItem(key));
-                        if(p.email.toLowerCase() === email) {
+                        if(p.email && p.email.toLowerCase() === email) {
                             foundLocally = true;
                             userName = p.name || 'Usuario';
+                            foundUserId = p.uid || p.email; // APEX FIX: Prioridad a UID
                             break;
                         }
                     }
@@ -3293,16 +3506,30 @@
                     await initCloud(); // APEX FIX: Forzar inicialización de nube para validar cuentas remotas
                     if (window.db) {
                         try {
-                            const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                            const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
-                            const docSnap = await getDoc(docRef);
+                            const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                            const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), where("email", "==", email));
+                            const docSnap = await getDocs(q);
                             
-                            if (docSnap.exists()) {
-                                const cloudProfile = docSnap.data();
+                            if (!docSnap.empty) {
+                                const cloudProfile = docSnap.docs[0].data();
                                 cloudProfile.isCloud = true;
-                                localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                                foundUserId = cloudProfile.uid || cloudProfile.email;
+                                localStorage.setItem(`nexus_profile_${foundUserId}`, JSON.stringify(cloudProfile));
                                 foundLocally = true;
                                 userName = cloudProfile.name || 'Usuario';
+                            } else {
+                                // Fallback para usuarios viejos
+                                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                                const docRefOld = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email);
+                                const docSnapOld = await getDoc(docRefOld);
+                                if (docSnapOld.exists()) {
+                                    const cloudProfile = docSnapOld.data();
+                                    cloudProfile.isCloud = true;
+                                    foundUserId = email;
+                                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(cloudProfile));
+                                    foundLocally = true;
+                                    userName = cloudProfile.name || 'Usuario';
+                                }
                             }
                         } catch(cloudErr) {
                             console.warn("Fallo verificando en la nube:", cloudErr);
@@ -3314,8 +3541,8 @@
                 btn.disabled = false;
 
                 if (foundLocally) {
-                    // Pasar a la sección de PIN
-                    selectUserForLogin(email, userName);
+                    // Pasar a la sección de PIN con el ID encontrado
+                    selectUserForLogin(foundUserId, userName, email);
                 } else {
                     alert(`No se encontró una bóveda registrada para:\n${email}\n\nSi eres nuevo, presiona "Crear cuenta".`);
                 }
@@ -3328,8 +3555,8 @@
             }
         }
         
-        function selectUserForLogin(email, name) {
-            loginSelectedEmail = email;
+        function selectUserForLogin(userId, name, realEmail) {
+            loginSelectedEmail = userId; // APEX FIX: Conservamos nombre variable pero aloja UID o Email
             $id('login-initial-choice').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
             $id('login-pin-section').classList.remove('hidden');
@@ -3337,14 +3564,24 @@
             const title = $id('auth-main-title');
             if(title) title.innerText = 'Te damos la bienvenida';
 
-            $id('login-active-email').innerText = email; // Google muestra el email
+            // Mostrar el email real visualmente buscando el perfil
+            let displayEmail = realEmail || userId;
+            try {
+                const p = JSON.parse(localStorage.getItem(`nexus_profile_${userId}`));
+                if (p && p.email) displayEmail = p.email;
+            } catch(e) {}
+            
+            $id('login-active-email').innerText = displayEmail;
             $id('login-existing-pin').value = '';
             
-            // APEX FIX: Autodisparo del FaceID al entrar a la pantalla de PIN
-            setTimeout(() => {
-                triggerFaceID();
-                $id('login-existing-pin').focus();
-            }, 300);
+            // APEX FIX: Auto-disparo y visualización de Biometría nativa en Login
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                const bioBtn = $id('btn-login-bio');
+                if (bioBtn) bioBtn.classList.remove('hidden');
+                setTimeout(() => triggerBiometricAuth(), 400);
+            } else {
+                setTimeout(() => $id('login-existing-pin').focus(), 100);
+            }
         }
 
         function cancelUserSelection() {
@@ -3411,10 +3648,14 @@
             const loginScreen = $id('login-screen');
             if(loginScreen) { 
                 loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                
+                // APEX FIX: Arrancar sistema ANTES de que termine la animación, para asegurar que la UI ya tenga los datos de Google
+                try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                
                 setTimeout(async () => { 
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
-                    try { await bootApp(); } catch(err) { console.error("Boot err", err); }
+                    
                     try { await initCloud(); fetchCloudState(); } catch(err) { console.error("Cloud err", err); }
                 }, 300); 
             } else {
@@ -3456,10 +3697,19 @@
             
             if(!email || !name || !passRegex.test(pin)) return alert("Todos los campos son requeridos. La contraseña debe tener al menos 8 caracteres, incluir mayúsculas, minúsculas, números y caracteres especiales.");
             
-            let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
+            sessionStorage.removeItem('nexus_logged_out'); // APEX FIX: Permite nuevo login
+            
+            let existingProfile = null;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('nexus_profile_')) {
+                    const p = JSON.parse(localStorage.getItem(key));
+                    if (p && p.email && p.email.toLowerCase() === email) existingProfile = p;
+                }
+            }
             if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
             
-            userProfile = { name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now() }; 
+            userProfile = { uid: email, name, email, pin, avatar: window.tempOAuthAvatar || null, lastSeen: Date.now(), isCloud: true }; 
             localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
             
             await initCloud(); // APEX FIX: Forzar enlace de red para subir nuevo perfil
@@ -3502,7 +3752,18 @@
             const reqPin = savedState && savedState.settings ? savedState.settings.requirePin : false;
             if(!sessionUnlocked && reqPin && !bypass) {
                 const lock = $id('session-lock-screen');
-                if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(ln) ln.innerText = userProfile.name; } return;
+                if(lock) { 
+                    lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); 
+                    const ln = $id('lock-name'); if(ln) ln.innerText = userProfile.name; 
+                    
+                    // APEX FIX: Autodisparo Biométrico en Contenedor iOS
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                        const bioBtn = $id('btn-bio-auth');
+                        if (bioBtn) bioBtn.classList.remove('hidden');
+                        setTimeout(() => triggerBiometricAuth(), 400); // Retardo sutil para que el Modal renderice antes del prompt nativo
+                    }
+                } 
+                return;
             }
             if(bypass) sessionStorage.removeItem('nexus_admin_bypass');
             sessionUnlocked = true; 
@@ -3595,6 +3856,21 @@
             });
 
             const hb = $id('header-user-badge'); if(hb) hb.innerText = userProfile.name;
+            
+            // APEX FIX: Inyectar la foto de perfil de Google en el Avatar del Encabezado
+            const ha = $id('header-avatar');
+            if (ha) {
+                if (userProfile.avatar) {
+                    ha.src = userProfile.avatar;
+                    ha.classList.remove('rounded-lg');
+                    ha.classList.add('rounded-full');
+                } else {
+                    ha.src = 'icono.png';
+                    ha.classList.remove('rounded-full');
+                    ha.classList.add('rounded-lg');
+                }
+            }
+            
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
             initNexus();
@@ -3602,8 +3878,78 @@
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
-        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
-        function logout() { 
+        // APEX FIX: Motor Biométrico y Manejador de Bloqueo de Bóveda
+        function triggerBiometricAuth() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                window.webkit.messageHandlers.biometricAuthHandler.postMessage("");
+            }
+        }
+
+        window.onBiometricSuccess = async function() {
+            console.log("¡Face ID Exitoso!");
+            
+            // APEX FIX: Rutear el éxito biométrico dependiendo de la pantalla activa
+            const loginScreen = $id('login-screen');
+            if (loginScreen && !loginScreen.classList.contains('hidden') && loginSelectedEmail) {
+                const profile = JSON.parse(localStorage.getItem(`nexus_profile_${loginSelectedEmail}`));
+                if (profile) {
+                    userProfile = profile;
+                    userProfile.lastSeen = Date.now();
+                    localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(userProfile));
+                    await processLoginSuccess(loginSelectedEmail);
+                }
+            } else {
+                unlockSession(true); 
+            }
+        };
+
+        window.onBiometricFailure = function(reason) {
+            console.log("Falló el Face ID o fue cancelado. Razón:", reason);
+            const bioBtn = $id('btn-bio-auth');
+            if (bioBtn) bioBtn.classList.remove('hidden');
+            const bioLoginBtn = $id('btn-login-bio');
+            if (bioLoginBtn) bioLoginBtn.classList.remove('hidden');
+            
+            const pinInput = $id('session-pin-input');
+            const loginPinInput = $id('login-existing-pin');
+            
+            if (pinInput && !$id('session-lock-screen').classList.contains('hidden')) { 
+                pinInput.value = ''; pinInput.focus(); 
+            } else if (loginPinInput && !$id('login-screen').classList.contains('hidden')) {
+                loginPinInput.value = ''; loginPinInput.focus();
+            }
+        };
+
+        function unlockSession(isBiometric = false) {
+            const pinInput = $id('session-pin-input');
+            
+            if (!isBiometric) {
+                const userPin = (userProfile && userProfile.pin) ? userProfile.pin : "Admin@1234!";
+                if (!pinInput || pinInput.value !== userPin) {
+                    alert("⚠️ Contraseña de bóveda incorrecta.");
+                    if(pinInput) pinInput.value = '';
+                    return;
+                }
+            }
+
+            sessionUnlocked = true;
+            if(pinInput) pinInput.value = '';
+            
+            const lock = $id('session-lock-screen');
+            if (lock) {
+                lock.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => { 
+                    lock.classList.add('hidden'); 
+                    lock.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); 
+                    // Reanudar el ciclo de vida de la aplicación
+                    initNexus();
+                    setTimeout(() => { checkDailyBriefing(); }, 800);
+                }, 300);
+            }
+        }
+
+        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria y Cierre de Nube
+        async function logout() { 
             sessionUnlocked = false; 
             
             if(unsubscribeSnapshot) unsubscribeSnapshot();
@@ -3615,9 +3961,21 @@
             }
             
             localStorage.removeItem('nexus_current_user'); 
-            NexusIDB.saveSession(null);
+            await NexusIDB.saveSession(null);
             document.cookie = "nexus_current_user=; max-age=0; path=/";
-            location.reload(); 
+            
+            sessionStorage.setItem('nexus_logged_out', 'true'); // APEX FIX: Candado estricto anti-bucle
+            
+            // APEX FIX: Destrucción formal de la credencial en Firebase Auth
+            try {
+                const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth();
+                if (auth) await signOut(auth);
+            } catch(e) {
+                console.warn("[APEX] Fricción cerrando sesión en Firebase", e);
+            }
+
+            setTimeout(() => { location.reload(); }, 400); // APEX FIX: Retardo para asegurar purga de caché de Firebase
         }
         
         function setApMode(mode) {
@@ -10168,6 +10526,45 @@
             reader.readAsText(file);
         }
 
+        function setupInactivityLock() {
+            if (!state || !state.settings) return;
+            const reqPin = state.settings.requirePin;
+            
+            document.removeEventListener('mousemove', resetInactivityTimer);
+            document.removeEventListener('keypress', resetInactivityTimer);
+            document.removeEventListener('touchstart', resetInactivityTimer);
+            
+            if (reqPin) {
+                document.addEventListener('mousemove', resetInactivityTimer);
+                document.addEventListener('keypress', resetInactivityTimer);
+                document.addEventListener('touchstart', resetInactivityTimer);
+                resetInactivityTimer();
+            } else {
+                if (inactivityTimer) clearTimeout(inactivityTimer);
+            }
+        }
+
+        function resetInactivityTimer() {
+            if (inactivityTimer) clearTimeout(inactivityTimer);
+            inactivityTimer = setTimeout(() => {
+                if (!sessionUnlocked) return;
+                sessionUnlocked = false;
+                const lock = $id('session-lock-screen');
+                if (lock) {
+                    lock.classList.remove('hidden');
+                    lock.classList.remove('opacity-0');
+                    const ln = $id('lock-name'); 
+                    if(ln && typeof userProfile !== 'undefined') ln.innerText = userProfile.name;
+                    
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.biometricAuthHandler) {
+                        const bioBtn = $id('btn-bio-auth');
+                        if (bioBtn) bioBtn.classList.remove('hidden');
+                        setTimeout(() => triggerBiometricAuth(), 400);
+                    }
+                }
+            }, 5 * 60 * 1000); // 5 minutos de inactividad activa la Bóveda
+        }
+
         function setupAutoBackup() {
             if (autoBackupInterval) clearInterval(autoBackupInterval);
             if (state.settings && state.settings.autoBackup && state.settings.backupTime) {
@@ -10464,76 +10861,8 @@
                         <button onclick="generateTaskVaultToken('${v.id}')" class="w-7 h-7 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
                         <button onclick="triggerUIDelete('task_vault', '${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
                     </div>
-                </div>
+                </div>       a
             `).join('');
-        }
-
-        // ==========================================
-        // APEX ENGINE: EDGE SWIPE (Gestos de Retroceso Nativo)
-        // ==========================================
-        document.addEventListener('touchstart', handleTouchStart, {passive: true});
-        document.addEventListener('touchmove', handleTouchMove, {passive: true});
-
-        let xDown = null;
-        let yDown = null;
-
-        function handleTouchStart(evt) {
-            const firstTouch = evt.touches[0];
-            xDown = firstTouch.clientX;
-            yDown = firstTouch.clientY;
-        }
-
-        function handleTouchMove(evt) {
-            if (!xDown || !yDown) return;
-
-            // Fricción Cero: Solo activamos el retroceso si el deslizamiento 
-            // comienza en el borde izquierdo de la pantalla (primeros 40px)
-            if (xDown > 40) return; 
-
-            let xUp = evt.touches[0].clientX;
-            let yUp = evt.touches[0].clientY;
-            let xDiff = xDown - xUp;
-            let yDiff = yDown - yUp;
-
-            // Si el deslizamiento es horizontal (hacia la derecha)
-            if (Math.abs(xDiff) > Math.abs(yDiff)) {
-                if (xDiff < -80) { // Umbral de 80px para confirmar el gesto de retroceso
-                    
-                    let actionTaken = false;
-
-                    // 1. Ocultar todos los modales sobrepuestos (excepto Login/Lock)
-                    const modals = document.querySelectorAll('.fixed.inset-0:not(.hidden)');
-                    if (modals.length > 0) {
-                        modals.forEach(modal => {
-                            if (modal.id !== 'login-screen' && modal.id !== 'session-lock-screen') {
-                                modal.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-                                setTimeout(() => {
-                                    modal.classList.add('hidden');
-                                    modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-                                }, 300);
-                                actionTaken = true;
-                            }
-                        });
-                    } 
-                    
-                    // 2. Si no hay modales, retroceder al inicio (Dashboard) si no estamos ya en él
-                    if (!actionTaken && typeof state !== 'undefined' && state.activeTab && state.activeTab !== 'home') {
-                        if (typeof switchTab === 'function') switchTab('home');
-                        actionTaken = true;
-                    } 
-                    
-                    // 3. Fallback a navegación estándar
-                    if (!actionTaken && window.history.length > 1) {
-                        window.history.back();
-                    }
-
-                    // Feedback Háptico (Vibración ligera) si está disponible en Android/PWA
-                    if (navigator.vibrate) navigator.vibrate(40);
-
-                    xDown = null;
-                    yDown = null;
-                }
-            }
         }
 
         </script>
