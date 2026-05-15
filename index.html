@@ -3223,6 +3223,7 @@
             const fm = $id('finances-menu'); const fd = $id('finances-detail'); if (fm && fd) { fm.classList.remove('hidden'); fd.classList.add('hidden'); }
             const ll = $id('loans-view-list'); const ld = $id('loans-view-detail'); if (ll && ld) { ll.classList.remove('hidden'); ld.classList.add('hidden'); }
             const isBack = id === 'home' && state.activeTab !== 'home'; state.activeTab = id;
+            saveState(); // APEX FIX: Guardar la pestaña activa inmediatamente para persistencia
             $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
             const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
             const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes', 'tasks', 'projects'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
@@ -8442,15 +8443,15 @@
                 const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'));
                 let html = '';
                 if (!state.taskVaults) state.taskVaults = [];
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.taskVaults.some(v => v.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-indigo-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-list-check text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-indigo-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${doc.id}', '${data.name}', '${data.owner}')" class="bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-indigo-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
-                });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas de tareas nuevas en la red.</p>';
-                radarList.innerHTML = html;
+            populateTaskVaultSelects(); // APEX FIX: Popular opciones de Bóvedas de Tareas en Arranque
+
+            // APEX FIX: App Real Behavior - Recordar la última interfaz exacta donde el usuario se quedó
+            if (!sessionStorage.getItem('nexus_session_active')) {
+                // Eliminamos la redirección forzada a 'home' para que respete state.activeTab
+                sessionStorage.setItem('nexus_session_active', 'true');
+            }
+
+            setupInactivityLock(); 
             } catch(e) {
                 radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
             }
