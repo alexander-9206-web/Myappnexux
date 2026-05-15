@@ -749,6 +749,11 @@
                     <h3 class="text-[11px] font-black uppercase text-red-600 tracking-widest"><i class="fa-solid fa-user-shield mr-2"></i>Gestión Total de Usuarios (SSoT)</h3>
                     <button type="button" onclick="loadAdminGlobalUsers()" class="bg-white text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm border border-red-100 active:scale-95 transition-transform hover:bg-red-50"><i class="fa-solid fa-rotate mr-1"></i> Actualizar</button>
                 </div>
+                <!-- BARRA DE ACCIÓN MASIVA (BULK) -->
+                <div id="admin-bulk-actions" class="hidden flex justify-between items-center bg-red-50 p-3 rounded-[1rem] border border-red-200 mb-3 animate-slideUp">
+                    <span class="text-[10px] font-black uppercase text-red-600"><span id="admin-bulk-count">0</span> Seleccionados</span>
+                    <button onclick="openBulkDeleteUsersModal()" class="bg-red-600 text-white px-3 py-2 rounded-lg text-[9px] font-black uppercase shadow-sm flex items-center gap-1 active:scale-95 transition-transform"><i class="fa-solid fa-dumpster-fire"></i> Purga Masiva</button>
+                </div>
                 <div id="admin-global-users-list" class="space-y-2 max-h-64 overflow-y-auto hide-scrollbar"></div>
 
                 <!-- NUEVO: Módulo de Feature Flags (Encendido/Apagado de Apps) -->
@@ -1353,36 +1358,7 @@
                 <button type="button" onclick="closeReorderModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-tight shrink-0">Sube o baja las cuentas. El orden de las divisas y grupos en el Dashboard dependerá de la posición de cada bóveda aquí.</p>
-            <div id="reorder-accounts-list" class="flex-1 overflow-y-auto space-y-2 hide-scrollbar pr-2 pb-4"></div>
-        </div>
-    </div>
-
-    <!-- MODAL TOMAR CONTROL (TAKEOVER) -->
-    <div id="takeover-user-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
-        <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
-            <div class="text-center">
-                <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm border border-amber-200">
-                    <i class="fa-solid fa-key text-2xl"></i>
-                </div>
-                <h3 class="text-xl font-black uppercase text-amber-600 tracking-tighter">Acceso Maestro</h3>
-                <p class="text-[10px] text-slate-500 mt-2 font-bold uppercase">Vas a tomar el control de la bóveda de <span id="takeover-user-target" class="text-slate-700 font-black"></span>.</p>
-                <p class="text-[8px] text-amber-500 mt-1 uppercase tracking-widest">Requiere PIN Administrador</p>
-            </div>
-            <div class="space-y-4">
-                <input type="hidden" id="takeover-user-email">
-                <input type="password" id="takeover-user-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] text-2xl w-full bg-slate-50 border-slate-200 focus:border-amber-500 transition-colors" inputmode="numeric">
-                
-                <p id="takeover-error-msg" class="text-[9px] text-red-500 font-bold hidden text-center uppercase tracking-widest">PIN de acceso denegado.</p>
-                
-                <div class="flex gap-2 mt-4">
-                    <button type="button" onclick="confirmTakeoverUserVault()" class="flex-1 bg-amber-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Acceder</button>
-                    <button type="button" onclick="closeTakeoverModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL ELIMINAR BÓVEDA USUARIO -->
+        <!-- MODAL ELIMINAR BÓVEDA USUARIO -->
         <div id="delete-user-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp">
                 <div class="text-center">
@@ -1409,6 +1385,35 @@
                     <div class="flex gap-2 mt-4">
                         <button type="button" onclick="confirmDeleteUserVault()" class="flex-1 bg-red-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Confirmar</button>
                         <button type="button" onclick="closeDeleteUserModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL ELIMINAR MÚLTIPLES BÓVEDAS (BULK) -->
+        <div id="bulk-delete-users-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-red-200 shadow-2xl">
+                <div class="text-center">
+                    <i class="fa-solid fa-dumpster-fire text-4xl text-red-600 mb-3"></i>
+                    <h3 class="text-xl font-black uppercase text-red-600 tracking-tighter">Destrucción Masiva</h3>
+                    <p class="text-[10px] text-slate-500 mt-2 font-bold uppercase">Se erradicarán <span id="bulk-del-count-display" class="text-red-600 font-black"></span> bóvedas de raíz, con sus datos locales y registros en la nube (SSoT).</p>
+                </div>
+                <div class="space-y-4">
+                    <label class="flex items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-2xl cursor-pointer active:scale-95 transition-transform">
+                        <input type="checkbox" id="bulk-del-users-check" class="w-5 h-5 rounded border-red-300 text-red-600 focus:ring-red-500 outline-none shadow-sm">
+                        <span class="text-[9px] font-bold text-red-800 uppercase tracking-widest leading-tight">Autorizo la purga irrevocable y profunda de estas cuentas seleccionadas.</span>
+                    </label>
+
+                    <div class="flex gap-2">
+                        <input type="password" id="bulk-del-users-pin" maxlength="4" placeholder="PIN" class="form-input text-center tracking-[0.5em] text-sm w-1/3 bg-slate-50 border-slate-200 focus:border-red-500 transition-colors" inputmode="numeric">
+                        <input type="text" id="bulk-del-users-keyword" class="form-input text-center font-black uppercase flex-1 bg-slate-50 border-slate-200 focus:border-red-500 transition-colors placeholder:text-slate-400" placeholder="Escriba RESET">
+                    </div>
+                    
+                    <p id="bulk-del-users-error" class="text-[9px] text-red-500 font-bold hidden text-center uppercase tracking-widest">Revisa el PIN, la palabra RESET y la confirmación.</p>
+                    
+                    <div class="flex gap-2 mt-4">
+                        <button type="button" onclick="confirmBulkDeleteUsers()" class="flex-1 bg-red-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"><i class="fa-solid fa-fire"></i> Ejecutar</button>
+                        <button type="button" onclick="closeBulkDeleteUsersModal()" class="flex-1 bg-slate-200 text-slate-700 p-4 rounded-2xl font-black uppercase text-xs active:scale-95 transition-transform">Cancelar</button>
                     </div>
                 </div>
             </div>
@@ -8567,7 +8572,8 @@
                     const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
 
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all gap-2">
-                        <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <div class="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+                            ${!isCurrent ? `<input type="checkbox" value="${data.email}" class="admin-user-select-cb w-5 h-5 rounded border-red-300 text-red-600 focus:ring-red-500 cursor-pointer shadow-sm shrink-0" onchange="handleAdminUserSelect()">` : `<div class="w-5 h-5 shrink-0"></div>`}
                             <div class="w-10 h-10 rounded-full ${isCurrent && !data.avatar ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
                             <div class="flex flex-col min-w-0 flex-1">
                                 <p class="text-[11px] font-black uppercase text-slate-800 truncate">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
@@ -8897,6 +8903,106 @@
             } else {
                 if(err) err.classList.remove('hidden');
                 $id('del-user-pin').value = '';
+            }
+        }
+
+        // APEX FIX: Lógica de Selección y Borrado Masivo (Bulk Wipe) SSoT
+        function handleAdminUserSelect() {
+            const checkboxes = document.querySelectorAll('.admin-user-select-cb:checked');
+            const bulkDiv = $id('admin-bulk-actions');
+            const countSpan = $id('admin-bulk-count');
+            if (bulkDiv && countSpan) {
+                if (checkboxes.length > 0) {
+                    bulkDiv.classList.remove('hidden');
+                    countSpan.innerText = checkboxes.length;
+                } else {
+                    bulkDiv.classList.add('hidden');
+                }
+            }
+        }
+
+        function openBulkDeleteUsersModal() {
+            const checkboxes = document.querySelectorAll('.admin-user-select-cb:checked');
+            if (checkboxes.length === 0) return;
+            const mod = $id('bulk-delete-users-modal');
+            if(mod) {
+                $id('bulk-del-count-display').innerText = checkboxes.length;
+                $id('bulk-del-users-check').checked = false;
+                $id('bulk-del-users-keyword').value = '';
+                $id('bulk-del-users-pin').value = '';
+                const err = $id('bulk-del-users-error');
+                if(err) err.classList.add('hidden');
+                
+                mod.classList.remove('hidden');
+                mod.classList.remove('opacity-0');
+            }
+        }
+
+        function closeBulkDeleteUsersModal() {
+            const mod = $id('bulk-delete-users-modal');
+            if(mod) {
+                mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => { 
+                    mod.classList.add('hidden'); 
+                    mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); 
+                }, 300);
+            }
+        }
+
+        async function confirmBulkDeleteUsers() {
+            const inputPin = $id('bulk-del-users-pin').value.trim();
+            const isChecked = $id('bulk-del-users-check').checked;
+            const kw = $id('bulk-del-users-keyword').value.toUpperCase();
+            const err = $id('bulk-del-users-error');
+            
+            // Requerir PIN maestro de la sesión root actual
+            if((inputPin === "1234" || inputPin === userProfile.pin) && isChecked && kw === 'RESET') {
+                if(err) err.classList.add('hidden');
+                
+                const checkboxes = document.querySelectorAll('.admin-user-select-cb:checked');
+                const emailsToDelete = Array.from(checkboxes).map(cb => cb.value);
+                
+                closeBulkDeleteUsersModal();
+                const listEl = $id('admin-global-users-list');
+                if(listEl) listEl.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4"><i class="fa-solid fa-fire text-red-600 fa-bounce mr-1"></i> Ejecutando purga masiva SSoT...</p>';
+
+                let dbModule = null;
+                if (window.db) {
+                    try {
+                        dbModule = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    } catch(e) { console.warn(e); }
+                }
+
+                // Iteración de destrucción profunda
+                for (const email of emailsToDelete) {
+                    // Borrado Local
+                    localStorage.removeItem('nexus_profile_' + email);
+                    localStorage.removeItem('nexus_db_' + email);
+                    localStorage.removeItem('nexus_briefing_' + email);
+                    
+                    // Borrado Nube (Firebase DocumentTree)
+                    if (dbModule && window.db) {
+                        try {
+                            const { doc, deleteDoc } = dbModule;
+                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
+                            
+                            const currentYear = new Date().getFullYear();
+                            for (let y = currentYear - 3; y <= currentYear + 3; y++) {
+                                await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                            }
+                        } catch(e) { console.warn("Error purga nube para", email, e); }
+                    }
+                }
+                
+                // Limpieza Visual y Refresco
+                updateLocalUsersList();
+                loadAdminGlobalUsers();
+                $id('admin-bulk-actions').classList.add('hidden');
+
+            } else {
+                if(err) err.classList.remove('hidden');
+                $id('bulk-del-users-pin').value = '';
             }
         }
 
