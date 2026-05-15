@@ -48,11 +48,11 @@
         
         @media (pointer: fine) {
             /* Scrollbars translúcidos para navegadores de escritorio */
-            .hide-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.4) transparent; }
-            .hide-scrollbar::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+            .hide-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, 0.6) transparent; overflow-x: auto; }
+            .hide-scrollbar::-webkit-scrollbar { display: block; width: 8px; height: 8px; }
             .hide-scrollbar::-webkit-scrollbar-track { background: transparent; }
-            .hide-scrollbar::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.3); border-radius: 10px; }
-            .hide-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.6); }
+            .hide-scrollbar::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.5); border-radius: 10px; border: 2px solid var(--app-bg); }
+            .hide-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.8); }
             
             /* Efectos táctiles y elevación (Hover) exclusivos para PC */
             .theme-card.cursor-pointer:hover, .glass-btn:hover { 
@@ -11222,6 +11222,61 @@
                 </div>
             `).join('');
         }
+
+        // APEX FIX: Motor Emulador "Drag-to-Scroll" (Fricción Cero para Navegadores de PC)
+        (function initDesktopScrollEngine() {
+            let isDown = false;
+            let startX;
+            let scrollLeft;
+            let slider = null;
+            let didDrag = false;
+
+            // Escuchar clics iniciales en cualquier contenedor con scroll horizontal
+            document.addEventListener('mousedown', (e) => {
+                slider = e.target.closest('.overflow-x-auto, .hide-scrollbar');
+                if (!slider) return;
+                
+                // Excluir elementos que por naturaleza requieren selección de texto (Inputs)
+                if (e.target.tagName.toLowerCase() === 'input' || e.target.tagName.toLowerCase() === 'textarea') return;
+
+                isDown = true;
+                didDrag = false;
+                slider.style.cursor = 'grabbing';
+                startX = e.pageX - slider.offsetLeft;
+                scrollLeft = slider.scrollLeft;
+            });
+
+            document.addEventListener('mouseleave', () => {
+                isDown = false;
+                if (slider) slider.style.cursor = '';
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDown = false;
+                if (slider) slider.style.cursor = '';
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDown || !slider) return;
+                const x = e.pageX - slider.offsetLeft;
+                const walk = (x - startX) * 1.8; // Velocidad de arrastre aumentada
+                
+                if (Math.abs(walk) > 5) {
+                    didDrag = true;
+                    e.preventDefault(); // Evita que se seleccione texto, imágenes o arrastre "fantasmas"
+                    slider.scrollLeft = scrollLeft - walk;
+                }
+            });
+
+            // Blindaje: Si el usuario arrastró, bloqueamos el 'click' para que no abra accidentalmente una transacción/tarea
+            document.addEventListener('click', (e) => {
+                if (didDrag) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    didDrag = false;
+                }
+            }, true); // Fase de Captura estricta
+        })();
 
         </script>
 </body>
