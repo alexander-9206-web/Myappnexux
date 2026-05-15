@@ -9072,8 +9072,21 @@
             }
 
             try {
-                const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', token);
+                
+                // APEX FIX: El "Handshake Ciego". Forzamos la entrada primero para ganar permisos de lectura.
+                try {
+                    await updateDoc(vaultRef, {
+                        invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
+                    });
+                } catch (hsErr) {
+                    console.error("Fallo Handshake P2P:", hsErr);
+                    if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
+                    return alert("Token inválido o denegado por reglas de seguridad.");
+                }
+
+                // Ahora que somos miembros oficiales, descargamos la bóveda
                 const snap = await getDoc(vaultRef);
 
                 if(!snap.exists()) {
@@ -9082,11 +9095,6 @@
                 }
 
                 const data = snap.data();
-                
-                // Actualizar permisos en Firestore
-                await setDoc(vaultRef, {
-                    invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
-                }, { merge: true });
 
                 const newAcc = { id: 'acc_' + Date.now(), name: '👥 ' + data.name, currency: data.currency || 'COP', balance: 0, type: 'liquid', isShared: true, remoteId: token, syncedOnce: false };
                 state.accounts.push(newAcc);
@@ -11106,8 +11114,21 @@
             }
 
             try {
-                const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', token);
+
+                // APEX FIX: "Handshake Ciego" para ganar permisos de lectura al instante.
+                try {
+                    await updateDoc(vaultRef, {
+                        invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
+                    });
+                } catch (hsErr) {
+                    console.error("Fallo Handshake Tareas:", hsErr);
+                    if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
+                    return alert("Token inválido o denegado por reglas de seguridad.");
+                }
+
+                // Ahora sí podemos leer el contenido de la bóveda
                 const snap = await getDoc(vaultRef);
 
                 if(!snap.exists()) {
@@ -11117,10 +11138,6 @@
 
                 const data = snap.data();
                 
-                await setDoc(vaultRef, {
-                    invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
-                }, { merge: true });
-
                 if(!state.taskVaults) state.taskVaults = [];
                 state.taskVaults.push({ id: token, name: '👥 ' + data.name.replace('👥 ', ''), isShared: true, remoteId: token, owner: data.owner });
                 
