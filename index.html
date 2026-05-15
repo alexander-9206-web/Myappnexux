@@ -40,7 +40,7 @@
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
         
-        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS (Fricción Cero en formularios) */
+        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS y Modales (Fricción Cero en formularios) */
         .fixed.inset-0.backdrop-blur-sm > div,
         .fixed.inset-0.backdrop-blur-md > div,
         #login-screen > div,
@@ -48,6 +48,8 @@
             max-height: 85dvh !important;
             overflow-y: auto;
             overscroll-behavior: contain;
+            /* Protege el contenido de los modales largos contra el Home Indicator */
+            padding-bottom: max(2rem, env(safe-area-inset-bottom)) !important;
         }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
@@ -55,43 +57,80 @@
         #session-lock-screen > div::-webkit-scrollbar { 
             display: none; 
         }
+
+        /* --- APEX FIX: CALIBRACIÓN HIG PARA IOS PWA & PRO MAX --- */
+        @supports (-webkit-touch-callout: none) {
+            /* 1. Altura dinámica real adaptativa al teclado y barras nativas */
+            body { min-height: 100dvh; }
+
+            /* 2. Prevención de colisión de Input Auto-Zoom en Safari */
+            input, select, textarea, .form-input { font-size: 16px !important; }
+            
+            /* 3. Zonas Seguras de Apple (Dynamic Island & Notch) */
+            .safe-top { padding-top: max(1.5rem, env(safe-area-inset-top)) !important; }
+            
+            /* 4. Levantamiento Inteligente del FAB sobre el Home Indicator */
+            #fab-main {
+                bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
+            }
+            
+            /* 5. Escudo de Listas: Fuerza un espaciado en la base de cada pestaña para que el FAB no oculte la última transacción */
+            .tab-content {
+                padding-bottom: calc(9rem + env(safe-area-inset-bottom)) !important;
+            }
+            
+            /* 6. Optimización de renderizado de scroll fluido */
+            .hide-scrollbar { -webkit-overflow-scrolling: touch !important; }
+        }
+
+        /* Calibración visual específica para displays grandes de iOS (Pro Max Series) */
+        @media (min-width: 390px) and (max-width: 440px) {
+            #fab-toggle-btn { width: 4rem; height: 4rem; font-size: 1.5rem; }
+            #fab-menu button { width: 3.5rem; height: 3.5rem; font-size: 1.25rem; }
+            .theme-card { border-radius: 2.25rem !important; }
+        }
     </style>
 </head>
-<body class="pb-40">
+<body class="pb-safe">
 
-    <!-- AUTENTICACIÓN -->
-    <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 text-white flex flex-col items-center justify-center p-8 transition-opacity duration-300 hidden">
-        <div class="w-full max-w-sm md:max-w-md space-y-6 animate-slideUp bg-slate-800 p-8 rounded-[2.5rem] shadow-2xl border border-slate-700">
-            <div class="text-center space-y-2"><div class="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><i class="fa-solid fa-shield-halved"></i></div><h1 class="text-2xl font-black uppercase tracking-tighter">Nexus <span class="text-indigo-400">Identity</span></h1><p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p></div>
+    <!-- APEX FIX: PANTALLA DE LOGIN / AUTENTICACIÓN (RESTAURADA Y ENCAPSULADA) -->
+    <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 flex items-center justify-center p-6 transition-opacity duration-500">
+        <div class="w-full max-w-sm bg-slate-800 p-8 rounded-[2.5rem] shadow-2xl border border-slate-700 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500"></div>
             
-            <!-- Elección Inicial (NUEVO) -->
-            <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-slate-700">
-                <button onclick="showExistingUsers()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-users"></i> Ingresar a Bóveda
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-slate-700 shadow-inner">
+                    <i class="fa-solid fa-fingerprint text-3xl text-indigo-500"></i>
+                </div>
+                <h2 class="text-2xl font-black text-white uppercase tracking-tighter">Nexus <span class="text-indigo-500">AR</span></h2>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Terminal de Acceso</p>
+            </div>
+
+            <!-- Opciones Iniciales -->
+            <div id="login-initial-choice" class="space-y-3">
+                <button onclick="showExistingUsers()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    Iniciar Sesión <i class="fa-solid fa-arrow-right"></i>
                 </button>
-                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-700 transition-colors active:scale-95 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-plus"></i> Crear Nueva Bóveda
+                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-300 p-4 rounded-2xl font-black uppercase tracking-widest text-xs border border-slate-700 active:scale-95 transition-transform hover:text-white hover:border-slate-500">
+                    Crear Bóveda
                 </button>
             </div>
 
-            <!-- Selector de Usuarios (MODIFICADO) -->
-            <div id="login-user-selection" class="space-y-3 pt-4 border-t border-slate-700 hidden">
-                <div class="flex justify-between items-center mb-2">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Selecciona tu cuenta</p>
-                    <button onclick="showInitialLoginChoice()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
+            <!-- Selección de Usuario -->
+            <div id="login-user-selection" class="hidden space-y-4">
+                <div class="flex justify-between items-center mb-2 border-b border-slate-700 pb-2">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Selecciona tu Perfil</p>
+                    <button onclick="showInitialLoginChoice()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i></button>
                 </div>
-                <!-- Buscador Dinámico -->
-                <div class="relative mb-2">
-                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
-                    <input type="text" id="login-search-user" oninput="filterLoginUsers()" placeholder="Buscar correo o nombre..." class="w-full bg-slate-900 border border-slate-700 text-white text-xs p-3 pl-8 rounded-xl outline-none focus:border-indigo-500 transition-colors">
+                <div class="relative">
+                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                    <input type="text" id="login-search-user" oninput="filterLoginUsers()" placeholder="Buscar usuario..." class="w-full bg-slate-900 text-white pl-9 pr-4 py-3 rounded-xl outline-none font-bold text-xs border border-slate-700 focus:border-indigo-500 transition-colors">
                 </div>
-                <div id="login-users-list" class="space-y-2 max-h-48 overflow-y-auto hide-scrollbar">
-                    <p class="text-xs text-center text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando bóvedas locales...</p>
-                </div>
+                <div id="login-users-list" class="max-h-48 overflow-y-auto space-y-2 hide-scrollbar pr-1"></div>
             </div>
 
-            <!-- Ingreso de PIN para usuario existente -->
-            <div id="login-pin-section" class="space-y-4 hidden pt-4 border-t border-slate-700">
+            <!-- Ingreso de PIN -->
+            <div id="login-pin-section" class="hidden space-y-4">
                 <div class="flex justify-between items-center mb-2">
                     <p id="login-active-email" class="text-xs font-bold text-indigo-400 truncate pr-2"></p>
                     <button onclick="cancelUserSelection()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
