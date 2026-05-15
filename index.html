@@ -2618,6 +2618,40 @@
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
+        // APEX FIX: Motor de Registro de Usuario Centralizado para Google Auth
+        async function registerGoogleUser(user) {
+            if (!user || !user.email) return false;
+            const email = user.email.toLowerCase();
+            const name = user.displayName || email.split('@')[0];
+            const avatar = user.photoURL || ''; 
+
+            let profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
+            if (!profile) {
+                profile = { name, email, pin: "0000", lastSeen: Date.now(), isCloud: true, avatar: avatar };
+                setTimeout(() => alert("✅ Bóveda vinculada con Google.\n\nTu PIN de seguridad por defecto es 0000.\nPuedes cambiarlo más tarde en el apartado de Configuración."), 2000);
+            } else {
+                profile.name = name;
+                profile.avatar = avatar;
+                profile.lastSeen = Date.now();
+                profile.isCloud = true;
+            }
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
+            userProfile = profile;
+            
+            await initCloud(); 
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
+            }
+
+            await processLoginSuccess(email);
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            return true;
+        }
+
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
@@ -2630,25 +2664,20 @@
                 }
             });
 
-            // APEX FIX: Sincronización perfecta al volver del background en iOS.
-            // Esto asegura que cuando el iPhone despierte la app tras haber estado minimizada, 
-            // Firebase y la vista se recarguen de forma instantánea.
+            // Sincronización perfecta al volver del background en iOS.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
-                    if (!sessionUnlocked || !state || !state.settings) return; // APEX FIX: Prevención de ejecución en estado zombie (Pantalla de login)
-                    
-                    // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
+                    if (!sessionUnlocked || !state || !state.settings) return;
                     if (sessionUnlocked) {
                         if (fbUser && window.db) fetchCloudState(); 
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
                 } else if (document.visibilityState === "hidden") {
-                    // APEX FIX: Registrar el milisegundo exacto al bloquear el teléfono o cambiar de app
                     localStorage.setItem('nexus_last_active', Date.now());
                 }
             });
 
-            // APEX FIX: Recuperación profunda de sesión (LocalStorage + IndexedDB + Cookies)
+            // Recuperación profunda de sesión
             currentUser = localStorage.getItem('nexus_current_user');
             
             if (!currentUser) {
@@ -2664,18 +2693,53 @@
                 }
             }
 
-            if (!currentUser) {
+            // APEX FIX: Interceptor de Redirección Google Auth (iOS WKWebView Failsafe)
+            const isRedirectPending = localStorage.getItem('nexus_redirect_pending') === 'true';
+
+            if (isRedirectPending) {
+                localStorage.removeItem('nexus_redirect_pending');
+                const ls = $id('login-screen'); 
+                if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
+                
+                const initChoice = $id('login-initial-choice');
+                if (initChoice) initChoice.innerHTML = '<div class="text-center py-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500 mb-4 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]"></i><p class="text-xs font-black text-white uppercase tracking-widest">Desencriptando Bóveda...</p></div>';
+
+                try {
+                    const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                    const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    
+                    const firebaseConfig = {
+                        apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
+                        authDomain: "nexus-jr.firebaseapp.com",
+                        projectId: "nexus-jr",
+                        storageBucket: "nexus-jr.firebasestorage.app",
+                        messagingSenderId: "273022472068",
+                        appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1"
+                    };
+                    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+                    const auth = getAuth(app);
+                    
+                    // Capturamos la respuesta desde la navegación nativa
+                    const result = await getRedirectResult(auth);
+                    
+                    if (result && result.user) {
+                        await registerGoogleUser(result.user);
+                    } else if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                        await registerGoogleUser(auth.currentUser);
+                    } else {
+                        // Redirección cancelada por el usuario o caducada, restaurar UI original
+                        location.reload(); 
+                    }
+                } catch(err) {
+                    console.error("[APEX] Redirect Error:", err);
+                    alert("⚠️ Error validando credenciales de Google. Inténtalo de nuevo.");
+                    location.reload();
+                }
+            } else if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
-                
-                // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
                 fetchLoginUsers(false);
-                
-                // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
             } else {
-                // ARRANQUE LOCAL-FIRST
                 await bootApp(); 
-                
-                // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
                 initCloud().then(() => {
                     fetchCloudState();
                 });
@@ -2823,16 +2887,17 @@
         }
 
         // APEX FIX: Implementación del Motor de Autenticación con Google (Fricción Cero SSoT)
+        // Rediseñado para saltar el bloqueo cross-origin ITP de Safari/iOS usando signInWithRedirect
         window.loginWithGoogle = async (event) => {
             if(event) event.preventDefault();
             const btn = event.currentTarget;
             const originalHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Conectando con Google...';
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Conectando...';
             btn.disabled = true;
 
             try {
                 const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 const firebaseConfig = {
                     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
@@ -2848,40 +2913,22 @@
                 const auth = getAuth(app);
                 const provider = new GoogleAuthProvider();
 
-                // Usamos Popup para que el Wrapper WKWebView de iOS intercepte la ventana, 
-                // abra el modal nativo de safari y permita el acceso por llavero/FaceID automáticamente.
+                // APEX FIX: Detección Estricta de Plataforma Nativa (iOS WKWebView / Safari ITP / Android Webview)
+                // Estos entornos bloquean IndexedDB cross-origin matando la promesa del popup.
+                // Redireccionar es obligatorio para completar el flujo de auth y retornar al punto seguro.
+                const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                const isWKWebView = window.webkit && window.webkit.messageHandlers;
+
+                if (isMobile || isWKWebView) {
+                    localStorage.setItem('nexus_redirect_pending', 'true');
+                    await signInWithRedirect(auth, provider);
+                    return; // Fin de la ejecución. El navegador salta hacia accounts.google.com
+                }
+
+                // Fallback Desktop (Google Chrome, Edge, Safari Desktop sin ITP estricto)
                 const result = await signInWithPopup(auth, provider);
-                const user = result.user;
-
-                if (user && user.email) {
-                    const email = user.email.toLowerCase();
-                    const name = user.displayName || email.split('@')[0];
-                    const avatar = user.photoURL || ''; // Extraemos la foto de perfil en alta resolución
-
-                    let profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
-                    if (!profile) {
-                        // Creación de nueva bóveda con Google
-                        profile = { name, email, pin: "0000", lastSeen: Date.now(), isCloud: true, avatar: avatar };
-                        setTimeout(() => alert("✅ Bóveda vinculada con Google.\n\nTu PIN de seguridad por defecto es 0000.\nPuedes cambiarlo más tarde en el apartado de Configuración."), 2000);
-                    } else {
-                        // Actualización de datos de perfil existente (Hereda Foto y Nombre actualizados de Google)
-                        profile.name = name;
-                        profile.avatar = avatar;
-                        profile.lastSeen = Date.now();
-                        profile.isCloud = true;
-                    }
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-                    userProfile = profile;
-                    
-                    await initCloud(); // Encendemos el motor de base de datos Firestore
-                    
-                    if (window.db) {
-                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
-                    }
-
-                    await processLoginSuccess(email);
-                    if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                if (result && result.user) {
+                    await registerGoogleUser(result.user);
                 }
 
             } catch (error) {
@@ -2890,6 +2937,8 @@
                     alert("⚠️ Error en conexión con Google: " + error.message);
                 }
             } finally {
+                // Solo se ejecuta si el popup es cerrado en Desktop, o falla instantáneamente.
+                // En móvil, la redirección destruye el hilo de JS antes de llegar aquí.
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
             }
