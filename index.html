@@ -5274,6 +5274,26 @@
             
             if (newAcc.isShared) {
                 if(typeof attachP2PListener === 'function') attachP2PListener();
+                
+                // APEX FIX: INYECCIÓN SÍNCRONA INMEDIATA EN FIRESTORE PARA BÓVEDAS NUEVAS
+                // Esto garantiza que el Token sea válido en el milisegundo en que se crea.
+                if (!id && window.db && rId) {
+                    import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, setDoc }) => {
+                        const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', rId);
+                        setDoc(vaultRef, {
+                            name: newAcc.name.replace('👥 ', ''),
+                            owner: currentUser,
+                            ownerName: userProfile && userProfile.name ? userProfile.name : 'Usuario',
+                            ownerEmail: userProfile && userProfile.publicEmail ? userProfile.publicEmail : '',
+                            balance: newAcc.balance,
+                            currency: newAcc.currency,
+                            txs: [],
+                            deletedTxs: [],
+                            invitedUsers: [currentUser],
+                            updatedAt: new Date().toISOString()
+                        }, { merge: true }).catch(err => console.error("Error en Inyección Síncrona:", err));
+                    });
+                }
             }
 
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); 
@@ -9072,14 +9092,14 @@
             }
 
             try {
-                const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { doc, getDoc, setDoc, deleteDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', token);
                 
-                // APEX FIX: El "Handshake Ciego". Forzamos la entrada primero para ganar permisos de lectura.
+                // APEX FIX: El "Handshake Ciego" usando setDoc con merge.
                 try {
-                    await updateDoc(vaultRef, {
-                        invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
-                    });
+                    await setDoc(vaultRef, {
+                        invitedUsers: arrayUnion(currentUser)
+                    }, { merge: true });
                 } catch (hsErr) {
                     console.error("Fallo Handshake P2P:", hsErr);
                     if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
@@ -9089,14 +9109,16 @@
                 // Ahora que somos miembros oficiales, descargamos la bóveda
                 const snap = await getDoc(vaultRef);
 
-                if(!snap.exists()) {
+                // APEX FIX: ANTI-GHOSTING. Si la bóveda no tiene dueño, fue una creación fantasma por token inválido.
+                if(!snap.exists() || !snap.data().owner) {
+                    await deleteDoc(vaultRef); // Destruir la bóveda fantasma
                     if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
-                    return alert("Token inválido o bóveda eliminada.");
+                    return alert("El Token es inválido o la bóveda aún no ha sido sincronizada por el creador.");
                 }
 
                 const data = snap.data();
 
-                const newAcc = { id: 'acc_' + Date.now(), name: '👥 ' + data.name, currency: data.currency || 'COP', balance: 0, type: 'liquid', isShared: true, remoteId: token, syncedOnce: false };
+                const newAcc = { id: 'acc_' + Date.now(), name: '👥 ' + (data.name || 'Bóveda'), currency: data.currency || 'COP', balance: 0, type: 'liquid', isShared: true, remoteId: token, syncedOnce: false };
                 state.accounts.push(newAcc);
                 if(currentUser) NexusIDB.saveState(currentUser, state);
                 
@@ -11065,6 +11087,24 @@
             if(!state.taskVaults) state.taskVaults = [];
             const remoteId = 'tkv_' + Date.now();
             state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser });
+            
+            // APEX FIX: INYECCIÓN SÍNCRONA INMEDIATA PARA TAREAS P2P
+            if (window.db && remoteId) {
+                import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, setDoc }) => {
+                    const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', remoteId);
+                    setDoc(vaultRef, {
+                        name: name,
+                        owner: currentUser,
+                        ownerName: userProfile && userProfile.name ? userProfile.name : 'Usuario',
+                        ownerEmail: userProfile && userProfile.publicEmail ? userProfile.publicEmail : '',
+                        tasks: [],
+                        deletedTasks: [],
+                        invitedUsers: [currentUser],
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true }).catch(err => console.error("Error en Inyección Síncrona de Tareas:", err));
+                });
+            }
+
             saveState();
             $id('new-task-vault-name').value = '';
             renderTaskVaultsList();
@@ -11114,14 +11154,14 @@
             }
 
             try {
-                const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { doc, getDoc, setDoc, deleteDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', token);
 
-                // APEX FIX: "Handshake Ciego" para ganar permisos de lectura al instante.
+                // APEX FIX: "Handshake Ciego" usando setDoc con merge
                 try {
-                    await updateDoc(vaultRef, {
-                        invitedUsers: arrayUnion(currentUser, userProfile.email || '', userProfile.publicEmail || '')
-                    });
+                    await setDoc(vaultRef, {
+                        invitedUsers: arrayUnion(currentUser)
+                    }, { merge: true });
                 } catch (hsErr) {
                     console.error("Fallo Handshake Tareas:", hsErr);
                     if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
@@ -11131,15 +11171,17 @@
                 // Ahora sí podemos leer el contenido de la bóveda
                 const snap = await getDoc(vaultRef);
 
-                if(!snap.exists()) {
+                // APEX FIX: ANTI-GHOSTING. Validar obligatoriedad de existencia (owner)
+                if(!snap.exists() || !snap.data().owner) {
+                    await deleteDoc(vaultRef); // Eliminar creación fantasma
                     if(btn) { btn.innerHTML = origHtml; btn.disabled = false; }
-                    return alert("Token inválido.");
+                    return alert("El Token es inválido o la bóveda de tareas aún no ha sido sincronizada por el creador.");
                 }
 
                 const data = snap.data();
                 
                 if(!state.taskVaults) state.taskVaults = [];
-                state.taskVaults.push({ id: token, name: '👥 ' + data.name.replace('👥 ', ''), isShared: true, remoteId: token, owner: data.owner });
+                state.taskVaults.push({ id: token, name: '👥 ' + (data.name ? data.name.replace('👥 ', '') : 'Equipo'), isShared: true, remoteId: token, owner: data.owner });
                 
                 saveState();
                 populateTaskVaultSelects();
