@@ -2970,22 +2970,58 @@
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
-        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
-        function logout() { 
+        // APEX FIX: Purga profunda asíncrona, tolerante a fallos y con transición visual Fricción Cero
+        async function logout() { 
             sessionUnlocked = false; 
             
-            if(unsubscribeSnapshot) unsubscribeSnapshot();
-            if(window.sharedUnsubscribers) {
-                for (const rId in window.sharedUnsubscribers) {
-                    window.sharedUnsubscribers[rId]();
-                }
-                window.sharedUnsubscribers = {};
-            }
+            // 1. Mostrar pantalla de Login inmediatamente por encima de todo (Transición suave)
+            const login = $id('login-screen');
+            const lockScreen = $id('session-lock-screen');
             
-            localStorage.removeItem('nexus_current_user'); 
-            NexusIDB.saveSession(null);
-            document.cookie = "nexus_current_user=; max-age=0; path=/";
-            location.reload(); 
+            if (lockScreen) {
+                lockScreen.classList.add('opacity-0');
+                setTimeout(() => lockScreen.classList.add('hidden'), 300);
+            }
+
+            if (login) {
+                login.classList.remove('hidden');
+                setTimeout(() => {
+                    login.classList.remove('opacity-0', 'pointer-events-none');
+                }, 10);
+            }
+
+            // 2. Ejecutar limpieza de memoria en segundo plano con aislamiento de fallos
+            try {
+                if(typeof unsubscribeSnapshot === 'function') unsubscribeSnapshot();
+                if(window.sharedUnsubscribers) {
+                    for (const rId in window.sharedUnsubscribers) {
+                        if(typeof window.sharedUnsubscribers[rId] === 'function') window.sharedUnsubscribers[rId]();
+                    }
+                    window.sharedUnsubscribers = {};
+                }
+                if(window.sharedTaskUnsubscribers) {
+                    for (const rId in window.sharedTaskUnsubscribers) {
+                        if(typeof window.sharedTaskUnsubscribers[rId] === 'function') window.sharedTaskUnsubscribers[rId]();
+                    }
+                    window.sharedTaskUnsubscribers = {};
+                }
+            } catch (e) { console.error("[APEX SYS] Error limpiando sockets:", e); }
+            
+            try {
+                localStorage.removeItem('nexus_current_user'); 
+                document.cookie = "nexus_current_user=; max-age=0; path=/";
+                await NexusIDB.saveSession(null);
+            } catch (e) { console.error("[APEX SYS] Error limpiando sesión DB:", e); }
+            
+            currentUser = null;
+            userProfile = null;
+            
+            // 3. Resetear el estado visual por detrás para el próximo acceso limpio
+            setTimeout(() => {
+                showInitialLoginChoice(); 
+                fetchLoginUsers(false);
+                switchTab('home'); 
+            }, 400);
         }
         
         function setApMode(mode) {
