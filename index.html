@@ -8438,24 +8438,24 @@
                 const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1" title="En Nube"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1" title="Solo Local"></i>';
                 const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[14px]"></i>`;
                 
-                netHtml += `<div class="flex justify-between items-center p-4 rounded-[1.5rem] border ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'} mb-2 shadow-sm transition-all hover:shadow-md">
-                    <div class="flex items-center gap-3">
+                netHtml += `<div class="flex justify-between items-center p-3 md:p-4 rounded-[1.5rem] border ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'} mb-2 shadow-sm transition-all hover:shadow-md gap-2">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
                         <div class="w-10 h-10 rounded-full ${isCurrent && !p.avatar ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
-                        <div>
-                            <p class="text-xs font-black uppercase text-slate-800">${p.name} ${cloudBadge}</p>
-                            <p class="text-[9px] font-bold text-slate-400 mt-1">ID: ${p.email}</p>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-[11px] md:text-xs font-black uppercase text-slate-800 truncate">${p.name} ${cloudBadge}</p>
+                            <p class="text-[9px] font-bold text-slate-400 mt-0.5 md:mt-1 truncate">ID: ${p.email}</p>
                         </div>
                     </div>
-                    <div class="flex flex-col gap-2 items-end">
+                    <div class="flex flex-col gap-2 items-end shrink-0">
                         ${isCurrent ? 
                         `<div class="flex items-center gap-2">
-                            <span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1.5 rounded shadow-sm">TU CUENTA</span>
-                            <button onclick="openUserEdit('${p.email}')" class="w-7 h-7 bg-white border border-blue-200 text-blue-600 rounded-full flex items-center justify-center shadow-sm hover:bg-blue-100 transition-colors"><i class="fa-solid fa-pen text-[8px]"></i></button>
+                            <span class="hidden sm:inline-block text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1.5 rounded shadow-sm">TU CUENTA</span>
+                            <button onclick="openUserEdit('${p.email}')" class="w-8 h-8 bg-white border border-blue-200 text-blue-600 rounded-full flex items-center justify-center shadow-sm hover:bg-blue-100 transition-colors shrink-0"><i class="fa-solid fa-pen text-[9px]"></i></button>
                         </div>` 
                         : 
-                        `<div class="flex items-center gap-2">
-                            <button onclick="document.getElementById('edit-user-original-email').value='${p.email}'; controlUserVault();" class="text-[9px] font-black bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 px-3 py-1.5 rounded-xl transition-colors active:scale-95 border border-slate-200 shadow-sm"><i class="fa-solid fa-key mr-1"></i> Acceder</button>
-                            <button onclick="openDeleteUserModal('${p.email}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm"><i class="fa-solid fa-trash text-[8px]"></i></button>
+                        `<div class="flex items-center gap-1.5">
+                            <button onclick="document.getElementById('edit-user-original-email').value='${p.email}'; controlUserVault();" class="text-[9px] font-black bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 px-3 py-1.5 rounded-xl transition-colors active:scale-95 border border-slate-200 shadow-sm shrink-0 flex items-center"><i class="fa-solid fa-key sm:mr-1"></i> <span class="hidden sm:inline-block">Acceder</span></button>
+                            <button onclick="openDeleteUserModal('${p.email}')" class="w-8 h-8 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm shrink-0"><i class="fa-solid fa-trash text-[9px]"></i></button>
                         </div>`}
                     </div>
                 </div>`;
@@ -8468,26 +8468,52 @@
         }
 
         // APEX FIX: Función para buscar cuentas P2P directamente en la vista de cuentas
-        async function scanP2PRadarDirect() {
-            const radarList = $id('direct-p2p-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando en Firebase...</p>';
+        // APEX FIX: Motor de Carga Exclusivo para Administración Total SSoT
+        async function loadAdminGlobalUsers() {
+            const list = $id('admin-global-users-list');
+            if(!list || !window.db) return;
+            list.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Accediendo al Directorio Raíz de Firebase...</p>';
             try {
                 const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
+                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
                 let html = '';
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-wallet text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
+                
+                // Convertir a array para ordenar
+                const users = [];
+                snap.forEach(doc => users.push(doc.data()));
+                users.sort((a,b) => new Date(b.lastSyncSize || 0) - new Date(a.lastSyncSize || 0));
+
+                const MAX_QUOTA_KB = 10240; // Cuota teórica de 10MB para perfil SSoT
+
+                users.forEach(data => {
+                    const isCurrent = data.email === currentUser;
+                    const sizeKB = data.vaultSize ? (data.vaultSize / 1024).toFixed(1) : 0;
+                    const usagePct = Math.min(100, (sizeKB / MAX_QUOTA_KB) * 100).toFixed(2);
+                    const lastSync = data.lastSyncSize ? new Date(data.lastSyncSize).toLocaleString('es-CO', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Sin actividad';
+                    
+                    const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
+
+                    html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all gap-2">
+                        <div class="flex items-center gap-3 min-w-0 flex-1">
+                            <div class="w-10 h-10 rounded-full ${isCurrent && !data.avatar ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
+                            <div class="flex flex-col min-w-0 flex-1">
+                                <p class="text-[11px] font-black uppercase text-slate-800 truncate">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
+                                <p class="text-[9px] font-bold text-slate-500 mt-0.5 truncate">${data.email}</p>
+                                <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 truncate"><i class="fa-solid fa-database mr-1 text-blue-400"></i>Uso: ${usagePct}% (${sizeKB} KB) • Ult: ${lastSync}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-end gap-1.5 shrink-0">
+                            ${!isCurrent ? `
+                            <button onclick="openRemotePermissions('${data.email}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm shrink-0" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
+                            <button onclick="openUserEdit('${data.email}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm shrink-0" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                            <button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm shrink-0" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                            <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm shrink-0" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                        </div>
+                    </div>`;
                 });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas nuevas en la red.</p>';
-                radarList.innerHTML = html;
+                list.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay usuarios registrados en Firebase.</p>';
             } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
+                list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión al Directorio SSoT.</p>';
             }
         }
 
