@@ -2875,6 +2875,40 @@
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
         }
 
+        // APEX FIX: Funciones de Google OAuth
+        async function loginWithGoogle() {
+            const btn = document.querySelector('#login-initial-choice button');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
+            try {
+                if (!fbAuth) await initCloud(true);
+                const { signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await signInWithRedirect(fbAuth, googleProvider);
+            } catch (error) {
+                console.error("Google Login Error:", error);
+                alert("Error de autenticación con Google.");
+                if (btn) btn.innerHTML = '<i class="fa-brands fa-google text-red-500"></i> Ingresar con Google';
+            }
+        }
+
+        async function handleGoogleLoginSuccess(user) {
+            const email = user.email.toLowerCase();
+            const name = user.displayName || email.split('@')[0];
+            const avatar = user.photoURL;
+
+            // Integración al ecosistema: Creamos el perfil evadiendo el PIN con "1234" por ser Google OAuth
+            userProfile = { name, email, pin: "1234", lastSeen: Date.now(), avatar: avatar, isCloud: true }; 
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
+            }
+            
+            await processLoginSuccess(email);
+        }
+
         async function unlockSession() {
             const input = $id('session-pin-input').value;
             // APEX FIX: Desbloqueo de Usuario Principal (Master Admin) con PIN 1234
