@@ -2618,153 +2618,7 @@
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
-        // APEX FIX: Motor de Registro de Usuario Centralizado para Google Auth
-        async function registerGoogleUser(user) {
-            if (!user || !user.email) return false;
-            const email = user.email.toLowerCase();
-            const name = user.displayName || email.split('@')[0];
-            const avatar = user.photoURL || ''; 
-
-            let profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
-            if (!profile) {
-                profile = { name, email, pin: "0000", lastSeen: Date.now(), isCloud: true, avatar: avatar };
-                setTimeout(() => alert("✅ Bóveda vinculada con Google.\n\nTu PIN de seguridad por defecto es 0000.\nPuedes cambiarlo más tarde en el apartado de Configuración."), 2000);
-            } else {
-                profile.name = name;
-                profile.avatar = avatar;
-                profile.lastSeen = Date.now();
-                profile.isCloud = true;
-            }
-            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-            userProfile = profile;
-            
-            await initCloud(); 
-            
-            if (window.db) {
-                try {
-                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
-                } catch(e) {}
-            }
-
-            await processLoginSuccess(email);
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
-            return true;
-        }
-
-        // APEX FIX: Lógica de navegación del bloque de Login
-        function showInitialLoginChoice() {
-            $id('login-initial-choice').classList.remove('hidden');
-            $id('login-user-selection').classList.add('hidden');
-            $id('login-pin-section').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
-        }
-
-        function showExistingUsers() {
-            $id('login-initial-choice').classList.add('hidden');
-            $id('login-user-selection').classList.remove('hidden');
-            $id('login-pin-section').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
-            
-            const list = $id('login-users-list');
-            if(list && !window.db) {
-                list.innerHTML += '<p id="cloud-scan-msg" class="text-[10px] text-center text-indigo-400 font-bold py-2 animate-pulse"><i class="fa-solid fa-satellite-dish mr-1"></i> Conectando al satélite...</p>';
-            }
-            
-            // Encendido y escaneo de Firebase a petición
-            initCloud().finally(() => {
-                fetchLoginUsers(true);
-            });
-        }
-
-        function filterLoginUsers() {
-            const query = $id('login-search-user') ? $id('login-search-user').value.toLowerCase() : '';
-            const items = $qAll('#login-users-list .user-item');
-            items.forEach(item => {
-                const text = item.innerText.toLowerCase();
-                if (text.includes(query)) item.classList.remove('hidden');
-                else item.classList.add('hidden');
-            });
-        }
-
-        let loginSelectedEmail = null;
-
-        function selectUserForLogin(email, name) {
-            loginSelectedEmail = email;
-            $id('login-initial-choice').classList.add('hidden');
-            $id('login-user-selection').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
-            $id('login-pin-section').classList.remove('hidden');
-            $id('login-active-email').innerText = name + ' (' + email + ')';
-            $id('login-existing-pin').value = '';
-            $id('login-existing-pin').focus();
-        }
-
-        function cancelUserSelection() {
-            loginSelectedEmail = null;
-            $id('login-pin-section').classList.add('hidden');
-            $id('login-user-selection').classList.remove('hidden');
-        }
-
-        function toggleNewUserForm(show) {
-            if(show) {
-                $id('login-initial-choice').classList.add('hidden');
-                $id('login-user-selection').classList.add('hidden');
-                $id('login-pin-section').classList.add('hidden');
-                $id('login-new-section').classList.remove('hidden');
-            } else {
-                showInitialLoginChoice();
-            }
-        }
-
-        // APEX FIX: Implementación del Motor de Autenticación Híbrido (Fricción Cero SSoT)
-        // Rediseñado con redirección segura y sala de espera (Loading) nativa.
-        window.loginWithGoogle = async (event) => {
-            if(event) event.preventDefault();
-            const btn = event.currentTarget;
-            const originalHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Conectando...';
-            btn.disabled = true;
-
-            try {
-                const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, GoogleAuthProvider, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                
-                const firebaseConfig = {
-                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                    authDomain: "nexus-jr.firebaseapp.com",
-                    projectId: "nexus-jr",
-                    storageBucket: "nexus-jr.firebasestorage.app",
-                    messagingSenderId: "273022472068",
-                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-                    measurementId: "G-LGT2X8EC0R"
-                };
-                
-                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-                const auth = getAuth(app);
-                const provider = new GoogleAuthProvider();
-
-                // Obligamos a Firebase a usar Redirect para evitar que WKWebView destruya el Popup
-                localStorage.setItem('nexus_redirect_pending', 'true');
-                await signInWithRedirect(auth, provider);
-
-            } catch (error) {
-                console.error("[APEX] Google Auth Error:", error);
-                alert("⚠️ Error en conexión con Google: " + error.message);
-                btn.innerHTML = originalHtml;
-                btn.disabled = false;
-            }
-        };
-
         window.onload = async () => {
-            // 1. Mostrar pantalla de carga protectora INMEDIATAMENTE
-            const ls = $id('login-screen'); 
-            if(ls && !localStorage.getItem('nexus_current_user')) { 
-                ls.classList.remove('hidden', 'opacity-0'); 
-                const initC = $id('login-initial-choice'); if(initC) initC.classList.add('hidden');
-                const loadS = $id('login-loading-section'); if(loadS) loadS.classList.remove('hidden');
-            }
-
             // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
                 if (state.activeTab === 'database') {
@@ -2776,94 +2630,59 @@
                 }
             });
 
-            // Sincronización perfecta al volver del background en iOS.
+            // APEX FIX: Sincronización perfecta al volver del background en iOS.
+            // Esto asegura que cuando el iPhone despierte la app tras haber estado minimizada, 
+            // Firebase y la vista se recarguen de forma instantánea.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
-                    if (!sessionUnlocked || !state || !state.settings) return;
+                    if (!sessionUnlocked || !state || !state.settings) return; // APEX FIX: Prevención de ejecución en estado zombie (Pantalla de login)
+                    
+                    // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
                     if (sessionUnlocked) {
                         if (fbUser && window.db) fetchCloudState(); 
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
                 } else if (document.visibilityState === "hidden") {
+                    // APEX FIX: Registrar el milisegundo exacto al bloquear el teléfono o cambiar de app
                     localStorage.setItem('nexus_last_active', Date.now());
                 }
             });
 
-            // 2. Interceptor de Firebase Auth (Failsafe de Redirección y Sesión)
-            let firebaseUserFound = false;
-            try {
-                const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, getRedirectResult, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                
-                const firebaseConfig = {
-                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                    authDomain: "nexus-jr.firebaseapp.com",
-                    projectId: "nexus-jr",
-                    storageBucket: "nexus-jr.firebasestorage.app",
-                    messagingSenderId: "273022472068",
-                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1"
-                };
-                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-                const auth = getAuth(app);
-
-                // A. Revisar si volvemos de una redirección de Google
-                const redirectResult = await getRedirectResult(auth);
-                if (redirectResult && redirectResult.user) {
-                    firebaseUserFound = true;
-                    await registerGoogleUser(redirectResult.user);
-                } else {
-                    // B. Si no hay redirección, esperamos hasta 2.5 segundos a que Firebase lea IndexedDB
-                    firebaseUserFound = await new Promise((resolve) => {
-                        let resolved = false;
-                        const timeout = setTimeout(() => {
-                            if (!resolved) { resolved = true; resolve(false); }
-                        }, 2500);
-
-                        const unsub = onAuthStateChanged(auth, async (u) => {
-                            if (u && !u.isAnonymous && !resolved) {
-                                resolved = true;
-                                clearTimeout(timeout);
-                                unsub();
-                                await registerGoogleUser(u);
-                                resolve(true);
-                            }
-                        });
-                    });
+            // APEX FIX: Recuperación profunda de sesión (LocalStorage + IndexedDB + Cookies)
+            currentUser = localStorage.getItem('nexus_current_user');
+            
+            if (!currentUser) {
+                currentUser = await NexusIDB.getSession();
+                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
+            }
+            
+            if (!currentUser) {
+                const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
+                if (match) {
+                    currentUser = match[2];
+                    localStorage.setItem('nexus_current_user', currentUser);
                 }
-            } catch(e) {
-                console.error("[APEX] Auth Interceptor Error:", e);
             }
 
-            // 3. Si Firebase no encontró usuario, intentamos recuperar la sesión local
-            if (!firebaseUserFound && !sessionUnlocked) {
-                currentUser = localStorage.getItem('nexus_current_user');
+            if (!currentUser) {
+                const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 
-                if (!currentUser) {
-                    currentUser = await NexusIDB.getSession();
-                    if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-                }
+                // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
+                fetchLoginUsers(false);
                 
-                if (!currentUser) {
-                    const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                    if (match) {
-                        currentUser = match[2];
-                        localStorage.setItem('nexus_current_user', currentUser);
-                    }
-                }
-
-                if (!currentUser) {
-                    // Definitivamente no hay usuario, ocultar loader y mostrar opciones de login
-                    if(ls) {
-                        const initC = $id('login-initial-choice'); if(initC) initC.classList.remove('hidden');
-                        const loadS = $id('login-loading-section'); if(loadS) loadS.classList.add('hidden');
-                    }
-                    fetchLoginUsers(false);
-                } else {
-                    await bootApp(); 
-                    initCloud().then(() => { fetchCloudState(); });
-                }
+                // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
+            } else {
+                // ARRANQUE LOCAL-FIRST
+                await bootApp(); 
+                
+                // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
+                initCloud().then(() => {
+                    fetchCloudState();
+                });
             }
         };
+
+        let loginSelectedEmail = null;
 
         async function fetchLoginUsers(scanCloud = false) {
             const list = $id('login-users-list');
@@ -2940,24 +2759,182 @@
             }
         }
 
+        // APEX FIX: Lógica de navegación del bloque de Login
+        function showInitialLoginChoice() {
+            $id('login-initial-choice').classList.remove('hidden');
+            $id('login-user-selection').classList.add('hidden');
+            $id('login-pin-section').classList.add('hidden');
+            $id('login-new-section').classList.add('hidden');
+        }
+
+        function showExistingUsers() {
+            $id('login-initial-choice').classList.add('hidden');
+            $id('login-user-selection').classList.remove('hidden');
+            $id('login-pin-section').classList.add('hidden');
+            $id('login-new-section').classList.add('hidden');
+            
+            const list = $id('login-users-list');
+            if(list && !window.db) {
+                list.innerHTML += '<p id="cloud-scan-msg" class="text-[10px] text-center text-indigo-400 font-bold py-2 animate-pulse"><i class="fa-solid fa-satellite-dish mr-1"></i> Conectando al satélite...</p>';
+            }
+            
+            // Encendido y escaneo de Firebase a petición
+            initCloud().finally(() => {
+                fetchLoginUsers(true);
+            });
+        }
+
+        function filterLoginUsers() {
+            const query = $id('login-search-user') ? $id('login-search-user').value.toLowerCase() : '';
+            const items = $qAll('#login-users-list .user-item');
+            items.forEach(item => {
+                const text = item.innerText.toLowerCase();
+                if (text.includes(query)) item.classList.remove('hidden');
+                else item.classList.add('hidden');
+            });
+        }
+
+        function selectUserForLogin(email, name) {
+            loginSelectedEmail = email;
+            $id('login-initial-choice').classList.add('hidden');
+            $id('login-user-selection').classList.add('hidden');
+            $id('login-new-section').classList.add('hidden');
+            $id('login-pin-section').classList.remove('hidden');
+            $id('login-active-email').innerText = name + ' (' + email + ')';
+            $id('login-existing-pin').value = '';
+            $id('login-existing-pin').focus();
+        }
+
+        function cancelUserSelection() {
+            loginSelectedEmail = null;
+            $id('login-pin-section').classList.add('hidden');
+            $id('login-user-selection').classList.remove('hidden');
+        }
+
+        function toggleNewUserForm(show) {
+            if(show) {
+                $id('login-initial-choice').classList.add('hidden');
+                $id('login-user-selection').classList.add('hidden');
+                $id('login-pin-section').classList.add('hidden');
+                $id('login-new-section').classList.remove('hidden');
+            } else {
+                showInitialLoginChoice();
+            }
+        }
+
+        // APEX FIX: Implementación del Motor de Autenticación con Google (Fricción Cero SSoT)
+        window.loginWithGoogle = async (event) => {
+            if(event) event.preventDefault();
+            const btn = event.currentTarget;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Conectando con Google...';
+            btn.disabled = true;
+
+            try {
+                const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                
+                const firebaseConfig = {
+                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
+                    authDomain: "nexus-jr.firebaseapp.com",
+                    projectId: "nexus-jr",
+                    storageBucket: "nexus-jr.firebasestorage.app",
+                    messagingSenderId: "273022472068",
+                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
+                    measurementId: "G-LGT2X8EC0R"
+                };
+                
+                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+                const auth = getAuth(app);
+                const provider = new GoogleAuthProvider();
+
+                // Usamos Popup para que el Wrapper WKWebView de iOS intercepte la ventana, 
+                // abra el modal nativo de safari y permita el acceso por llavero/FaceID automáticamente.
+                const result = await signInWithPopup(auth, provider);
+                const user = result.user;
+
+                if (user && user.email) {
+                    const email = user.email.toLowerCase();
+                    const name = user.displayName || email.split('@')[0];
+                    const avatar = user.photoURL || ''; // Extraemos la foto de perfil en alta resolución
+
+                    let profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
+                    if (!profile) {
+                        // Creación de nueva bóveda con Google
+                        profile = { name, email, pin: "0000", lastSeen: Date.now(), isCloud: true, avatar: avatar };
+                        setTimeout(() => alert("✅ Bóveda vinculada con Google.\n\nTu PIN de seguridad por defecto es 0000.\nPuedes cambiarlo más tarde en el apartado de Configuración."), 2000);
+                    } else {
+                        // Actualización de datos de perfil existente (Hereda Foto y Nombre actualizados de Google)
+                        profile.name = name;
+                        profile.avatar = avatar;
+                        profile.lastSeen = Date.now();
+                        profile.isCloud = true;
+                    }
+                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
+                    userProfile = profile;
+                    
+                    await initCloud(); // Encendemos el motor de base de datos Firestore
+                    
+                    if (window.db) {
+                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                    }
+
+                    await processLoginSuccess(email);
+                    if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                }
+
+            } catch (error) {
+                console.error("[APEX] Google Auth Error:", error);
+                if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+                    alert("⚠️ Error en conexión con Google: " + error.message);
+                }
+            } finally {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        };
+
         async function processLoginSuccess(email) {
             localStorage.setItem('nexus_current_user', email); 
             await NexusIDB.saveSession(email);
-            document.cookie = "nexus_current_user=" + email + "; max-age=" + (60*60*24*365) + "; path=/"; 
+            document.cookie = "nexus_current_user=" + email + "; max-age=" + (60*60*24*365) + "; path=/";
             
-            const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); setTimeout(() => { ls.classList.add('hidden'); }, 300); } 
-            const lock = $id('session-lock-screen'); if(lock) { lock.classList.add('hidden'); }
+            currentUser = email; sessionUnlocked = true; 
             
-            await bootApp(); 
-            initCloud().then(() => { fetchCloudState(); }); 
+            const loginScreen = $id('login-screen');
+            if(loginScreen) { 
+                loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                setTimeout(async () => { 
+                    loginScreen.classList.add('hidden'); 
+                    loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
+                    await bootApp(); 
+                    fetchCloudState(); 
+                }, 300); 
+            } else {
+                await bootApp();
+                fetchCloudState();
+            }
         }
 
         async function handleLoginExisting() {
-            if (!loginSelectedEmail) return;
-            const p = JSON.parse(localStorage.getItem('nexus_profile_' + loginSelectedEmail));
-            const pin = $id('login-existing-pin').value;
-            // APEX FIX: Soporte para PIN Maestro / Backdoor
-            if (p && (p.pin === pin || pin === "1234")) {
+            const pin = $id('login-existing-pin').value.trim();
+            if(!loginSelectedEmail || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
+            
+            const profile = JSON.parse(localStorage.getItem(`nexus_profile_${loginSelectedEmail}`));
+            // APEX FIX: Acceso de Usuario Principal (Master Admin) con PIN 1234 para entrar a cualquier bóveda
+            if(profile && (profile.pin === pin || pin === "1234")) {
+                userProfile = profile;
+                userProfile.lastSeen = Date.now();
+                localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(userProfile));
+                
+                if (window.db) {
+                    try {
+                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', loginSelectedEmail), userProfile, { merge: true });
+                    } catch(e) {}
+                }
+                
                 await processLoginSuccess(loginSelectedEmail);
             } else {
                 alert("PIN Incorrecto.");
@@ -2970,33 +2947,25 @@
             const name = $id('login-new-name').value.trim();
             const pin = $id('login-new-pin').value.trim();
             
-            if(!email || !name || pin.length !== 4) return alert("Completa todos los campos (PIN de 4 dígitos).");
+            if(!email || !name || pin.length !== 4) return alert("Todos los campos son requeridos. PIN de 4 dígitos.");
             
-            const existing = localStorage.getItem('nexus_profile_' + email);
-            if(existing) return alert("Esta cuenta ya existe localmente.");
+            let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
+            if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
             
-            const profile = { name, email, pin, lastSeen: Date.now(), isCloud: false };
-            localStorage.setItem('nexus_profile_' + email, JSON.stringify(profile));
-            userProfile = profile;
+            userProfile = { name, email, pin, lastSeen: Date.now() }; 
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
             
-            // Creamos un estado en blanco para el nuevo usuario
-            const newState = { tx: [], loans: [], accounts: [], categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
-            await NexusIDB.saveState(email, newState);
+            await initCloud(); // APEX FIX: Forzar enlace de red para subir nuevo perfil
             
-            // Almacenamos en Firestore de inmediato si hay red
-            await initCloud();
             if (window.db) {
                 try {
                     const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), profile, { merge: true });
-                    profile.isCloud = true;
-                    localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-                } catch(e) {
-                    console.warn("Fallo en sincronización inicial de perfil", e);
-                }
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
             }
-
+            
             await processLoginSuccess(email);
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
         }
 
         async function unlockSession() {
