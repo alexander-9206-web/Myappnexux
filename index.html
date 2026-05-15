@@ -2693,49 +2693,7 @@
                 }
             }
 
-            // APEX FIX: Interceptor de Redirección Google Auth (iOS WKWebView Failsafe)
-            const isRedirectPending = localStorage.getItem('nexus_redirect_pending') === 'true';
-
-            if (isRedirectPending) {
-                localStorage.removeItem('nexus_redirect_pending');
-                const ls = $id('login-screen'); 
-                if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
-                
-                const initChoice = $id('login-initial-choice');
-                if (initChoice) initChoice.innerHTML = '<div class="text-center py-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500 mb-4 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]"></i><p class="text-xs font-black text-white uppercase tracking-widest">Desencriptando Bóveda...</p></div>';
-
-                try {
-                    const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                    const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                    
-                    const firebaseConfig = {
-                        apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                        authDomain: "nexus-jr.firebaseapp.com",
-                        projectId: "nexus-jr",
-                        storageBucket: "nexus-jr.firebasestorage.app",
-                        messagingSenderId: "273022472068",
-                        appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1"
-                    };
-                    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-                    const auth = getAuth(app);
-                    
-                    // Capturamos la respuesta desde la navegación nativa
-                    const result = await getRedirectResult(auth);
-                    
-                    if (result && result.user) {
-                        await registerGoogleUser(result.user);
-                    } else if (auth.currentUser && !auth.currentUser.isAnonymous) {
-                        await registerGoogleUser(auth.currentUser);
-                    } else {
-                        // Redirección cancelada por el usuario o caducada, restaurar UI original
-                        location.reload(); 
-                    }
-                } catch(err) {
-                    console.error("[APEX] Redirect Error:", err);
-                    alert("⚠️ Error validando credenciales de Google. Inténtalo de nuevo.");
-                    location.reload();
-                }
-            } else if (!currentUser) {
+            if (!currentUser) {
                 const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
                 fetchLoginUsers(false);
             } else {
@@ -2886,8 +2844,8 @@
             }
         }
 
-        // APEX FIX: Implementación del Motor de Autenticación con Google (Fricción Cero SSoT)
-        // Rediseñado para saltar el bloqueo cross-origin ITP de Safari/iOS usando signInWithRedirect
+        // APEX FIX: Implementación del Motor de Autenticación Híbrido (Fricción Cero SSoT)
+        // Diseñado para soportar el contenedor nativo Swift (WKWebView) que destruye popups
         window.loginWithGoogle = async (event) => {
             if(event) event.preventDefault();
             const btn = event.currentTarget;
@@ -2895,9 +2853,11 @@
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Conectando...';
             btn.disabled = true;
 
+            let processFinished = false; // Flag de seguridad para no resetear el botón en caso de éxito
+
             try {
                 const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 const firebaseConfig = {
                     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
@@ -2913,34 +2873,59 @@
                 const auth = getAuth(app);
                 const provider = new GoogleAuthProvider();
 
-                // APEX FIX: Detección Estricta de Plataforma Nativa (iOS WKWebView / Safari ITP / Android Webview)
-                // Estos entornos bloquean IndexedDB cross-origin matando la promesa del popup.
-                // Redireccionar es obligatorio para completar el flujo de auth y retornar al punto seguro.
-                const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                const isWKWebView = window.webkit && window.webkit.messageHandlers;
+                try {
+                    // Flujo estándar (Navegadores Desktop o Popups que logran sobrevivir)
+                    const result = await signInWithPopup(auth, provider);
+                    if (result && result.user) {
+                        processFinished = true;
+                        await registerGoogleUser(result.user);
+                    }
+                } catch (popupError) {
+                    // Fuego Cruzado iOS: El contenedor Swift cierra el popup a la fuerza al detectar que Google terminó.
+                    // Esto rompe la promesa y arroja "popup-closed", pero Firebase SÍ escribió la sesión.
+                    if (popupError.code === 'auth/popup-closed-by-user' || popupError.code === 'auth/cancelled-popup-request' || popupError.code === 'auth/internal-error') {
+                        
+                        btn.innerHTML = '<i class="fa-solid fa-shield-halved fa-spin mr-2"></i> Desencriptando...';
+                        
+                        // Bypass Failsafe: Esperamos hasta 6 segundos a que Firebase lea IndexedDB en segundo plano
+                        const recoveredUser = await new Promise((resolve) => {
+                            let resolved = false;
+                            const timeout = setTimeout(() => {
+                                if (!resolved) { resolved = true; resolve(null); }
+                            }, 6000);
+                            
+                            const unsub = onAuthStateChanged(auth, (u) => {
+                                if (u && !u.isAnonymous && !resolved) {
+                                    resolved = true;
+                                    clearTimeout(timeout);
+                                    unsub();
+                                    resolve(u);
+                                }
+                            });
+                        });
 
-                if (isMobile || isWKWebView) {
-                    localStorage.setItem('nexus_redirect_pending', 'true');
-                    await signInWithRedirect(auth, provider);
-                    return; // Fin de la ejecución. El navegador salta hacia accounts.google.com
-                }
-
-                // Fallback Desktop (Google Chrome, Edge, Safari Desktop sin ITP estricto)
-                const result = await signInWithPopup(auth, provider);
-                if (result && result.user) {
-                    await registerGoogleUser(result.user);
+                        if (recoveredUser) {
+                            processFinished = true;
+                            await registerGoogleUser(recoveredUser);
+                        } else {
+                            throw new Error("Operación cancelada por el usuario o tiempo agotado.");
+                        }
+                    } else {
+                        throw popupError;
+                    }
                 }
 
             } catch (error) {
                 console.error("[APEX] Google Auth Error:", error);
-                if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+                if (error.message !== "Operación cancelada por el usuario o tiempo agotado.") {
                     alert("⚠️ Error en conexión con Google: " + error.message);
                 }
             } finally {
-                // Solo se ejecuta si el popup es cerrado en Desktop, o falla instantáneamente.
-                // En móvil, la redirección destruye el hilo de JS antes de llegar aquí.
-                btn.innerHTML = originalHtml;
-                btn.disabled = false;
+                // Solo restauramos la interfaz si el inicio de sesión fracasó de verdad
+                if (!processFinished) {
+                    btn.innerHTML = originalHtml;
+                    btn.disabled = false;
+                }
             }
         };
 
