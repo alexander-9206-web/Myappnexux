@@ -7,7 +7,7 @@
     
     <!-- Meta etiquetas nativas para iOS (PWA Fullscreen) -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-styleA" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="NEXUS AR">
     <meta name="theme-color" content="#000000">
     <link rel="apple-touch-icon" href="icono.png">
@@ -1990,6 +1990,44 @@
         // ============================================================================
         // --- MOTOR DE NUBE (FIREBASE FIRESTORE MULTI-PLAYER) APEX OPTIMIZED ---
         // ============================================================================
+        
+        const NexusCloudEngine = {
+            config: {
+                apiKey: "AIzaSyDRzze-HGTmefvKih_0-_PxUoyToI0SUYk",
+                authDomain: "project-948940465806.firebaseapp.com",
+                projectId: "project-948940465806",
+                storageBucket: "project-948940465806.firebasestorage.app",
+                messagingSenderId: "948940465806",
+                appId: "1:948940465806:web:317f55cc9bf92c6392cbdf"
+            },
+            app: null, auth: null, db: null,
+            init: async function() {
+                if (this.app && this.auth && window.db) return true;
+                try {
+                    const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                    const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    
+                    this.app = getApps().length === 0 ? initializeApp(this.config) : getApps()[0];
+                    this.auth = getAuth(this.app);
+                    
+                    try {
+                        this.db = initializeFirestore(this.app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+                    } catch (e) {
+                        this.db = getFirestore(this.app);
+                    }
+                    
+                    window.db = this.db; 
+                    window.appId = 'project-948940465806';
+                    
+                    return true;
+                } catch (e) {
+                    console.error("[APEX SYS] Error inicializando Firebase Engine:", e);
+                    return false;
+                }
+            }
+        };
+
         let fbUser = null;
         let unsubscribeSnapshot = null;
         let isSyncing = false;
@@ -2274,51 +2312,13 @@
             }
             updateCloudBadge(false, true); 
             try {
-                const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                
-                // APEX OPTIMIZATION: Importar motores de caché offline avanzada
-                const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                
-                const firebaseConfig = {
-                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                    authDomain: "nexus-jr.firebaseapp.com",
-                    projectId: "nexus-jr",
-                    storageBucket: "nexus-jr.firebasestorage.app",
-                    messagingSenderId: "273022472068",
-                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-                    measurementId: "G-LGT2X8EC0R"
-                };
-                
-                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-                const auth = getAuth(app);
-                
-                // APEX OPTIMIZATION: Inicialización con Caché Local Persistente Multi-Pestaña.
-                try {
-                    window.db = initializeFirestore(app, {
-                        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-                    });
-                } catch (cacheErr) {
-                    console.warn("[APEX SYS] Modo restringido (Incógnito/iOS). Fallback a Firestore estándar.");
-                    window.db = getFirestore(app);
-                }
-                
-                window.appId = 'nexus-jr'; 
-                
-                import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
-                    .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
+                const success = await NexusCloudEngine.init();
+                if (!success) throw new Error("Cloud Engine Init Failed");
+
+                const { onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
 
                 return new Promise((resolve) => {
-                    const initAuth = async () => {
-                        try {
-                            await signInAnonymously(auth);
-                        } catch (err) {
-                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
-                        }
-                    };
-                    initAuth();
-
-                    onAuthStateChanged(auth, (user) => {
+                    onAuthStateChanged(NexusCloudEngine.auth, (user) => {
                         fbUser = user;
                         if(user) {
                             updateCloudBadge(true, false);
@@ -2786,26 +2786,14 @@
             btn.disabled = true;
 
             try {
-                const { getApps, initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await NexusCloudEngine.init();
+                const { GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
-                const firebaseConfig = {
-                    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-                    authDomain: "nexus-jr.firebaseapp.com",
-                    projectId: "nexus-jr",
-                    storageBucket: "nexus-jr.firebasestorage.app",
-                    messagingSenderId: "273022472068",
-                    appId: "1:273022472068:web:4b7ab7b40873f2cbf2d7d1",
-                    measurementId: "G-LGT2X8EC0R"
-                };
-                
-                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-                const auth = getAuth(app);
                 const provider = new GoogleAuthProvider();
 
                 // Usamos Popup para que el Wrapper WKWebView de iOS intercepte la ventana, 
                 // abra el modal nativo de safari y permita el acceso por llavero/FaceID automáticamente.
-                const result = await signInWithPopup(auth, provider);
+                const result = await signInWithPopup(NexusCloudEngine.auth, provider);
                 const user = result.user;
 
                 if (user && user.email) {
