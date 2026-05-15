@@ -40,7 +40,7 @@
         .timeline-item::before { content: ''; position: absolute; left: -21px; top: 0; bottom: -24px; width: 2px; background: #e2e8f0; } .timeline-item:last-child::before { display: none; } .timeline-dot { position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; z-index: 10; }
         .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; } .cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; font-size: 10px; font-weight: bold; position: relative; color: var(--app-text); background-color: #f8fafc; transition: all 0.2s;} .cal-cell.is-empty { background-color: transparent; } .cal-cell.has-event { border: 1.5px solid var(--val-exp); background-color: #fef2f2; color: var(--val-exp); } .cal-cell.is-today { background-color: var(--app-text); color: var(--card-bg); border-color: var(--app-text);} .cal-event-dot { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background-color: var(--val-exp); }
         
-        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS y Modales (Fricción Cero en formularios) */
+        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS (Fricción Cero en formularios) */
         .fixed.inset-0.backdrop-blur-sm > div,
         .fixed.inset-0.backdrop-blur-md > div,
         #login-screen > div,
@@ -48,8 +48,6 @@
             max-height: 85dvh !important;
             overflow-y: auto;
             overscroll-behavior: contain;
-            /* Protege el contenido de los modales largos contra el Home Indicator */
-            padding-bottom: max(2rem, env(safe-area-inset-bottom)) !important;
         }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
@@ -57,80 +55,43 @@
         #session-lock-screen > div::-webkit-scrollbar { 
             display: none; 
         }
-
-        /* --- APEX FIX: CALIBRACIÓN HIG PARA IOS PWA & PRO MAX --- */
-        @supports (-webkit-touch-callout: none) {
-            /* 1. Altura dinámica real adaptativa al teclado y barras nativas */
-            body { min-height: 100dvh; }
-
-            /* 2. Prevención de colisión de Input Auto-Zoom en Safari */
-            input, select, textarea, .form-input { font-size: 16px !important; }
-            
-            /* 3. Zonas Seguras de Apple (Dynamic Island & Notch) */
-            .safe-top { padding-top: max(1.5rem, env(safe-area-inset-top)) !important; }
-            
-            /* 4. Levantamiento Inteligente del FAB sobre el Home Indicator */
-            #fab-main {
-                bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
-            }
-            
-            /* 5. Escudo de Listas: Fuerza un espaciado en la base de cada pestaña para que el FAB no oculte la última transacción */
-            .tab-content {
-                padding-bottom: calc(9rem + env(safe-area-inset-bottom)) !important;
-            }
-            
-            /* 6. Optimización de renderizado de scroll fluido */
-            .hide-scrollbar { -webkit-overflow-scrolling: touch !important; }
-        }
-
-        /* Calibración visual específica para displays grandes de iOS (Pro Max Series) */
-        @media (min-width: 390px) and (max-width: 440px) {
-            #fab-toggle-btn { width: 4rem; height: 4rem; font-size: 1.5rem; }
-            #fab-menu button { width: 3.5rem; height: 3.5rem; font-size: 1.25rem; }
-            .theme-card { border-radius: 2.25rem !important; }
-        }
     </style>
 </head>
-<body class="pb-safe">
+<body class="pb-40">
 
-    <!-- APEX FIX: PANTALLA DE LOGIN / AUTENTICACIÓN (RESTAURADA Y ENCAPSULADA) -->
-    <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 flex items-center justify-center p-6 transition-opacity duration-500">
-        <div class="w-full max-w-sm bg-slate-800 p-8 rounded-[2.5rem] shadow-2xl border border-slate-700 relative overflow-hidden">
-            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500"></div>
+    <!-- AUTENTICACIÓN -->
+    <div id="login-screen" class="fixed inset-0 z-[100] bg-slate-900 text-white flex flex-col items-center justify-center p-8 transition-opacity duration-300 hidden">
+        <div class="w-full max-w-sm md:max-w-md space-y-6 animate-slideUp bg-slate-800 p-8 rounded-[2.5rem] shadow-2xl border border-slate-700">
+            <div class="text-center space-y-2"><div class="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><i class="fa-solid fa-shield-halved"></i></div><h1 class="text-2xl font-black uppercase tracking-tighter">Nexus <span class="text-indigo-400">Identity</span></h1><p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p></div>
             
-            <div class="text-center mb-8">
-                <div class="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-slate-700 shadow-inner">
-                    <i class="fa-solid fa-fingerprint text-3xl text-indigo-500"></i>
-                </div>
-                <h2 class="text-2xl font-black text-white uppercase tracking-tighter">Nexus <span class="text-indigo-500">AR</span></h2>
-                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Terminal de Acceso</p>
-            </div>
-
-            <!-- Opciones Iniciales -->
-            <div id="login-initial-choice" class="space-y-3">
-                <button onclick="showExistingUsers()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    Iniciar Sesión <i class="fa-solid fa-arrow-right"></i>
+            <!-- Elección Inicial (NUEVO) -->
+            <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-slate-700">
+                <button onclick="showExistingUsers()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-users"></i> Ingresar a Bóveda
                 </button>
-                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-300 p-4 rounded-2xl font-black uppercase tracking-widest text-xs border border-slate-700 active:scale-95 transition-transform hover:text-white hover:border-slate-500">
-                    Crear Bóveda
+                <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-700 transition-colors active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-plus"></i> Crear Nueva Bóveda
                 </button>
             </div>
 
-            <!-- Selección de Usuario -->
-            <div id="login-user-selection" class="hidden space-y-4">
-                <div class="flex justify-between items-center mb-2 border-b border-slate-700 pb-2">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Selecciona tu Perfil</p>
-                    <button onclick="showInitialLoginChoice()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i></button>
+            <!-- Selector de Usuarios (MODIFICADO) -->
+            <div id="login-user-selection" class="space-y-3 pt-4 border-t border-slate-700 hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center">Selecciona tu cuenta</p>
+                    <button onclick="showInitialLoginChoice()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
                 </div>
-                <div class="relative">
-                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
-                    <input type="text" id="login-search-user" oninput="filterLoginUsers()" placeholder="Buscar usuario..." class="w-full bg-slate-900 text-white pl-9 pr-4 py-3 rounded-xl outline-none font-bold text-xs border border-slate-700 focus:border-indigo-500 transition-colors">
+                <!-- Buscador Dinámico -->
+                <div class="relative mb-2">
+                    <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
+                    <input type="text" id="login-search-user" oninput="filterLoginUsers()" placeholder="Buscar correo o nombre..." class="w-full bg-slate-900 border border-slate-700 text-white text-xs p-3 pl-8 rounded-xl outline-none focus:border-indigo-500 transition-colors">
                 </div>
-                <div id="login-users-list" class="max-h-48 overflow-y-auto space-y-2 hide-scrollbar pr-1"></div>
+                <div id="login-users-list" class="space-y-2 max-h-48 overflow-y-auto hide-scrollbar">
+                    <p class="text-xs text-center text-slate-500 py-4"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando bóvedas locales...</p>
+                </div>
             </div>
 
-            <!-- Ingreso de PIN -->
-            <div id="login-pin-section" class="hidden space-y-4">
+            <!-- Ingreso de PIN para usuario existente -->
+            <div id="login-pin-section" class="space-y-4 hidden pt-4 border-t border-slate-700">
                 <div class="flex justify-between items-center mb-2">
                     <p id="login-active-email" class="text-xs font-bold text-indigo-400 truncate pr-2"></p>
                     <button onclick="cancelUserSelection()" class="text-slate-500 hover:text-white text-[10px] uppercase font-black tracking-widest"><i class="fa-solid fa-arrow-left"></i> Volver</button>
@@ -1268,19 +1229,28 @@
     
     <!-- MODALES DE CUENTAS / COMPRAS -->
     <div id="shared-account-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
-        <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp shadow-2xl">
-            <div class="flex justify-between items-center mb-2">
-                <h3 class="text-xl font-black uppercase theme-text tracking-tighter text-purple-600"><i class="fa-solid fa-link mr-2 text-purple-500"></i>Conexión P2P</h3>
-                <button type="button" onclick="closeLinkSharedModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
-            </div>
+        <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
+            <div class="flex justify-between items-center mb-2"><h3 class="text-2xl font-black uppercase theme-text tracking-tighter text-purple-600">Conexión P2P</h3><button type="button" onclick="closeLinkSharedModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
             <div class="space-y-4">
-                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p class="text-[10px] font-black uppercase text-slate-600 tracking-widest mb-2 text-center">Vincular Bóveda Compartida</p>
-                    <p class="text-[8px] text-slate-400 leading-tight text-center mb-4 font-bold">Pega el token P2P proporcionado por tu socio.</p>
-                    <div class="flex gap-2">
-                        <input type="text" id="shared-token-input" placeholder="Ej: nx_aG9sYS..." class="form-input text-xs font-mono bg-white flex-1 text-center tracking-widest shadow-sm">
-                        <button onclick="processSharedToken()" class="bg-purple-600 text-white px-4 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-link"></i></button>
-                    </div>
+                <div class="bg-purple-50 p-4 rounded-2xl border border-purple-100">
+                    <div class="flex items-center gap-3 mb-2"><i class="fa-solid fa-satellite-dish text-xl text-purple-500"></i><p class="text-[10px] font-black uppercase text-purple-800 tracking-widest">Radar de Bóvedas</p></div>
+                    <p class="text-[8px] text-purple-600 leading-tight">Las cuentas configuradas como "Compartidas" por otros usuarios en la red aparecerán aquí automáticamente.</p>
+                </div>
+                
+                <!-- APEX FIX: Explorador Automático P2P -->
+                <div id="p2p-radar-list" class="max-h-48 overflow-y-auto hide-scrollbar bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <p class="text-[10px] text-center text-slate-400 font-bold py-2"><i class="fa-solid fa-radar fa-spin mr-1"></i> Escaneando red...</p>
+                </div>
+
+                <div class="relative flex items-center py-2">
+                    <div class="flex-grow border-t border-slate-100"></div>
+                    <span class="flex-shrink-0 mx-4 text-[8px] font-black text-slate-400 uppercase tracking-widest">O usa un Token manual</span>
+                    <div class="flex-grow border-t border-slate-100"></div>
+                </div>
+
+                <div class="flex gap-2">
+                    <input type="text" id="shared-token-input" placeholder="Pegar Token (nx_...)" class="form-input text-xs font-mono bg-slate-50 flex-1 text-center tracking-widest">
+                    <button onclick="processSharedToken()" class="bg-purple-600 text-white px-4 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-link"></i></button>
                 </div>
             </div>
         </div>
@@ -2047,7 +2017,6 @@
                         
                         const data = docSnap.data();
                         let hasSharedChanges = false;
-                        let hasNewCategories = false; // APEX FIX: Flag para detectar aprendizaje de diccionario P2P
 
                         // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras (Race Conditions).
                         if (!localAcc.syncedOnce && data.balance !== undefined) {
@@ -2097,27 +2066,6 @@
                                     state.tx.push(mappedTx);
                                     hasSharedChanges = true;
                                     
-                                    // APEX FIX: Motor de Aprendizaje Silencioso (Categorías Compartidas SSoT)
-                                    // Si el socio usa una categoría o jerarquía que no tenemos, la agregamos a nuestro diccionario local.
-                                    if (mappedTx.cat) {
-                                        if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-                                        if(!state.categories.global) state.categories.global = [];
-                                        if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
-                                        if(!state.catParents.global) state.catParents.global = [];
-
-                                        if (!state.categories.global.includes(mappedTx.cat)) {
-                                            state.categories.global.push(mappedTx.cat);
-                                            hasNewCategories = true;
-                                            
-                                            // Extraer al Padre y asegurar que exista
-                                            const m = mappedTx.cat.match(/\[(.*?)\]\s*(.*)/);
-                                            const parentCat = m ? m[1] : mappedTx.cat;
-                                            if (!state.catParents.global.includes(parentCat)) {
-                                                state.catParents.global.push(parentCat);
-                                            }
-                                        }
-                                    }
-
                                     // Sumar al balance local el delta de la nueva transacción (Event Sourcing)
                                     if (localAcc.syncedOnce) {
                                         if (mappedTx.type === 'transfer') {
@@ -2153,24 +2101,6 @@
                                         }
                                         state.tx[idx] = mappedTx;
                                         hasSharedChanges = true;
-                                        
-                                        // APEX FIX: Aprender categoría si se edita
-                                        if (mappedTx.cat) {
-                                            if(!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-                                            if(!state.categories.global) state.categories.global = [];
-                                            if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
-                                            if(!state.catParents.global) state.catParents.global = [];
-
-                                            if (!state.categories.global.includes(mappedTx.cat)) {
-                                                state.categories.global.push(mappedTx.cat);
-                                                hasNewCategories = true;
-                                                const m = mappedTx.cat.match(/\[(.*?)\]\s*(.*)/);
-                                                const parentCat = m ? m[1] : mappedTx.cat;
-                                                if (!state.catParents.global.includes(parentCat)) {
-                                                    state.catParents.global.push(parentCat);
-                                                }
-                                            }
-                                        }
                                     }
                                 }
                             });
@@ -2187,23 +2117,6 @@
                             if (sessionUnlocked) { 
                                 clearTimeout(p2pRenderTimeout);
                                 p2pRenderTimeout = setTimeout(() => {
-                                    // APEX FIX: Si aprendimos categorías nuevas de un socio, actualizamos los selectores globales
-                                    if (hasNewCategories) {
-                                        if(typeof updateCatManageView === 'function') updateCatManageView();
-                                        if(typeof updateDbCatFilter === 'function') updateDbCatFilter();
-                                        
-                                        // Actualiza el modal de registro activo silenciosamente sin cerrarlo si el usuario está en él
-                                        const selP = document.getElementById('f-cat-parent-select');
-                                        if (selP && !document.getElementById('tx-modal').classList.contains('hidden')) {
-                                            const currentVal = selP.value;
-                                            selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
-                                            state.catParents.global.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
-                                            selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
-                                            if(Array.from(selP.options).some(o => o.value === currentVal)) selP.value = currentVal;
-                                            handleParentCategoryChange();
-                                        }
-                                    }
-
                                     updateDashboard(); 
                                     if(state.activeTab === 'accounts') renderAccountsTab(); 
                                     if(state.activeTab === 'database') renderDatabase();
@@ -2298,7 +2211,6 @@
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                // APEX FIX: Credenciales actualizadas apuntando al cluster nexus-ar-da31c
                 const firebaseConfig = {
                     apiKey: "AIzaSyDRzze-HGTmefvKih_0-_PxUoyToI0SUYk",
                     authDomain: "nexus-ar-da31c.firebaseapp.com",
@@ -2321,7 +2233,6 @@
                     window.db = getFirestore(app);
                 }
                 
-                // APEX FIX: Identificador Global de Rutas actualizado
                 window.appId = 'nexus-ar-da31c'; 
                 
                 import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
@@ -2970,58 +2881,22 @@
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
-        // APEX FIX: Purga profunda asíncrona, tolerante a fallos y con transición visual Fricción Cero
-        async function logout() { 
+        // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
+        function logout() { 
             sessionUnlocked = false; 
             
-            // 1. Mostrar pantalla de Login inmediatamente por encima de todo (Transición suave)
-            const login = $id('login-screen');
-            const lockScreen = $id('session-lock-screen');
-            
-            if (lockScreen) {
-                lockScreen.classList.add('opacity-0');
-                setTimeout(() => lockScreen.classList.add('hidden'), 300);
-            }
-
-            if (login) {
-                login.classList.remove('hidden');
-                setTimeout(() => {
-                    login.classList.remove('opacity-0', 'pointer-events-none');
-                }, 10);
-            }
-
-            // 2. Ejecutar limpieza de memoria en segundo plano con aislamiento de fallos
-            try {
-                if(typeof unsubscribeSnapshot === 'function') unsubscribeSnapshot();
-                if(window.sharedUnsubscribers) {
-                    for (const rId in window.sharedUnsubscribers) {
-                        if(typeof window.sharedUnsubscribers[rId] === 'function') window.sharedUnsubscribers[rId]();
-                    }
-                    window.sharedUnsubscribers = {};
+            if(unsubscribeSnapshot) unsubscribeSnapshot();
+            if(window.sharedUnsubscribers) {
+                for (const rId in window.sharedUnsubscribers) {
+                    window.sharedUnsubscribers[rId]();
                 }
-                if(window.sharedTaskUnsubscribers) {
-                    for (const rId in window.sharedTaskUnsubscribers) {
-                        if(typeof window.sharedTaskUnsubscribers[rId] === 'function') window.sharedTaskUnsubscribers[rId]();
-                    }
-                    window.sharedTaskUnsubscribers = {};
-                }
-            } catch (e) { console.error("[APEX SYS] Error limpiando sockets:", e); }
+                window.sharedUnsubscribers = {};
+            }
             
-            try {
-                localStorage.removeItem('nexus_current_user'); 
-                document.cookie = "nexus_current_user=; max-age=0; path=/";
-                await NexusIDB.saveSession(null);
-            } catch (e) { console.error("[APEX SYS] Error limpiando sesión DB:", e); }
-            
-            currentUser = null;
-            userProfile = null;
-            
-            // 3. Resetear el estado visual por detrás para el próximo acceso limpio
-            setTimeout(() => {
-                showInitialLoginChoice(); 
-                fetchLoginUsers(false);
-                switchTab('home'); 
-            }, 400);
+            localStorage.removeItem('nexus_current_user'); 
+            NexusIDB.saveSession(null);
+            document.cookie = "nexus_current_user=; max-age=0; path=/";
+            location.reload(); 
         }
         
         function setApMode(mode) {
@@ -7863,9 +7738,30 @@
         }
 
         // APEX FIX: Radar P2P Integrado (Búsqueda Automática de Cuentas Compartidas)
-        function openLinkSharedModal() { 
+        async function openLinkSharedModal() { 
             const m = $id('shared-account-modal'); if(m) m.classList.remove('hidden'); 
-            const input = $id('shared-token-input'); if(input) input.value = '';
+            
+            const radarList = $id('p2p-radar-list');
+            if(radarList && window.db) {
+                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-4"><i class="fa-solid fa-satellite-dish fa-fade mr-2"></i>Escaneando red de bóvedas...</p>';
+                try {
+                    const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
+                    let html = '';
+                    snap.forEach(doc => {
+                        const data = doc.data();
+                        const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
+                        // Mostrar solo si es de otro usuario y no está vinculada en este dispositivo
+                        if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
+                            html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-satellite-dish text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">De: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-100 text-purple-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-200 transition-colors active:scale-95">Vincular</button></div>`;
+                        }
+                    });
+                    if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay bóvedas compartidas disponibles.</p>';
+                    radarList.innerHTML = html;
+                } catch(e) {
+                    radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-4">Error conectando al radar P2P.</p>';
+                }
+            }
         }
 
         function linkRadarAccount(remoteId, name, currency) {
@@ -9050,55 +8946,16 @@
         }
 
         // --- BACKUP Y RESTAURACIÓN ---
-        async function exportBackup(isAuto = false) {
-            try {
-                const d = new Date();
-                const tag = (state.settings && state.settings.backupFolder) ? `_${state.settings.backupFolder}` : '';
-                // Formato exacto por fecha y hora: YYYYMMDD_HHMM
-                const timestamp = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
-                const safeEmail = currentUser ? currentUser.split('@')[0] : 'vault';
-                const fileName = `Nexus_Backup_${safeEmail}${tag}_${timestamp}.json`;
-
-                const jsonStr = JSON.stringify(state, null, 2); // Formato JSON legible
-                
-                // Si es un Auto-Backup silencioso, aseguramos persistencia profunda
-                if (isAuto) {
-                    localStorage.setItem(`nexus_autobackup_${currentUser}`, jsonStr);
-                    localStorage.setItem('nexus_last_backup_date', d.toDateString());
-                    console.log("[APEX SYS] Auto-Backup silencioso ejecutado e inyectado en caché segura.");
-                }
-
-                const blob = new Blob([jsonStr], { type: 'application/json' });
-                const file = new File([blob], fileName, { type: 'application/json' });
-
-                // Puente Nativo iOS / Android (Fricción Cero para "Elegir Carpeta")
-                // Nota: navigator.share requiere interacción humana estricta, se omite en auto-backup
-                if (!isAuto && navigator.canShare && navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: fileName,
-                        text: 'Copia de Seguridad SSoT - NEXUS AR FINANCE'
-                    });
-                    // iOS lanzará su Share Sheet nativo, permitiendo "Guardar en Archivos" (iCloud / Local)
-                } else {
-                    // Fallback para Web/Desktop o para forzar la descarga en el Auto-Backup
-                    const url = URL.createObjectURL(blob);
-                    const dlNode = document.createElement('a');
-                    dlNode.href = url;
-                    dlNode.download = fileName;
-                    document.body.appendChild(dlNode);
-                    dlNode.click();
-                    setTimeout(() => {
-                        document.body.removeChild(dlNode);
-                        URL.revokeObjectURL(url);
-                    }, 100);
-                    
-                    if (!isAuto) alert(`✅ Backup generado con éxito:\n\n${fileName}`);
-                }
-            } catch (error) {
-                console.error("Error exportando backup:", error);
-                if (!isAuto && error.name !== 'AbortError') alert("⚠️ Error al generar el archivo de backup.");
-            }
+        function exportBackup() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
+            const dlNode = document.createElement('a');
+            const d = new Date();
+            const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
+            dlNode.setAttribute("href", dataStr);
+            dlNode.setAttribute("download", `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`);
+            document.body.appendChild(dlNode);
+            dlNode.click();
+            dlNode.remove();
         }
 
         function importBackup(event) {
@@ -9133,7 +8990,8 @@
                         const lastBackupDate = localStorage.getItem('nexus_last_backup_date');
                         const todayStr = now.toDateString();
                         if (lastBackupDate !== todayStr) {
-                            exportBackup(true); // Ejecuta el backup pasándole el flag isAuto = true
+                            exportBackup();
+                            localStorage.setItem('nexus_last_backup_date', todayStr);
                         }
                     }
                 }, 60000);
