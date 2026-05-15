@@ -9051,17 +9051,32 @@
             
             const radarList = $id('p2p-radar-list');
             if(radarList && window.db) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-4"><i class="fa-solid fa-satellite-dish fa-fade mr-2"></i>Buscando invitaciones...</p>';
+                if(!userProfile || !userProfile.publicEmail) {
+                    radarList.innerHTML = '<div class="p-4 bg-red-50 border border-red-200 rounded-xl text-center"><i class="fa-solid fa-triangle-exclamation text-red-500 text-2xl mb-2"></i><p class="text-[10px] text-red-600 font-bold uppercase tracking-widest leading-relaxed">Configura tu Correo Público (P2P) en la pestaña de Configuración para recibir invitaciones de red.</p></div>';
+                    return;
+                }
+                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-4"><i class="fa-solid fa-satellite-dish fa-fade mr-2"></i>Buscando invitaciones para ' + userProfile.publicEmail + '...</p>';
                 try {
                     const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'), where("invitedUsers", "array-contains", currentUser));
-                    const snap = await getDocs(q);
+                    const collRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults');
+                    
+                    // APEX FIX: Búsqueda estricta por el Token de Correo Público registrado en Configuración
+                    const q1 = query(collRef, where("invitedUsers", "array-contains", userProfile.publicEmail.toLowerCase()));
+                    const snap1 = await getDocs(q1);
+                    
+                    // Fallback para mantener compatibilidad con invitaciones viejas
+                    const q2 = query(collRef, where("invitedUsers", "array-contains", currentUser));
+                    const snap2 = await getDocs(q2);
+
+                    const allDocs = new Map();
+                    snap1.forEach(doc => allDocs.set(doc.id, doc.data()));
+                    snap2.forEach(doc => allDocs.set(doc.id, doc.data()));
+
                     let html = '';
-                    snap.forEach(doc => {
-                        const data = doc.data();
-                        const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
+                    allDocs.forEach((data, docId) => {
+                        const alreadyLinked = state.accounts.some(a => a.remoteId === docId);
                         if(!alreadyLinked && data.name) {
-                            html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-envelope-open-text text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Invitación de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
+                            html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-envelope-open-text text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Invitación de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${docId}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
                         }
                     });
                     if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay invitaciones pendientes.</p>';
@@ -9085,7 +9100,7 @@
 
         function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
 
-        // APEX FIX: Motor de Invitación Directa por Correo
+        // APEX FIX: Motor de Invitación Directa por Correo Público P2P
         async function inviteUserToVault(accId) {
             const acc = state.accounts.find(a => a.id === accId);
             if(!acc) return;
@@ -9093,33 +9108,36 @@
                 alert("Espera: La bóveda debe sincronizarse con la nube primero.");
                 return;
             }
-            triggerUIPrompt(`Ingresa el correo del socio a invitar a ${acc.name}:`, '', 'invite_p2p_vault', accId);
+            triggerUIPrompt(`Ingresa el correo público P2P del socio a invitar a ${acc.name}:`, '', 'invite_p2p_vault', accId);
         }
 
         async function executeInviteP2PVault(accId, email) {
             if(!email || !email.includes('@')) return alert("Correo inválido.");
-            const targetEmail = email.toLowerCase();
-            if(targetEmail === currentUser) return alert("No puedes invitarte a ti mismo.");
+            const targetEmail = email.trim().toLowerCase();
+            if(targetEmail === (userProfile.publicEmail || '').toLowerCase()) return alert("No puedes invitarte a ti mismo.");
             
             const acc = state.accounts.find(a => a.id === accId);
             if(!acc || !acc.remoteId) return;
 
             try {
-                const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { collection, query, where, getDocs, doc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', targetEmail);
-                const userSnap = await getDoc(userRef);
+                // 1. Buscar si el usuario destino tiene registrado ese correo como público
+                const usersRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users');
+                const q = query(usersRef, where("publicEmail", "==", targetEmail));
+                const snap = await getDocs(q);
                 
-                if(!userSnap.exists()) {
-                    return alert("No se encontró un usuario con ese correo. Dile que inicie sesión en la app primero.");
+                if(snap.empty) {
+                    return alert("⚠️ El usuario no se encuentra o no ha configurado su Correo Público P2P. Pídele que lo agregue en su pestaña de Configuración.");
                 }
 
+                // 2. Si existe, añadimos su correo público al array de invitados de la bóveda
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', acc.remoteId);
                 await setDoc(vaultRef, {
                     invitedUsers: arrayUnion(targetEmail)
                 }, { merge: true });
 
-                alert("✅ Invitación enviada a " + targetEmail + ".\n\nPodrá aceptarla desde su Radar P2P en Bóvedas.");
+                alert("✅ Invitación enviada a " + targetEmail + ".\n\nEl usuario ya puede vincular y crear la conexión directa desde su Radar P2P en Bóvedas.");
             } catch(e) {
                 console.error(e);
                 alert("Error al enviar la invitación.");
@@ -11082,17 +11100,31 @@
 
             const radarList = $id('task-p2p-radar-list');
             if(radarList && window.db) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-2"><i class="fa-solid fa-satellite-dish fa-fade mr-1"></i>Buscando invitaciones...</p>';
+                if(!userProfile || !userProfile.publicEmail) {
+                    radarList.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-xl text-center"><p class="text-[9px] text-red-600 font-bold uppercase tracking-widest leading-relaxed">Configura tu Correo Público (P2P) en la pestaña de Configuración para recibir invitaciones.</p></div>';
+                    return;
+                }
+                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-2"><i class="fa-solid fa-satellite-dish fa-fade mr-1"></i>Buscando invitaciones para ' + userProfile.publicEmail + '...</p>';
                 try {
                     const { collection, getDocs, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'), where("invitedUsers", "array-contains", currentUser));
-                    const snap = await getDocs(q);
+                    const collRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks');
+                    
+                    // APEX FIX: Búsqueda cruzada por Correo P2P
+                    const q1 = query(collRef, where("invitedUsers", "array-contains", userProfile.publicEmail.toLowerCase()));
+                    const snap1 = await getDocs(q1);
+                    
+                    const q2 = query(collRef, where("invitedUsers", "array-contains", currentUser));
+                    const snap2 = await getDocs(q2);
+
+                    const allDocs = new Map();
+                    snap1.forEach(doc => allDocs.set(doc.id, doc.data()));
+                    snap2.forEach(doc => allDocs.set(doc.id, doc.data()));
+
                     let html = '';
-                    snap.forEach(doc => {
-                        const data = doc.data();
-                        const alreadyLinked = state.taskVaults && state.taskVaults.some(v => v.remoteId === doc.id);
+                    allDocs.forEach((data, docId) => {
+                        const alreadyLinked = state.taskVaults && state.taskVaults.some(v => v.remoteId === docId);
                         if(!alreadyLinked && data.name) {
-                            html += `<div class="flex justify-between items-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm mb-1"><div class="flex items-center gap-2"><div class="w-6 h-6 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-envelope-open-text text-[8px]"></i></div><div><p class="text-[9px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[7px] font-bold text-slate-400 mt-0.5">De: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${doc.id}', '${data.name}', '${data.owner}')" class="bg-purple-500 text-white px-2 py-1 rounded-md text-[8px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
+                            html += `<div class="flex justify-between items-center p-2 bg-white rounded-lg border border-purple-100 shadow-sm mb-1"><div class="flex items-center gap-2"><div class="w-6 h-6 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-envelope-open-text text-[8px]"></i></div><div><p class="text-[9px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[7px] font-bold text-slate-400 mt-0.5">De: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${docId}', '${data.name}', '${data.owner}')" class="bg-purple-500 text-white px-2 py-1 rounded-md text-[8px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
                         }
                     });
                     if(!html) html = '<p class="text-[9px] text-center text-slate-400 font-bold py-2">No tienes invitaciones pendientes.</p>';
@@ -11121,7 +11153,7 @@
             setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity'); }, 300);
         }
 
-        // APEX FIX: Motor de Invitación Directa por Correo para Tareas
+        // APEX FIX: Motor de Invitación Directa por Correo Público para Tareas
         async function inviteUserToTaskVault(vaultId) {
             const v = state.taskVaults.find(a => a.id === vaultId);
             if(!v) return;
@@ -11129,33 +11161,36 @@
                 alert("Espera: La bóveda debe sincronizarse con la nube primero.");
                 return;
             }
-            triggerUIPrompt(`Ingresa el correo del socio a invitar a ${v.name}:`, '', 'invite_p2p_task_vault', vaultId);
+            triggerUIPrompt(`Ingresa el correo público P2P del socio a invitar a ${v.name}:`, '', 'invite_p2p_task_vault', vaultId);
         }
 
         async function executeInviteP2PTaskVault(vaultId, email) {
             if(!email || !email.includes('@')) return alert("Correo inválido.");
-            const targetEmail = email.toLowerCase();
-            if(targetEmail === currentUser) return alert("No puedes invitarte a ti mismo.");
+            const targetEmail = email.trim().toLowerCase();
+            if(targetEmail === (userProfile.publicEmail || '').toLowerCase()) return alert("No puedes invitarte a ti mismo.");
             
             const v = state.taskVaults.find(a => a.id === vaultId);
             if(!v || !v.remoteId) return;
 
             try {
-                const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { collection, query, where, getDocs, doc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 
-                const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', targetEmail);
-                const userSnap = await getDoc(userRef);
+                // 1. Buscar si el usuario destino tiene registrado ese correo como público
+                const usersRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users');
+                const q = query(usersRef, where("publicEmail", "==", targetEmail));
+                const snap = await getDocs(q);
                 
-                if(!userSnap.exists()) {
-                    return alert("No se encontró un usuario con ese correo. Dile que inicie sesión en la app primero.");
+                if(snap.empty) {
+                    return alert("⚠️ El usuario no se encuentra o no ha configurado su Correo Público P2P. Pídele que lo agregue en su pestaña de Configuración.");
                 }
 
+                // 2. Añadimos la invitación a la bóveda
                 const vaultRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', v.remoteId);
                 await setDoc(vaultRef, {
                     invitedUsers: arrayUnion(targetEmail)
                 }, { merge: true });
 
-                alert("✅ Invitación enviada a " + targetEmail + ".\n\nPodrá aceptarla desde su Radar P2P de Tareas.");
+                alert("✅ Invitación enviada a " + targetEmail + ".\n\nEl usuario ya puede vincular la conexión directa desde su Radar P2P de Tareas.");
             } catch(e) {
                 console.error(e);
                 alert("Error al enviar la invitación.");
