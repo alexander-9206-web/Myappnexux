@@ -2507,8 +2507,7 @@
                 // APEX FIX: Ñemboheko atómica en cola (Cola de promesas)
                 cloudSyncQueue = cloudSyncQueue.then(async () => {
                     try {
-                        // APEX FIX: Importar runTransaction para operaciones simultáneas P2P
-                        const { doc, writeBatch, runTransaction } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                         
                         // --- 1. SINCRONIZACIÓN PERSONAL (BATCH) ---
                         const batch = writeBatch(window.db);
@@ -2548,17 +2547,14 @@
                             }
                         }
 
-                        if (writesCount > 0) {
-                            await batch.commit(); 
-                            console.log(`[APEX SYS] Oñeñongatu araípe (Personal SSoT). Tembiapo: ${writesCount}`);
-                        }
-
-                        // --- 2. SINCRONIZACIÓN SIMULTÁNEA P2P BÓVEDAS (TRANSACTIONS) ---
-                        // APEX FIX: Evita sobrescritura (race conditions) entre 2 usuarios usando bloqueos atómicos
+                        // --- 2. SINCRONIZACIÓN P2P BÓVEDAS (BATCH + SELF-HEALING) ---
+                        // APEX FIX: Restauración de Batching de ultra-baja latencia con Auto-Curación
                         const p2pVaults = (stateSnapshot.accounts || []).filter(a => a.isShared && a.remoteId);
                         for (const sharedAcc of p2pVaults) {
                             const sharedTxs = (stateSnapshot.tx || [])
                                 .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
+                                .sort((a,b) => new Date(b.date) - new Date(a.date)) // APEX FIX: Estabilidad de Hash garantizada
+                                .slice(0, 300)
                                 .map(t => {
                                     const netTx = { ...t };
                                     if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId;
@@ -2571,98 +2567,54 @@
                             let localDeleted = stateSnapshot.deletedSharedTxs || [];
                             if (localDeleted.length > 200) localDeleted = localDeleted.slice(-200);
 
+                            const sharedPayload = { 
+                                name: sharedAcc.name.replace('👥 ', ''),
+                                owner: sharedAcc.owner || currentUser,
+                                balance: sharedAcc.balance, 
+                                currency: sharedAcc.currency, 
+                                txs: sharedTxs,
+                                deletedTxs: localDeleted, 
+                                updatedAt: new Date().toISOString() 
+                            };
+                            
                             const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: localDeleted }); 
-                            if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] === sharedStr) continue;
-                            
-                            const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
-                            
-                            // Ñemboheko atómica (Transaction Firebase)
-                            await runTransaction(window.db, async (transaction) => {
-                                const cloudDoc = await transaction.get(sharedRef);
-                                let cloudTxs = [], cloudDel = [];
-                                if (cloudDoc.exists()) {
-                                    cloudTxs = cloudDoc.data().txs || [];
-                                    cloudDel = cloudDoc.data().deletedTxs || [];
-                                }
-
-                                // Fusión Inteligente Atómica (Smart Merge)
-                                const mergedDel = [...new Set([...cloudDel, ...localDeleted])].slice(-200);
-                                const txMap = new Map();
-                                
-                                cloudTxs.forEach(t => txMap.set(t.id, t));
-                                sharedTxs.forEach(t => {
-                                    const cTx = txMap.get(t.id);
-                                    if (!cTx || JSON.stringify(cTx) !== JSON.stringify(t)) {
-                                        txMap.set(t.id, t);
-                                    }
-                                });
-
-                                const finalTxs = Array.from(txMap.values())
-                                    .filter(t => !mergedDel.includes(t.id))
-                                    .sort((a,b) => new Date(b.date) - new Date(a.date))
-                                    .slice(0, 300);
-
-                                const payload = { 
-                                    name: sharedAcc.name.replace('👥 ', ''),
-                                    owner: sharedAcc.owner || currentUser,
-                                    balance: sharedAcc.balance, 
-                                    currency: sharedAcc.currency, 
-                                    txs: finalTxs,
-                                    deletedTxs: mergedDel, 
-                                    updatedAt: new Date().toISOString() 
-                                };
-                                
-                                transaction.set(sharedRef, payload, { merge: true });
-                                lastCloudSyncHash['shared_' + sharedAcc.remoteId] = JSON.stringify({ b: sharedAcc.balance, t: finalTxs, d: mergedDel });
-                            });
-                            console.log(`[APEX P2P] Bóveda compartida oñeñongatu hekopete: ${sharedAcc.name}`);
+                            if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] !== sharedStr) {
+                                const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
+                                batch.set(sharedRef, sharedPayload, { merge: true });
+                                lastCloudSyncHash['shared_' + sharedAcc.remoteId] = sharedStr;
+                                writesCount++;
+                            }
                         }
 
-                        // --- 3. SINCRONIZACIÓN SIMULTÁNEA P2P TAREAS (TRANSACTIONS) ---
+                        // --- 3. SINCRONIZACIÓN P2P TAREAS (BATCH + SELF-HEALING) ---
                         const p2pTasks = (stateSnapshot.taskVaults || []).filter(v => v.isShared && v.remoteId);
                         for (const vault of p2pTasks) {
-                            const sTasks = (stateSnapshot.tasks || []).filter(t => t.vaultId === vault.remoteId);
+                            const sTasks = (stateSnapshot.tasks || [])
+                                .filter(t => t.vaultId === vault.remoteId)
+                                .sort((a,b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)); // APEX FIX: Estabilidad Hash
+
                             let localDel = stateSnapshot.deletedSharedTasks || [];
 
+                            const sharedPayload = {
+                                name: vault.name,
+                                owner: vault.owner || currentUser,
+                                tasks: sTasks,
+                                deletedTasks: localDel,
+                                updatedAt: new Date().toISOString()
+                            };
+
                             const sharedStr = JSON.stringify({ t: sTasks, d: localDel });
-                            if (lastCloudSyncHash['stask_' + vault.remoteId] === sharedStr) continue;
+                            if (lastCloudSyncHash['stask_' + vault.remoteId] !== sharedStr) {
+                                const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
+                                batch.set(sharedRef, sharedPayload, { merge: true });
+                                lastCloudSyncHash['stask_' + vault.remoteId] = sharedStr;
+                                writesCount++;
+                            }
+                        }
 
-                            const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
-                            
-                            // Ñemboheko atómica (Transaction Firebase)
-                            await runTransaction(window.db, async (transaction) => {
-                                const cloudDoc = await transaction.get(sharedRef);
-                                let cloudTasks = [], cloudDel = [];
-                                if (cloudDoc.exists()) {
-                                    cloudTasks = cloudDoc.data().tasks || [];
-                                    cloudDel = cloudDoc.data().deletedTasks || [];
-                                }
-
-                                const mergedDel = [...new Set([...cloudDel, ...localDel])];
-                                const tkMap = new Map();
-                                
-                                cloudTasks.forEach(t => tkMap.set(t.id, t));
-                                sTasks.forEach(t => {
-                                    const cTk = tkMap.get(t.id);
-                                    if (!cTk || JSON.stringify(cTk) !== JSON.stringify(t)) {
-                                        tkMap.set(t.id, t);
-                                    }
-                                });
-
-                                const finalTasks = Array.from(tkMap.values()).filter(t => !mergedDel.includes(t.id));
-
-                                const payload = {
-                                    name: vault.name,
-                                    owner: vault.owner || currentUser,
-                                    tasks: finalTasks,
-                                    deletedTasks: mergedDel,
-                                    updatedAt: new Date().toISOString()
-                                };
-
-                                transaction.set(sharedRef, payload, { merge: true });
-                                lastCloudSyncHash['stask_' + vault.remoteId] = JSON.stringify({ t: finalTasks, d: mergedDel });
-                            });
-                            console.log(`[APEX P2P] Tareas compartidas oñeñongatu hekopete: ${vault.name}`);
+                        if (writesCount > 0) {
+                            await batch.commit(); 
+                            console.log(`[APEX SYS] Oñeñongatu araípe (Personal SSoT). Tembiapo: ${writesCount}`);
                         }
 
                     } catch (e) {
