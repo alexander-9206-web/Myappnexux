@@ -2408,14 +2408,23 @@
                             const data = change.doc.data();
                             
                             if (change.doc.id === 'core') {
-                                // Preservamos las transacciones locales y fusionamos el resto de variables
-                                const currentTx = state.tx || [];
-                                state = { ...state, ...data };
-                                state.tx = currentTx;
+                                // APEX FIX: Escudo Forense Anti-Borrado (Evita la Paradoja del Dispositivo Nuevo)
+                                if ((!data.accounts || data.accounts.length === 0) && state.accounts && state.accounts.length > 0) {
+                                    console.warn("[APEX GUARD] Intento de borrado de cuentas SSoT detectado. Bloqueando y restaurando nube...");
+                                    lastCloudSyncHash['core'] = '';
+                                    setTimeout(() => { window.initialCloudLoadComplete = true; triggerCloudSync(); }, 1000);
+                                } else {
+                                    // Preservamos las transacciones locales y fusionamos el resto de variables
+                                    const currentTx = state.tx || [];
+                                    state = { ...state, ...data };
+                                    state.tx = currentTx;
+                                    lastCloudSyncHash['core'] = JSON.stringify(data); // Restaura el caché para eficiencia
+                                }
                             } else if (change.doc.id.startsWith('tx_')) {
                                 // Capturamos las transacciones agrupadas por año
                                 const year = change.doc.id.split('_')[1];
                                 incomingTxByYear[year] = data.tx || [];
+                                lastCloudSyncHash[change.doc.id] = JSON.stringify({ tx: data.tx || [] });
                             }
                         }
                     });
@@ -2456,6 +2465,9 @@
                         }
                         console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
                     }
+                    
+                    // APEX FIX: Desbloqueo del motor de subida (El dispositivo ya leyó la base de datos SSoT)
+                    window.initialCloudLoadComplete = true;
                     updateCloudBadge(true, false);
                 }, (error) => {
                     console.error("[APEX SYS] Error de Snapshot Firestore", error);
@@ -2488,6 +2500,13 @@
         function triggerCloudSync() {
             if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
             
+            // APEX FIX: Prevención del efecto "Borrador de Dispositivo Nuevo". 
+            // Si el dispositivo acaba de abrir la app y no ha descargado los datos de Firebase, prohibimos que suba su estado vacío.
+            if(!window.initialCloudLoadComplete) {
+                console.warn("[APEX SYS] Subida pausada. Esperando descarga inicial SSoT...");
+                return;
+            }
+
             // APEX OPTIMIZATION: Prevención de Cola Infinita (Race Condition Fix)
             if(isSyncing) {
                 syncPending = true;
