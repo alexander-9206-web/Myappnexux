@@ -2279,10 +2279,20 @@
                         }
                         if (hasChanges) {
                             state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
-                            if(currentUser) NexusIDB.saveState(currentUser, state);
+                            
+                            // APEX FIX: Orden Cronológico Estricto para Tareas P2P
+                            state.tasks.sort((a,b) => new Date(b.createdAt || b.date || '2100') - new Date(a.createdAt || a.date || '2100'));
+
+                            // APEX FIX: Motor de Auto-Curación. Inyecta transacciones perdidas en la nube nuevamente sin perder la inmediatez de la UI.
+                            if(currentUser) saveState(); 
+                            
                             if (sessionUnlocked) {
-                                if(state.activeTab === 'tasks') renderTasksTab();
-                                updateDashboard();
+                                // APEX OPTIMIZATION: Debounce visual de 150ms para no saturar el DOM cuando Firebase empuja múltiples tareas compartidas
+                                clearTimeout(window.taskP2PRenderTimeout);
+                                window.taskP2PRenderTimeout = setTimeout(() => {
+                                    if(state.activeTab === 'tasks') renderTasksTab();
+                                    updateDashboard();
+                                }, 150);
                             }
                         }
                     });
@@ -2720,21 +2730,14 @@
                                 if (btn) btn.innerHTML = origHtml;
                             });
                         } else {
-                            alert("Autenticación fallida: " + error.message);
+                            alert("Autenticación fallida o cancelada.");
                             if (btn) btn.innerHTML = origHtml;
                         }
                     });
             } else {
-                // Si la persona toca el botón antes de que Firebase termine de descargar en segundo plano
-                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Preparando sistema...';
-                initCloud(true).then(() => {
-                    if (btn) btn.innerHTML = origHtml;
-                    // Auto disparar una vez cargado
-                    setTimeout(() => loginWithGoogle(), 150);
-                }).catch(() => {
-                    alert("Error de red. Revisa tu conexión.");
-                    if (btn) btn.innerHTML = origHtml;
-                });
+                // APEX FIX: Escudo Anti-Desincronización. 
+                alert("⚠️ El motor de seguridad está cargando o no hay red.\n\nPor favor, espera un momento y revisa tu conexión a internet.");
+                initCloud(true);
             }
         }
 
@@ -2854,22 +2857,57 @@
             // 2. Función de pintado aislada para ejecución inmediata
             const renderList = () => {
                 let html = '';
-                Array.from(usersMap.values()).forEach(p => {
+                let quickHtml = ''; // APEX FIX: Contenedor HTML para avatares rápidos
+                
+                // Ordenar usuarios para mostrar los más recientes primero
+                const sortedUsers = Array.from(usersMap.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+                
+                sortedUsers.forEach((p, index) => {
                     const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
+                    // APEX FIX: Sincronización visual del avatar real si existe
+                    const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[14px]"></i>`;
+                    
                     html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
                         <div class="flex items-center gap-3 overflow-hidden">
-                            <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
+                            <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0 border border-slate-700 overflow-hidden">${avatarHtml}</div>
                             <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
                         </div>
                         <div class="flex items-center gap-2 shrink-0 ml-2">
                             <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
                         </div>
                     </div>`;
+
+                    // APEX FIX: Generar avatares rápidos para los 3 usuarios más recientes
+                    if (index < 3) {
+                        const quickAvatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-xl"></i>`;
+                        quickHtml += `
+                        <div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="flex flex-col items-center gap-2 cursor-pointer group active:scale-95 transition-transform">
+                            <div class="w-14 h-14 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center overflow-hidden border-2 border-slate-700 group-hover:border-indigo-400 shadow-lg transition-colors">
+                                ${quickAvatarHtml}
+                            </div>
+                            <p class="text-[9px] font-black uppercase text-slate-300 w-16 text-center truncate">${p.name.split(' ')[0]}</p>
+                        </div>
+                        `;
+                    }
+
                     localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
                 });
+                
                 if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
                 else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
                 list.innerHTML = html;
+
+                // APEX FIX: Inyectar avatares rápidos en la pantalla principal
+                const quickAvatarsContainer = $id('quick-login-avatars');
+                if (quickAvatarsContainer) {
+                    if (quickHtml) {
+                        quickAvatarsContainer.innerHTML = quickHtml;
+                        quickAvatarsContainer.classList.remove('hidden');
+                    } else {
+                        quickAvatarsContainer.classList.add('hidden');
+                    }
+                }
+
                 filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
             };
 
@@ -4660,74 +4698,6 @@
             state.tx.push(newTx); saveCloudTx(newTx);
             saveState(); updateDashboard(); switchTab('loans'); alert(`✅ Cuota pagada correctamente.`);
         }
-
-        function openLinkSharedModal() { const m = $id('shared-account-modal'); if(m) m.classList.remove('hidden'); }
-        function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
-
-        function processSharedToken() {
-            const tokenInput = $id('shared-token-input');
-            if(!tokenInput) return;
-            const token = tokenInput.value.trim();
-            if(!token.startsWith('nx_')) return alert("Token inválido.");
-            try {
-                const b64 = token.substring(3);
-                const shareData = JSON.parse(atob(b64));
-                if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
-                
-                // Evitar duplicar cuentas vinculadas
-                if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
-                    return alert("Esta bóveda ya está vinculada a tu cuenta.");
-                }
-
-                const newAcc = { 
-                    id: 'acc_' + Date.now(), 
-                    name: '👥 ' + shareData.name, 
-                    currency: shareData.currency, 
-                    balance: 0, 
-                    type: 'liquid', 
-                    isShared: true, 
-                    remoteId: shareData.vaultId,
-                    syncedOnce: false // APEX FIX: Bloqueo anti-wipe para el que se une, hasta que descargue.
-                };
-                state.accounts.push(newAcc);
-                
-                // Guardado estrictamente local sin disparar triggerCloudSync() 
-                if(currentUser) NexusIDB.saveState(currentUser, state);
-                
-                // Llamamos a la función de escucha P2P de inmediato
-                if (typeof attachP2PListener === 'function') attachP2PListener();
-                
-                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
-                closeLinkSharedModal();
-                updateDashboard();
-                if (state.activeTab === 'accounts') renderAccountsTab();
-                
-            } catch(e) {
-                console.error("[APEX P2P] Error decodificando token:", e);
-                alert("El token está corrupto o mal formado.");
-            }
-        }
-
-        function generateShareTokenForAccount(accId) {
-            const acc = state.accounts.find(a => a.id === accId);
-            if(!acc) return;
-            
-            // APEX FIX: Obtener el ID remoto correcto para que ambos celulares apunten al mismo archivo en Firebase
-            const targetRemoteId = acc.remoteId || acc.id; 
-            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency };
-            const token = 'nx_' + btoa(JSON.stringify(payload));
-            
-            // Hack para copiar al portapapeles en iOS/Web
-            const temp = document.createElement("textarea");
-            temp.value = token;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            document.body.removeChild(temp);
-            
-            alert("✅ Token copiado al portapapeles:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio. Tu socio debe presionar el botón morado (P2P) para vincular la cuenta.");
-        }
-        // --- FIN MOTOR P2P ---
 
         function saveCCPurchase(e, forceOverdraft = false) { 
             if(e && typeof e.preventDefault === 'function') e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
