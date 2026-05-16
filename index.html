@@ -9498,12 +9498,29 @@
                         state = importedState;
                         await NexusIDB.saveState(currentUser, state);
                         
-                        // 2. Forzar a Firebase a aceptar el nuevo estado como Verdad Absoluta SSoT
-                        if (typeof triggerCloudSync === 'function') {
-                            lastCloudSyncHash = {}; // Limpia la caché local para forzar reescritura total
-                            triggerCloudSync();
-                            alert("⏳ Sincronizando respaldo con la nube... Por favor espera unos segundos.");
-                            await new Promise(resolve => setTimeout(resolve, 3000)); // Dar tiempo al batch de Firestore
+                        // 2. Subida Síncrona Directa a Firestore (Evita que el timeout corte la subida)
+                        if (window.db && currentUser) {
+                            alert("⏳ Bóveda cargada localmente.\n\nSubiendo a la nube SSoT... No cierres la ventana.");
+                            const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                            const batch = writeBatch(window.db);
+                            
+                            const coreState = { ...state };
+                            delete coreState.tx; 
+                            const cleanCore = JSON.parse(JSON.stringify(coreState));
+                            
+                            batch.set(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core'), cleanCore);
+                            
+                            const txByYear = {};
+                            (state.tx || []).forEach(t => {
+                                const year = new Date(t.date).getFullYear() || new Date().getFullYear();
+                                if(!txByYear[year]) txByYear[year] = [];
+                                txByYear[year].push(t);
+                            });
+                            for (const year in txByYear) {
+                                batch.set(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year), { tx: txByYear[year] });
+                            }
+                            
+                            await batch.commit(); // Garantiza que los datos estén en Google antes de reiniciar
                         }
 
                         alert("✅ Bóveda restaurada con éxito. Reiniciando el motor...");
