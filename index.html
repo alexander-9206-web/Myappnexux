@@ -2628,13 +2628,47 @@
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
+        // APEX FIX: Receptor Global para el Token inyectado desde el contenedor nativo iOS (Safari Externo)
+        window.receiveNativeAuthToken = async function(idToken) {
+            try {
+                // APEX FIX: Forzar a iOS a quitar la pantalla negra (Splash Screen) al volver de Google
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: "app_ready" });
+                }
+
+                if (!fbAuth) await initCloud(true);
+                const { GoogleAuthProvider, signInWithCredential } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const credential = GoogleAuthProvider.credential(idToken);
+                const result = await signInWithCredential(fbAuth, credential);
+                if (result && result.user) {
+                    await handleGoogleLoginSuccess(result.user);
+                }
+            } catch (error) {
+                console.error("Native Auth Error:", error);
+                // APEX FIX: Si hay error, también quitamos la pantalla negra para que puedas ver el mensaje
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: "app_ready" });
+                }
+                alert("Error nativo de Google: " + error.message);
+                const btn = document.querySelector('#login-initial-choice button');
+                if (btn) btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-4 h-4" alt="Google"> Continuar con Google';
+            }
+        };
+
         // APEX FIX: Funciones de Google OAuth
         async function loginWithGoogle() {
             const btn = document.querySelector('#login-initial-choice button');
             if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Autenticando...';
             try {
                 if (!fbAuth) await initCloud(true);
-                // APEX FIX: Transición a signInWithPopup para evitar recargas y bloqueos ITP en iOS
+                
+                // APEX FIX: Puente Nativo iOS. Ordena abrir la autenticación fuera del WKWebView 
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
+                    return; // Detiene el flujo web y espera a que Swift inyecte el token llamando a window.receiveNativeAuthToken()
+                }
+
+                // Fallback tradicional web/PWA para navegadores estándar
                 const { signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const result = await signInWithPopup(fbAuth, googleProvider);
                 if (result && result.user) {
@@ -2683,6 +2717,11 @@
             // Firebase y la vista se recarguen de forma instantánea.
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {
+                    // APEX FIX: Si iOS volvió a pintar la pantalla negra (Splash), la erradicamos al instante
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                        window.webkit.messageHandlers.appInterface.postMessage({ action: "app_ready" });
+                    }
+
                     if (!sessionUnlocked || !state || !state.settings) return; // APEX FIX: Prevención de ejecución en estado zombie (Pantalla de login)
                     
                     // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
