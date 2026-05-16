@@ -2592,6 +2592,40 @@
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
+        // APEX FIX: Funciones de Google OAuth
+        async function loginWithGoogle() {
+            const btn = document.querySelector('#login-initial-choice button');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Autenticando...';
+            try {
+                if (!fbAuth) await initCloud(true);
+                const { signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                await signInWithRedirect(fbAuth, googleProvider);
+            } catch (error) {
+                console.error("Google Login Error:", error);
+                alert("Error de autenticación con Google.");
+                if (btn) btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5" alt="Google"> Ingresar con Google';
+            }
+        }
+
+        async function handleGoogleLoginSuccess(user) {
+            const email = user.email.toLowerCase();
+            const name = user.displayName || email.split('@')[0];
+            const avatar = user.photoURL;
+
+            // Integración al ecosistema: Creamos el perfil evadiendo el PIN con "1234" por ser Google OAuth
+            userProfile = { name, email, pin: "1234", lastSeen: Date.now(), avatar: avatar, isCloud: true }; 
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
+            
+            if (window.db) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
+                } catch(e) {}
+            }
+            
+            await processLoginSuccess(email);
+        }
+
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
             window.addEventListener('scroll', () => {
@@ -2644,7 +2678,8 @@
                 // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
                 fetchLoginUsers(false);
                 
-                // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
+                // APEX FIX: Inicializamos la nube silenciosamente para interceptar el regreso del Login de Google
+                initCloud(true);
             } else {
                 // ARRANQUE LOCAL-FIRST
                 await bootApp(); 
@@ -2878,7 +2913,7 @@
         // APEX FIX: Funciones de Google OAuth
         async function loginWithGoogle() {
             const btn = document.querySelector('#login-initial-choice button');
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...';
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Autenticando...';
             try {
                 if (!fbAuth) await initCloud(true);
                 const { signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
@@ -2886,7 +2921,7 @@
             } catch (error) {
                 console.error("Google Login Error:", error);
                 alert("Error de autenticación con Google.");
-                if (btn) btn.innerHTML = '<i class="fa-brands fa-google text-red-500"></i> Ingresar con Google';
+                if (btn) btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5" alt="Google"> Ingresar con Google';
             }
         }
 
