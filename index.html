@@ -8791,7 +8791,7 @@
             }
         }
 
-        // APEX FIX: Función Radar P2P para Tareas Restaurada (Eliminación de código invasor)
+        // APEX FIX: Función para buscar Tareas P2P directamente en la vista de configuración
         async function scanTaskP2PRadarDirect() {
             const radarList = $id('direct-task-radar-list');
             if(!radarList || !window.db) return;
@@ -8801,17 +8801,16 @@
                 const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'));
                 let html = '';
-                
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.taskVaults && state.taskVaults.some(v => v.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-indigo-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-list-check text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-indigo-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">De: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${doc.id}', '${data.name}', '${data.owner}')" class="bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-indigo-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
-                });
-                
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas de tareas en la red.</p>';
-                radarList.innerHTML = html;
+                if (!state.taskVaults) state.taskVaults = [];
+            populateTaskVaultSelects(); // APEX FIX: Popular opciones de Bóvedas de Tareas en Arranque
+
+            // APEX FIX: App Real Behavior - Recordar la última interfaz exacta donde el usuario se quedó
+            if (!sessionStorage.getItem('nexus_session_active')) {
+                // Eliminamos la redirección forzada a 'home' para que respete state.activeTab
+                sessionStorage.setItem('nexus_session_active', 'true');
+            }
+
+            setupInactivityLock(); 
             } catch(e) {
                 radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
             }
