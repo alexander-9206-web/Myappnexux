@@ -2298,7 +2298,7 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, getRedirectResult, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2317,12 +2317,19 @@
                 
                 fbAuth = auth;
                 googleProvider = new GoogleAuthProvider();
+                window.fbSignInWithPopup = signInWithPopup;
+                window.fbSignInWithRedirect = signInWithRedirect;
                 
                 getRedirectResult(auth).then(result => {
                     if(result && result.user) {
                         handleGoogleLoginSuccess(result.user);
                     }
-                }).catch(e => console.error("[APEX SYS] Google Auth Error:", e));
+                }).catch(e => {
+                    console.error("[APEX SYS] Google Auth Error:", e);
+                    if (e.code === 'auth/unauthorized-domain') {
+                        alert("Dominio no autorizado en Firebase. Añade la URL a la consola.");
+                    }
+                });
                 
                 // APEX OPTIMIZATION: Inicialización con Caché Local Persistente Multi-Pestaña.
                 try {
@@ -2655,28 +2662,52 @@
             }
         };
 
-        // APEX FIX: Funciones de Google OAuth
+        // APEX FIX: Funciones de Google OAuth con Motor Auto-Reparable (Anti-Congelamiento)
         async function loginWithGoogle() {
             const btn = document.querySelector('#login-initial-choice button');
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Autenticando...';
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Conectando...';
             try {
-                if (!fbAuth) await initCloud(true);
-                
-                // APEX FIX: Puente Nativo iOS. Ordena abrir la autenticación fuera del WKWebView 
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                    window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
-                    return; // Detiene el flujo web y espera a que Swift inyecte el token llamando a window.receiveNativeAuthToken()
+                // 1. Inicializar Firebase silenciosamente si no está listo
+                if (!fbAuth || !window.fbSignInWithPopup) {
+                    await initCloud(true);
                 }
 
-                // Fallback tradicional web/PWA para navegadores estándar
-                const { signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                const result = await signInWithPopup(fbAuth, googleProvider);
-                if (result && result.user) {
-                    await handleGoogleLoginSuccess(result.user);
+                // 2. Puente Nativo iOS (Máxima Prioridad)
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
+                    
+                    // Mecanismo Anti-Congelamiento: Si Xcode/Swift no responde en 2.5s, forzamos web.
+                    setTimeout(async () => {
+                        if (btn.innerHTML.includes('Conectando')) {
+                            console.warn("[APEX] Swift Native Bridge sin respuesta. Forzando flujo Web...");
+                            try {
+                                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Redirigiendo...';
+                                await window.fbSignInWithRedirect(fbAuth, googleProvider);
+                            } catch(e) {
+                                alert("Error en redirección: " + e.message);
+                                btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-4 h-4" alt="Google"> Continuar con Google';
+                            }
+                        }
+                    }, 2500);
+                    return;
                 }
+
+                // 3. Entorno Web PWA / Browser Estándar
+                try {
+                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Abriendo Google...';
+                    const result = await window.fbSignInWithPopup(fbAuth, googleProvider);
+                    if (result && result.user) {
+                        await handleGoogleLoginSuccess(result.user);
+                    }
+                } catch (popupError) {
+                    console.warn("[APEX] Popup bloqueado o cerrado. Aplicando Fallback Redirect...", popupError);
+                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Redirigiendo...';
+                    await window.fbSignInWithRedirect(fbAuth, googleProvider);
+                }
+
             } catch (error) {
                 console.error("Google Login Error:", error);
-                alert("Error de autenticación con Google. Verifica tu conexión.");
+                alert("Error de autenticación: " + (error.message || "Verifica tu conexión."));
                 if (btn) btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-4 h-4" alt="Google"> Continuar con Google';
             }
         }
