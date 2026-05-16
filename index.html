@@ -2298,7 +2298,8 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, getRedirectResult, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                // APEX FIX: Extirpación absoluta de signInAnonymously. Solo importamos lo necesario para Google.
+                const { getAuth, onAuthStateChanged, GoogleAuthProvider, getRedirectResult, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2349,18 +2350,8 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    const initAuth = async () => {
-                        try {
-                            // APEX FIX: Evitar que el inicio anónimo sobrescriba una sesión legítima de Google en curso
-                            if (!auth.currentUser) {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (err) {
-                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
-                        }
-                    };
-                    initAuth();
-
+                    // APEX FIX: Erradicación del motor Anónimo. 
+                    // Ahora Firebase esperará exclusivamente a la validación de Google SSoT sin generar errores 403.
                     onAuthStateChanged(auth, (user) => {
                         fbUser = user;
                         if(user) {
@@ -2616,23 +2607,51 @@
                         }
                     });
 
-                    // APEX OPTIMIZATION: Ejecución Condicional de Batch
+                    // APEX FIX: Eliminación del Deadlock y Cierre correcto de la función
                     if (writesCount > 0) {
-                        await batch.commit();
-                        console.log(`[APEX SYS] Snapshot guardado en Nube. Reducción de carga: ${writesCount} operaciones.`);
-                    } else {
-                        console.log(`[APEX SYS] Carga Omitida: Base de datos ya sincronizada sin cambios reales.`);
+                        batch.commit().then(() => {
+                            console.log(`[APEX SYS] Snapshot guardado en Nube. Operaciones: ${writesCount}`);
+                        }).catch(e => {
+                            console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
+                        });
                     }
                 } catch (e) {
-                    console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
-                    syncPending = true; // Reprogramar en caso de fallo de red
+                    console.error("[APEX SYS] Error crítico construyendo batch de datos.", e);
                 } finally {
-                    isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
-                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura
-                    if (syncPending) setTimeout(() => triggerCloudSync(), 1500);
                 }
-            }, 1500); // APEX OPTIMIZATION: Latencia de subida reducida de 2.5s a 1.5s para sensación de tiempo real
+            }, 1000); // Tiempo de reacción optimizado a 1 segundo
+        }
+
+        // APEX FIX: Forzar Sincronización Manual Absoluta
+        async function forceCloudSync(event) {
+            if (!fbUser) {
+                alert("⚠️ Sin conexión a la Nube.\nPor favor inicia sesión con tu cuenta de Google para sincronizar.");
+                return;
+            }
+            
+            const btn = event ? event.currentTarget : null;
+            let origHtml = '';
+            if (btn) {
+                origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando...';
+            }
+            
+            // 1. Destruimos la caché local temporal para forzar que suba/baje TODO
+            lastCloudSyncHash = {};
+            
+            // 2. Forzamos descarga y reconexión PRIMERO
+            if (typeof fetchCloudState === 'function') fetchCloudState();
+            if (typeof updateLocalUsersList === 'function') updateLocalUsersList();
+            if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
+            if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
+
+            // 3. Empujamos cualquier cambio después de asegurar la bajada
+            setTimeout(() => {
+                triggerCloudSync();
+                if(btn) btn.innerHTML = origHtml;
+                alert("✅ Sincronización SSoT forzada completada exitosamente.");
+            }, 2500);
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
