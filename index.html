@@ -9312,15 +9312,32 @@
                 try {
                     const importedState = JSON.parse(e.target.result);
                     if (importedState && importedState.tx && importedState.accounts) {
+                        // APEX FIX: Desconectar Firebase temporalmente para evitar sobrescrituras de la nube (Race Condition)
+                        window.isRestoringBackup = true;
+                        if (typeof unsubscribeSnapshot === 'function' && unsubscribeSnapshot) unsubscribeSnapshot();
+                        
+                        // 1. Inyectar estado en memoria local
                         state = importedState;
                         await NexusIDB.saveState(currentUser, state);
-                        alert("✅ Bóveda restaurada correctamente.");
+                        
+                        // 2. Forzar a Firebase a aceptar el nuevo estado como Verdad Absoluta SSoT
+                        if (typeof triggerCloudSync === 'function') {
+                            lastCloudSyncHash = {}; // Limpia la caché local para forzar reescritura total
+                            triggerCloudSync();
+                            alert("⏳ Sincronizando respaldo con la nube... Por favor espera unos segundos.");
+                            await new Promise(resolve => setTimeout(resolve, 3000)); // Dar tiempo al batch de Firestore
+                        }
+
+                        alert("✅ Bóveda restaurada con éxito. Reiniciando el motor...");
                         location.reload();
                     } else {
                         throw new Error("Invalid Format");
                     }
                 } catch(err) {
-                    alert("Error: El archivo JSON está corrupto o no pertenece a Nexus AR.");
+                    console.error("[APEX SYS] Error crítico restaurando bóveda:", err);
+                    alert("⚠️ Archivo incompatible. Verifica que sea el JSON de NEXUS AR.");
+                } finally {
+                    window.isRestoringBackup = false;
                 }
             };
             reader.readAsText(file);
