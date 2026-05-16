@@ -2670,53 +2670,49 @@
             }
         };
 
-        // APEX FIX: Función NO asíncrona para blindar el "User Gesture Token" en la comunicación con iOS
+        // APEX FIX: Sistema Autónomo Síncrono (Fricción Cero sin Swift)
+        // Erradicamos la dependencia del puente nativo para que la web abra Google por sí sola.
         function loginWithGoogle() {
-            // 1. DISPARO NATIVO ABSOLUTO EN EL MILISEGUNDO CERO
-            // Cero manipulación del DOM antes de esto para asegurar máxima prioridad en el puente Swift
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
-                
-                // Feedback visual diferido
-                setTimeout(() => {
-                    const btn = document.querySelector('#login-initial-choice button');
-                    if (btn) {
-                        btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
-                    }
-                }, 100);
-                return; // Detiene el flujo web. Swift tiene el control absoluto.
-            }
-
-            // 2. Fallback Web PWA / Browser Estándar
-            executeWebGoogleLogin();
-        }
-
-        async function executeWebGoogleLogin() {
             const btn = document.querySelector('#login-initial-choice button');
             const origHtml = btn ? btn.innerHTML : '';
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Solicitando acceso...';
             
-            try {
-                if (!fbAuth || !window.fbSignInWithPopup) {
-                    await initCloud(true);
-                }
-
-                try {
-                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Abriendo Google...';
-                    const result = await window.fbSignInWithPopup(fbAuth, googleProvider);
-                    if (result && result.user) {
-                        await handleGoogleLoginSuccess(result.user);
-                    }
-                } catch (popupError) {
-                    console.warn("[APEX] Popup bloqueado o cerrado. Aplicando Fallback Redirect...", popupError);
-                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Redirigiendo...';
-                    await window.fbSignInWithRedirect(fbAuth, googleProvider);
-                }
-
-            } catch (error) {
-                console.error("Google Login Error:", error);
-                alert("Error de autenticación: " + (error.message || "Verifica tu conexión."));
-                if (btn) btn.innerHTML = origHtml;
+            // APEX FIX CRÍTICO: Disparo 100% Síncrono de Firebase para evadir el bloqueo de ventanas de iOS
+            // Al no usar 'await' antes de llamar a Firebase, Safari y WKWebView reconocen que el usuario
+            // acaba de tocar la pantalla y PERMITEN abrir la ventana emergente sin bloquearla.
+            if (fbAuth && window.fbSignInWithPopup && googleProvider) {
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Abriendo Google...';
+                
+                window.fbSignInWithPopup(fbAuth, googleProvider)
+                    .then(result => {
+                        if (result && result.user) {
+                            handleGoogleLoginSuccess(result.user);
+                        }
+                    })
+                    .catch(error => {
+                        console.warn("[APEX] Popup cancelado o bloqueado:", error);
+                        // Mecanismo Auto-Reparable si el usuario cierra la ventana o el navegador es estricto
+                        if (error.code === 'auth/popup-blocked' || error.code === 'auth/cancelled-popup-request') {
+                            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Redirigiendo...';
+                            window.fbSignInWithRedirect(fbAuth, googleProvider).catch(err => {
+                                alert("Error en redirección: " + err.message);
+                                if (btn) btn.innerHTML = origHtml;
+                            });
+                        } else {
+                            alert("Autenticación fallida: " + error.message);
+                            if (btn) btn.innerHTML = origHtml;
+                        }
+                    });
+            } else {
+                // Si la persona toca el botón antes de que Firebase termine de descargar en segundo plano
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Preparando sistema...';
+                initCloud(true).then(() => {
+                    if (btn) btn.innerHTML = origHtml;
+                    // Auto disparar una vez cargado
+                    setTimeout(() => loginWithGoogle(), 150);
+                }).catch(() => {
+                    alert("Error de red. Revisa tu conexión.");
+                    if (btn) btn.innerHTML = origHtml;
+                });
             }
         }
 
