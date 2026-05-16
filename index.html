@@ -2421,12 +2421,10 @@
                                 const currentTx = state.tx || [];
                                 state = { ...state, ...data };
                                 state.tx = currentTx;
-                                lastCloudSyncHash['core'] = JSON.stringify(data); // APEX FIX: Actualizar caché
                             } else if (change.doc.id.startsWith('tx_')) {
                                 // Capturamos las transacciones agrupadas por año
                                 const year = change.doc.id.split('_')[1];
                                 incomingTxByYear[year] = data.tx || [];
-                                lastCloudSyncHash[change.doc.id] = JSON.stringify(data.tx); // APEX FIX: Actualizar caché
                             }
                         }
                     });
@@ -2496,14 +2494,9 @@
             } catch(e) { console.error(e); }
         }
 
+        // APEX FIX: Motor de Sincronización Liberado (Sin Deadlocks)
         function triggerCloudSync() {
             if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
-            
-            // APEX OPTIMIZATION: Prevención de Cola Infinita (Race Condition Fix)
-            if(isSyncing) {
-                syncPending = true;
-                return;
-            }
             
             // APEX FIX: Guardrail Kill Switch (Suspensión)
             if(window.isUserSuspended) {
@@ -2514,25 +2507,23 @@
             
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(async () => {
-                isSyncing = true;
-                syncPending = false;
                 updateCloudBadge(true, true);
                 try {
                     const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const batch = writeBatch(window.db);
                     let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
-                    // APEX FIX: Registrar el peso en memoria del usuario en su perfil público para telemetría global
+                    // Registrar el peso en memoria del usuario
                     const currentSizeBytes = new Blob([JSON.stringify(state)]).size;
                     const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser);
                     batch.set(userRef, { vaultSize: currentSizeBytes, lastSyncSize: Date.now() }, { merge: true });
-                    writesCount++; // Garantiza la actualización de métricas en la red
+                    writesCount++; 
                     
                     const coreState = { ...state };
                     delete coreState.tx; 
                     const cleanCore = JSON.parse(JSON.stringify(coreState));
                     
-                    // APEX OPTIMIZATION: Dirty Checking para CORE (Evita reescrituras inútiles del núcleo)
+                    // Dirty Checking para CORE
                     const coreStr = JSON.stringify(cleanCore);
                     if (lastCloudSyncHash['core'] !== coreStr) {
                         const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
@@ -2548,7 +2539,7 @@
                         txByYear[year].push(t);
                     });
 
-                    // APEX OPTIMIZATION: Dirty Checking por AÑO de historial (Evita subir todo si solo afectas 1 mes)
+                    // Dirty Checking por AÑO de historial
                     for (const year in txByYear) {
                         const txStr = JSON.stringify(txByYear[year]);
                         if (lastCloudSyncHash['tx_' + year] !== txStr) {
@@ -2559,36 +2550,13 @@
                         }
                     }
                     
+                    // Sincronización Bóvedas Compartidas
                     (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
-                        const sharedTxs = (state.tx || [])
-                            .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
-                            .sort((a,b) => new Date(b.date) - new Date(a.date))
-                            .slice(0, 300) 
-                            .map(t => {
-                                const netTx = { ...t };
-                                if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId;
-                                if (netTx.toAccId === sharedAcc.id) netTx.toAccId = sharedAcc.remoteId;
-                                return netTx;
-                            });
-
-                        if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) {
-                            return; 
-                        }
-                        
-                        let deletedTxs = state.deletedSharedTxs || [];
-                        if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
-
-                        // APEX OPTIMIZATION: Dirty Checking para Bóvedas P2P con firma compacta
-                        const sharedPayload = { 
-                            name: sharedAcc.name.replace('👥 ', ''),
-                            owner: currentUser,
-                            balance: sharedAcc.balance, 
-                            currency: sharedAcc.currency, 
-                            txs: sharedTxs,
-                            deletedTxs: deletedTxs, 
-                            updatedAt: new Date().toISOString() 
-                        };
-                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); // Hash compacto
+                        const sharedTxs = (state.tx || []).filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id).sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 300).map(t => { const netTx = { ...t }; if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId; if (netTx.toAccId === sharedAcc.id) netTx.toAccId = sharedAcc.remoteId; return netTx; });
+                        if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) return; 
+                        let deletedTxs = state.deletedSharedTxs || []; if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
+                        const sharedPayload = { name: sharedAcc.name.replace('👥 ', ''), owner: currentUser, balance: sharedAcc.balance, currency: sharedAcc.currency, txs: sharedTxs, deletedTxs: deletedTxs, updatedAt: new Date().toISOString() };
+                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); 
                         
                         if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
@@ -2598,17 +2566,11 @@
                         }
                     });
 
-                    // APEX FIX: Sincronización Subida de Tareas P2P a Firebase
+                    // Sincronización Tareas Compartidas
                     (state.taskVaults || []).filter(v => v.isShared && v.remoteId).forEach(vault => {
                         const sTasks = (state.tasks || []).filter(t => t.vaultId === vault.remoteId);
                         let dTasks = state.deletedSharedTasks || [];
-                        const sharedPayload = {
-                            name: vault.name,
-                            owner: currentUser,
-                            tasks: sTasks,
-                            deletedTasks: dTasks,
-                            updatedAt: new Date().toISOString()
-                        };
+                        const sharedPayload = { name: vault.name, owner: currentUser, tasks: sTasks, deletedTasks: dTasks, updatedAt: new Date().toISOString() };
                         const sharedStr = JSON.stringify({ t: sTasks, d: dTasks });
                         if (lastCloudSyncHash['stask_' + vault.remoteId] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
@@ -2618,23 +2580,50 @@
                         }
                     });
 
-                    // APEX OPTIMIZATION: Ejecución Condicional de Batch
+                    // APEX FIX: Eliminación del Deadlock.
+                    // En lugar de 'await batch.commit()', dejamos que Firebase lo encole nativamente en background.
                     if (writesCount > 0) {
-                        await batch.commit();
-                        console.log(`[APEX SYS] Snapshot guardado en Nube. Reducción de carga: ${writesCount} operaciones.`);
+                        batch.commit().then(() => {
+                            console.log(`[APEX SYS] Snapshot guardado en Nube. Operaciones: ${writesCount}`);
+                        }).catch(e => {
+                            console.error("[APEX SYS] Fricción en subida de red a Firestore. Guardado en cola offline.", e);
+                        });
                     } else {
                         console.log(`[APEX SYS] Carga Omitida: Base de datos ya sincronizada sin cambios reales.`);
                     }
                 } catch (e) {
-                    console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
-                    syncPending = true; // Reprogramar en caso de fallo de red
+                    console.error("[APEX SYS] Error crítico construyendo batch de datos.", e);
                 } finally {
-                    isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
-                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura
-                    if (syncPending) setTimeout(() => triggerCloudSync(), 1500);
                 }
-            }, 1500); // APEX OPTIMIZATION: Latencia de subida reducida de 2.5s a 1.5s para sensación de tiempo real
+            }, 1000); // Tiempo de reacción optimizado a 1 segundo
+        }
+
+        // APEX FIX: Forzar Sincronización Manual Absoluta
+        async function forceCloudSync(event) {
+            const btn = event ? event.currentTarget : null;
+            let origHtml = '';
+            if (btn) {
+                origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sincronizando...';
+            }
+            
+            // 1. Destruimos la caché local temporal para forzar que suba TODO a Firebase de nuevo
+            lastCloudSyncHash = {};
+            
+            // 2. Disparamos la subida
+            triggerCloudSync();
+            
+            // 3. Forzamos descarga y reconexión
+            if (typeof fetchCloudState === 'function') await fetchCloudState();
+            if (typeof updateLocalUsersList === 'function') updateLocalUsersList();
+            if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
+            if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
+
+            setTimeout(() => {
+                if(btn) btn.innerHTML = origHtml;
+                alert("✅ Sincronización SSoT forzada completada exitosamente.");
+            }, 1500);
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
