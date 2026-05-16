@@ -2311,7 +2311,8 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, getRedirectResult, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                // APEX FIX: Extirpación absoluta de signInAnonymously. Solo importamos lo necesario para Google.
+                const { getAuth, onAuthStateChanged, GoogleAuthProvider, getRedirectResult, signInWithPopup, signInWithRedirect } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2362,21 +2363,8 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    const initAuth = async () => {
-                        try {
-                            // APEX FIX: Evitar que el inicio anónimo sobrescriba una sesión legítima de Google en curso
-                            if (!auth.currentUser) {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (err) {
-                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
-                            if (err.code === 'auth/operation-not-allowed') {
-                                alert("⚠️ SINCRONIZACIÓN BLOQUEADA\n\nPara sincronizar bóvedas locales, ve a tu Consola de Firebase -> Authentication -> Sign-in method, y HABILITA el proveedor 'Anónimo'.\n\nSi no lo haces, tus datos se quedarán solo en este teléfono.");
-                            }
-                        }
-                    };
-                    initAuth();
-
+                    // APEX FIX: Erradicación del inicio de sesión Anónimo y sus alertas.
+                    // Ahora Firebase esperará exclusivamente a la validación de Google SSoT.
                     onAuthStateChanged(auth, (user) => {
                         fbUser = user;
                         if(user) {
@@ -2618,7 +2606,7 @@
         // APEX FIX: Forzar Sincronización Manual Absoluta
         async function forceCloudSync(event) {
             if (!fbUser) {
-                alert("⚠️ Sin conexión a la Nube.\nAsegúrate de haber habilitado el proveedor 'Anónimo' en Firebase Auth si usas bóvedas con PIN local, o inicia sesión con Google.");
+                alert("⚠️ Sin conexión a la Nube.\nPor favor inicia sesión con tu cuenta de Google para sincronizar.");
                 return;
             }
             
