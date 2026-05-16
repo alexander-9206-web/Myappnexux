@@ -2322,6 +2322,8 @@
                 
                 getRedirectResult(auth).then(result => {
                     if(result && result.user) {
+                        const btn = document.querySelector('#login-initial-choice button');
+                        if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Sincronizando Bóveda...';
                         handleGoogleLoginSuccess(result.user);
                     }
                 }).catch(e => {
@@ -2349,7 +2351,10 @@
                 return new Promise((resolve) => {
                     const initAuth = async () => {
                         try {
-                            await signInAnonymously(auth);
+                            // APEX FIX: Evitar que el inicio anónimo sobrescriba una sesión legítima de Google en curso
+                            if (!auth.currentUser) {
+                                await signInAnonymously(auth);
+                            }
                         } catch (err) {
                             console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
                         }
@@ -2643,6 +2648,9 @@
                     window.webkit.messageHandlers.appInterface.postMessage({ action: "app_ready" });
                 }
 
+                const btn = document.querySelector('#login-initial-choice button');
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Descargando Bóveda...';
+
                 if (!fbAuth) await initCloud(true);
                 const { GoogleAuthProvider, signInWithCredential } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const credential = GoogleAuthProvider.credential(idToken);
@@ -2665,7 +2673,7 @@
         // APEX FIX: Funciones de Google OAuth con Motor Auto-Reparable (Anti-Congelamiento)
         async function loginWithGoogle() {
             const btn = document.querySelector('#login-initial-choice button');
-            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Conectando...';
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Solicitando acceso...';
             try {
                 // 1. Inicializar Firebase silenciosamente si no está listo
                 if (!fbAuth || !window.fbSignInWithPopup) {
@@ -2676,20 +2684,14 @@
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
                     window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
                     
-                    // Mecanismo Anti-Congelamiento: Si Xcode/Swift no responde en 2.5s, forzamos web.
+                    // APEX FIX: Eliminamos la redirección forzada de 2.5s que destruía el flujo nativo.
+                    // Solo actualizamos el texto visualmente para dar confianza al usuario.
                     setTimeout(async () => {
-                        if (btn.innerHTML.includes('Conectando')) {
-                            console.warn("[APEX] Swift Native Bridge sin respuesta. Forzando flujo Web...");
-                            try {
-                                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Redirigiendo...';
-                                await window.fbSignInWithRedirect(fbAuth, googleProvider);
-                            } catch(e) {
-                                alert("Error en redirección: " + e.message);
-                                btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-4 h-4" alt="Google"> Continuar con Google';
-                            }
+                        if (btn.innerHTML.includes('Solicitando acceso')) {
+                            btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
                         }
-                    }, 2500);
-                    return;
+                    }, 1500);
+                    return; // Detiene el flujo. Esperamos infinitamente a que Swift inyecte el token.
                 }
 
                 // 3. Entorno Web PWA / Browser Estándar
