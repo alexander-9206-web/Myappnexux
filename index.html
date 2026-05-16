@@ -8781,7 +8781,7 @@
                     const data = doc.data();
                     const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
                     if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-wallet text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
+                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-wallet text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}', '${data.owner}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
                     }
                 });
                 if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas nuevas en la red.</p>';
@@ -8791,50 +8791,79 @@
             }
         }
 
-        // APEX FIX: Función para buscar Tareas P2P directamente en la vista de configuración
-        async function scanTaskP2PRadarDirect() {
-            const radarList = $id('direct-task-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-indigo-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando en Firebase...</p>';
+        function linkRadarAccount(remoteId, name, currency, owner) {
+            const newAcc = { id: 'acc_' + Date.now(), name: '👥 ' + name, currency: currency || 'COP', balance: 0, type: 'liquid', isShared: true, remoteId: remoteId, syncedOnce: false, owner: owner };
+            state.accounts.push(newAcc);
+            if(currentUser) NexusIDB.saveState(currentUser, state);
+            if (typeof attachP2PListener === 'function') attachP2PListener();
+            alert("✅ Bóveda P2P Vinculada desde el Radar.\n\nDescargando historial de transacciones. Estará lista en un par de segundos.");
+            closeLinkSharedModal();
+            updateDashboard();
+            if (state.activeTab === 'accounts') renderAccountsTab();
+        }
+
+        function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
+
+        function processSharedToken() {
+            const tokenInput = $id('shared-token-input');
+            if(!tokenInput) return;
+            const token = tokenInput.value.trim();
+            if(!token.startsWith('nx_')) return alert("Token inválido.");
             try {
-                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'));
-                let html = '';
-                if (!state.taskVaults) state.taskVaults = [];
-            populateTaskVaultSelects(); // APEX FIX: Popular opciones de Bóvedas de Tareas en Arranque
+                const b64 = token.substring(3);
+                const shareData = JSON.parse(atob(b64));
+                if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
+                
+                // Evitar duplicar cuentas vinculadas
+                if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
+                    return alert("Esta bóveda ya está vinculada a tu cuenta.");
+                }
 
-            // APEX FIX: App Real Behavior - Recordar la última interfaz exacta donde el usuario se quedó
-            if (!sessionStorage.getItem('nexus_session_active')) {
-                // Eliminamos la redirección forzada a 'home' para que respete state.activeTab
-                sessionStorage.setItem('nexus_session_active', 'true');
-            }
-
-            setupInactivityLock(); 
+                const newAcc = { 
+                    id: 'acc_' + Date.now(), 
+                    name: '👥 ' + shareData.name, 
+                    currency: shareData.currency, 
+                    balance: 0, 
+                    type: 'liquid', 
+                    isShared: true, 
+                    remoteId: shareData.vaultId,
+                    syncedOnce: false,
+                    owner: shareData.owner || currentUser // APEX FIX
+                };
+                state.accounts.push(newAcc);
+                
+                if(currentUser) NexusIDB.saveState(currentUser, state);
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+                
+                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
+                closeLinkSharedModal();
+                updateDashboard();
+                if (state.activeTab === 'accounts') renderAccountsTab();
+                
             } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
+                console.error("[APEX P2P] Error decodificando token:", e);
+                alert("El token está corrupto o mal formado.");
             }
         }
 
-        function linkTaskRadarVault(remoteId, name, owner) {
-            if(!state.taskVaults) state.taskVaults = [];
-            if(state.taskVaults.some(v => v.remoteId === remoteId)) return alert("Ya estás vinculado a esta bóveda.");
+        function generateShareTokenForAccount(accId) {
+            const acc = state.accounts.find(a => a.id === accId);
+            if(!acc) return;
             
-            let cleanName = name;
-            if(!cleanName.startsWith('👥 ')) cleanName = '👥 ' + cleanName;
-
-            state.taskVaults.push({ id: remoteId, name: cleanName, isShared: true, remoteId: remoteId, owner: owner });
-            if(currentUser) NexusIDB.saveState(currentUser, state);
+            // APEX FIX: Obtener el ID remoto correcto para que ambos celulares apunten al mismo archivo en Firebase
+            const targetRemoteId = acc.remoteId || acc.id; 
+            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency, owner: acc.owner || currentUser };
+            const token = 'nx_' + btoa(JSON.stringify(payload));
             
-            if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
+            // Hack para copiar al portapapeles en iOS/Web
+            const temp = document.createElement("textarea");
+            temp.value = token;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            document.body.removeChild(temp);
             
-            alert("✅ Bóveda de tareas P2P vinculada desde el Radar.");
-            
-            populateTaskVaultSelects();
-            if ($id('task-vault-modal') && !$id('task-vault-modal').classList.contains('hidden')) renderTaskVaultsList();
-            
-            scanTaskP2PRadarDirect();
-            updateDashboard();
+            alert("✅ Token copiado al portapapeles:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio. Tu socio debe presionar el botón morado (P2P) para vincular la cuenta.");
         }
 
         let currentEditAvatar = null;
@@ -8848,15 +8877,18 @@
                 img.onload = function() {
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
-                    const MAX_SIZE = 150;
+                    const MAX_SIZE = 256;
                     let width = img.width;
                     let height = img.height;
+                    
                     if (width > height) {
                         if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
                     } else {
                         if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
                     }
-                    canvas.width = width; canvas.height = height;
+                    
+                    canvas.width = width;
+                    canvas.height = height;
                     ctx.drawImage(img, 0, 0, width, height);
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.6); // Alta compresión Web-Safe
                     currentEditAvatar = dataUrl;
