@@ -2673,28 +2673,29 @@
         // APEX FIX: Funciones de Google OAuth con Motor Auto-Reparable (Anti-Congelamiento)
         async function loginWithGoogle() {
             const btn = document.querySelector('#login-initial-choice button');
+            const origHtml = btn ? btn.innerHTML : '';
             if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Solicitando acceso...';
+            
+            // APEX FIX CRÍTICO: El puente nativo DEBE ejecutarse de forma SÍNCRONA (sin 'await' antes).
+            // Si hay un retraso asíncrono, iOS bloquea la ventana de autenticación por seguridad.
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
+                
+                setTimeout(() => {
+                    if (btn && btn.innerHTML.includes('Solicitando acceso')) {
+                        btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
+                    }
+                }, 1500);
+                return; // Detiene el flujo web. Espera infinitamente a que Swift inyecte el token.
+            }
+
             try {
-                // 1. Inicializar Firebase silenciosamente si no está listo
+                // 1. Inicializar Firebase silenciosamente si no está listo (Solo entorno Web/PWA)
                 if (!fbAuth || !window.fbSignInWithPopup) {
                     await initCloud(true);
                 }
 
-                // 2. Puente Nativo iOS (Máxima Prioridad)
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                    window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
-                    
-                    // APEX FIX: Eliminamos la redirección forzada de 2.5s que destruía el flujo nativo.
-                    // Solo actualizamos el texto visualmente para dar confianza al usuario.
-                    setTimeout(async () => {
-                        if (btn.innerHTML.includes('Solicitando acceso')) {
-                            btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
-                        }
-                    }, 1500);
-                    return; // Detiene el flujo. Esperamos infinitamente a que Swift inyecte el token.
-                }
-
-                // 3. Entorno Web PWA / Browser Estándar
+                // 2. Entorno Web PWA / Browser Estándar
                 try {
                     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Abriendo Google...';
                     const result = await window.fbSignInWithPopup(fbAuth, googleProvider);
@@ -2710,7 +2711,7 @@
             } catch (error) {
                 console.error("Google Login Error:", error);
                 alert("Error de autenticación: " + (error.message || "Verifica tu conexión."));
-                if (btn) btn.innerHTML = '<img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-4 h-4" alt="Google"> Continuar con Google';
+                if (btn) btn.innerHTML = origHtml;
             }
         }
 
@@ -3393,12 +3394,14 @@
                         saveState();
                         
                         // Si la app está abierta, fuerza la notificación nativa usando el puente Swift inmediato
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.immediateAlarmHandler) {
-                            window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({ 
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                            window.webkit.messageHandlers.appInterface.postMessage({ 
+                                action: "notification",
                                 id: 'rem_' + t.id, 
-                                title: "Recordatorio: " + t.title, 
+                                title: "⏳ Recordatorio: " + t.title, 
                                 body: t.description || "Tienes una tarea pendiente." 
-                            }));
+                                // Sin timestamp para que suene en el mismo instante
+                            });
                         } else if (Notification.permission === "granted") {
                             new Notification("Recordatorio: " + t.title, { body: t.description || "Tienes una tarea pendiente." });
                         }
@@ -3709,8 +3712,18 @@
                 if (window.webkit && window.webkit.messageHandlers) {
                     if (t.completed) {
                         if (window.webkit.messageHandlers.cancelAlarmHandler) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
-                    } else if (t.date && t.timeAlarm) {
-                        if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                    } else if (t.date && t.timeAlarm && window.webkit.messageHandlers.appInterface) {
+                        const [y, m, d] = t.date.split('-');
+                        const [hr, min] = t.timeAlarm.split(':');
+                        const fechaTarea = new Date(y, m - 1, d, hr, min, 0);
+
+                        window.webkit.messageHandlers.appInterface.postMessage({
+                            action: "notification",
+                            id: id,
+                            title: "⏳ NEXUS: " + t.title,
+                            body: t.description ? t.description : "Tarea pendiente programada.",
+                            timestamp: fechaTarea.getTime() // <-- ESTA ES LA MAGIA
+                        });
                     }
                 }
             }
@@ -4590,15 +4603,17 @@
                 });
                 
                 // Disparo de la notificación Push en el contenedor iOS
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                    window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                    const [y, m, d] = date.split('-');
+                    const fechaTarea = new Date(y, m - 1, d, 9, 0, 0); // 09:00 AM por defecto
+
+                    window.webkit.messageHandlers.appInterface.postMessage({ 
+                        action: "notification",
                         id: taskId, 
-                        title: "Recordatorio: " + taskTitle, 
+                        title: "⚡ Recordatorio: " + taskTitle, 
                         body: taskDesc, 
-                        date: date, 
-                        time: '09:00', 
-                        priority: priority 
-                    }));
+                        timestamp: fechaTarea.getTime()
+                    });
                 }
             } 
             saveState(); updateDashboard(); closePendingForm(); 
@@ -6642,10 +6657,17 @@
                     });
                     
                     // Notificación empujada al puente nativo de iOS (Si existe)
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Recordatorio: " + taskTitle, body: taskDesc, date: dateStr, time: '09:00', priority: 'high' 
-                        }));
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                        const [y, m, d] = dateStr.split('-');
+                        const fechaTarea = new Date(y, m - 1, d, 9, 0, 0); // 09:00 AM por defecto
+
+                        window.webkit.messageHandlers.appInterface.postMessage({ 
+                            action: "notification",
+                            id: taskId, 
+                            title: "💸 Recordatorio: " + taskTitle, 
+                            body: taskDesc, 
+                            timestamp: fechaTarea.getTime()
+                        });
                     }
                 }
             } else {
@@ -7071,18 +7093,22 @@
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
 
-            // APEX FIX: Integración nativa con contenedor iOS
-            if (date && timeAlarm && window.webkit && window.webkit.messageHandlers) {
+            // APEX FIX: Integración nativa con contenedor iOS usando el Timestamp
+            if (date && timeAlarm && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                const [y, m, d] = date.split('-');
+                const [hr, min] = timeAlarm.split(':');
+                const fechaTarea = new Date(y, m - 1, d, hr, min, 0);
+
                 const payload = {
+                    action: "notification",
                     id: finalId,
-                    title: "Recordatorio: " + title,
+                    title: "⏳ Recordatorio: " + title,
                     body: desc ? desc : "Tarea pendiente.",
-                    date: date,
-                    time: timeAlarm,
-                    priority: priority
+                    timestamp: fechaTarea.getTime() // <-- ESTA ES LA MAGIA
                 };
-                if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
-                console.log("[APEX SYS] Comando de Alarma/Push esterilizado enviado al contenedor iOS:", payload);
+                
+                window.webkit.messageHandlers.appInterface.postMessage(payload);
+                console.log("[APEX SYS] Comando de Alarma/Push programado enviado a iOS:", payload);
             } else if (!window.webkit && Notification.permission !== "granted") {
                 Notification.requestPermission(); // Solicitud para PWA en Mac/PC
             }
