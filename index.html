@@ -2670,32 +2670,37 @@
             }
         };
 
-        // APEX FIX: Funciones de Google OAuth con Motor Auto-Reparable (Anti-Congelamiento)
-        async function loginWithGoogle() {
+        // APEX FIX: Función NO asíncrona para blindar el "User Gesture Token" en la comunicación con iOS
+        function loginWithGoogle() {
+            // 1. DISPARO NATIVO ABSOLUTO EN EL MILISEGUNDO CERO
+            // Cero manipulación del DOM antes de esto para asegurar máxima prioridad en el puente Swift
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
+                
+                // Feedback visual diferido
+                setTimeout(() => {
+                    const btn = document.querySelector('#login-initial-choice button');
+                    if (btn) {
+                        btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
+                    }
+                }, 100);
+                return; // Detiene el flujo web. Swift tiene el control absoluto.
+            }
+
+            // 2. Fallback Web PWA / Browser Estándar
+            executeWebGoogleLogin();
+        }
+
+        async function executeWebGoogleLogin() {
             const btn = document.querySelector('#login-initial-choice button');
             const origHtml = btn ? btn.innerHTML : '';
             if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Solicitando acceso...';
             
-            // APEX FIX CRÍTICO: El puente nativo DEBE ejecutarse de forma SÍNCRONA (sin 'await' antes).
-            // Si hay un retraso asíncrono, iOS bloquea la ventana de autenticación por seguridad.
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                window.webkit.messageHandlers.appInterface.postMessage({ action: "native_google_login" });
-                
-                setTimeout(() => {
-                    if (btn && btn.innerHTML.includes('Solicitando acceso')) {
-                        btn.innerHTML = '<i class="fa-solid fa-shield-halved text-slate-500"></i> Completa en la ventana segura...';
-                    }
-                }, 1500);
-                return; // Detiene el flujo web. Espera infinitamente a que Swift inyecte el token.
-            }
-
             try {
-                // 1. Inicializar Firebase silenciosamente si no está listo (Solo entorno Web/PWA)
                 if (!fbAuth || !window.fbSignInWithPopup) {
                     await initCloud(true);
                 }
 
-                // 2. Entorno Web PWA / Browser Estándar
                 try {
                     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-500"></i> Abriendo Google...';
                     const result = await window.fbSignInWithPopup(fbAuth, googleProvider);
