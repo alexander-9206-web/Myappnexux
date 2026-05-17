@@ -2935,21 +2935,124 @@
                 
                 if (snap.exists()) {
                     const data = snap.data();
+                    adminSecurityData = data;
                     if (data.adminEmails && data.adminEmails.includes(email)) {
-                        isRootAdminUnlocked = true;
+                        isRootAdmin = true;
+                        isRootAdminUnlocked = false; // Requiere ingresar el PIN
                         return true;
                     }
                 } else {
                     // El primer usuario que inicie sesión se convierte en Root Admin de por vida en Firebase
-                    await setDoc(adminRef, { adminEmails: [email], createdAt: new Date().toISOString() }, { merge: true });
-                    isRootAdminUnlocked = true;
+                    const newAdminData = { adminEmails: [email], createdAt: new Date().toISOString() };
+                    await setDoc(adminRef, newAdminData, { merge: true });
+                    adminSecurityData = newAdminData;
+                    isRootAdmin = true;
+                    isRootAdminUnlocked = false; // Requiere configurar su PIN por primera vez
                     return true;
                 }
             } catch (e) {
                 console.warn("[APEX] Fricción en verificación Admin Nube", e);
             }
+            isRootAdmin = false;
             isRootAdminUnlocked = false;
             return false;
+        }
+
+        // APEX FIX: Funciones de Seguridad para Super Administrador Root
+        function showAdminAuthBox() {
+            $id('btn-show-admin-auth').classList.add('hidden');
+            $id('admin-auth-box').classList.remove('hidden');
+            
+            if (adminSecurityData && adminSecurityData.rootPin) {
+                $id('admin-login-step').classList.remove('hidden');
+                $id('admin-setup-step').classList.add('hidden');
+                $id('admin-recovery-step').classList.add('hidden');
+                setTimeout(() => $id('admin-master-pin').focus(), 100);
+            } else {
+                $id('admin-login-step').classList.add('hidden');
+                $id('admin-setup-step').classList.remove('hidden');
+                $id('admin-recovery-step').classList.add('hidden');
+                setTimeout(() => $id('admin-setup-pin').focus(), 100);
+            }
+        }
+
+        async function saveAdminSetup() {
+            const pin = $id('admin-setup-pin').value.trim();
+            const q1 = $id('admin-sq1').value.trim().toLowerCase();
+            const q2 = $id('admin-sq2').value.trim().toLowerCase();
+            const q3 = $id('admin-sq3').value.trim().toLowerCase();
+            
+            if (pin.length !== 4 || !q1 || !q2 || !q3) return alert("Completa todos los campos y usa un PIN de 4 dígitos.");
+
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const adminRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'admin_config');
+                
+                const securityPayload = { rootPin: pin, securityQ1: q1, securityQ2: q2, securityQ3: q3 };
+                await setDoc(adminRef, securityPayload, { merge: true });
+                
+                adminSecurityData = { ...adminSecurityData, ...securityPayload };
+                isRootAdminUnlocked = true;
+                
+                alert("✅ Seguridad Root configurada correctamente.");
+                
+                // Permitir la navegación normal ahora que configuró el PIN
+                switchTab('home'); 
+            } catch(e) { alert("Error guardando configuración de seguridad en Firebase."); }
+        }
+
+        function verifyAdminRoot() {
+            const pin = $id('admin-master-pin').value.trim();
+            const err = $id('admin-auth-error');
+            
+            if (adminSecurityData && adminSecurityData.rootPin === pin) {
+                isRootAdminUnlocked = true;
+                if(err) err.classList.add('hidden');
+                $id('admin-master-pin').value = '';
+                
+                // Si estaba bloqueado en el inicio, dejarlo ir al Home. De lo contrario recargar settings.
+                if (state.activeTab === 'settings') renderSettingsTab();
+                else switchTab('home');
+
+            } else {
+                if(err) err.classList.remove('hidden');
+                $id('admin-master-pin').value = '';
+            }
+        }
+
+        function startAdminRecovery() {
+            $id('admin-login-step').classList.add('hidden');
+            $id('admin-recovery-step').classList.remove('hidden');
+            $id('admin-rec-q1').value = ''; $id('admin-rec-q2').value = ''; $id('admin-rec-q3').value = ''; $id('admin-rec-pin').value = '';
+        }
+
+        function cancelAdminRecovery() {
+            $id('admin-recovery-step').classList.add('hidden');
+            $id('admin-login-step').classList.remove('hidden');
+        }
+
+        async function processAdminRecovery() {
+            const q1 = $id('admin-rec-q1').value.trim().toLowerCase();
+            const q2 = $id('admin-rec-q2').value.trim().toLowerCase();
+            const q3 = $id('admin-rec-q3').value.trim().toLowerCase();
+            const newPin = $id('admin-rec-pin').value.trim();
+
+            if (newPin.length !== 4 || !q1 || !q2 || !q3) return alert("Completa todos los campos y usa un PIN de 4 dígitos.");
+
+            if (adminSecurityData && adminSecurityData.securityQ1 === q1 && adminSecurityData.securityQ2 === q2 && adminSecurityData.securityQ3 === q3) {
+                try {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const adminRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'admin_config');
+                    await setDoc(adminRef, { rootPin: newPin }, { merge: true });
+                    adminSecurityData.rootPin = newPin;
+                    isRootAdminUnlocked = true;
+                    alert("✅ PIN Root restablecido con éxito.");
+                    
+                    if (state.activeTab === 'settings') renderSettingsTab();
+                    else switchTab('home');
+
+                } catch(e) { alert("Error comunicándose con la base de datos."); }
+            } else { alert("❌ Respuestas incorrectas. Acceso denegado."); }
         }
 
         async function processLoginSuccess(email) {
@@ -2968,13 +3071,40 @@
                     await bootApp(); 
                     await initCloud(); // Asegurar DB instanciada
                     await checkAdminStatus(email); // Valida en la nube si tienes acceso maestro
+                    
+                    // APEX FIX: Interceptor de Primer Inicio para Admin
+                    enforceAdminSecurityGuard();
+
                     fetchCloudState(); 
                 }, 300); 
             } else {
                 await bootApp();
                 await initCloud();
                 await checkAdminStatus(email);
+                
+                enforceAdminSecurityGuard();
+
                 fetchCloudState();
+            }
+        }
+        
+        // APEX FIX: Función guardiana que obliga al Root Admin a crear o poner su PIN antes de usar la app
+        function enforceAdminSecurityGuard() {
+            if (isRootAdmin && !isRootAdminUnlocked) {
+                // Forzar ir a la pestaña de configuración
+                switchTab('settings');
+                
+                // Desplegar automáticamente el cuadro de PIN/Preguntas secretas
+                setTimeout(() => {
+                    const unlockContainer = $id('admin-unlock-container');
+                    if(unlockContainer) {
+                        unlockContainer.classList.remove('hidden');
+                        showAdminAuthBox();
+                        
+                        // Scroll hacia el cuadro para asegurar que lo vea en móviles
+                        unlockContainer.scrollIntoView({behavior: 'smooth', block: 'center'});
+                    }
+                }, 100);
             }
         }
 
