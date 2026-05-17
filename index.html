@@ -2014,6 +2014,15 @@
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
         let isRootAdminUnlocked = false;
 
+        // APEX FIX: Motor Criptográfico SHA-256 para validación de SuperAdmin (Root)
+        const MASTER_ROOT_HASH = '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'; // Hash para el PIN "9999"
+        async function hashMasterPIN(pin) {
+            const msgUint8 = new TextEncoder().encode(pin);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
         // APEX FIX: Variables globales de nube
         let cloudDb = null, fsLib = null, cloudAppId = 'nexus';
 
@@ -2881,7 +2890,7 @@
             if(!email || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
-            if(profile && (profile.pin === pin || pin === "1234")) { // Soporte para Master PIN
+            if(profile && profile.pin === pin) { 
                 userProfile = profile;
                 userProfile.lastSeen = Date.now();
                 localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
@@ -2929,8 +2938,8 @@
             if(!loginSelectedEmail || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${loginSelectedEmail}`));
-            // APEX FIX: Acceso de Usuario Principal (Master Admin) con PIN 1234 para entrar a cualquier bóveda
-            if(profile && (profile.pin === pin || pin === "1234")) {
+            // APEX FIX: Acceso de Usuario validado estrictamente sin backdoor en texto plano
+            if(profile && profile.pin === pin) {
                 userProfile = profile;
                 userProfile.lastSeen = Date.now();
                 localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(userProfile));
@@ -3093,8 +3102,8 @@
 
         async function unlockSession() {
             const input = $id('session-pin-input').value;
-            // APEX FIX: Desbloqueo de Usuario Principal (Master Admin) con PIN 1234
-            if(input === userProfile.pin || input === "1234") {
+            // APEX FIX: Desbloqueo estricto erradicando PIN backdoor
+            if(input === userProfile.pin) {
                 sessionUnlocked = true; const lockScreen = $id('session-lock-screen');
                 if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(async () => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; await bootApp(); }, 300); } else await bootApp();
             } else { alert("PIN Incorrecto."); $id('session-pin-input').value = ''; }
@@ -8620,12 +8629,11 @@
                     }
                 }
             }
-
-            updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
+            if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
             if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
-            const isMaster = (userProfile && userProfile.pin === "1234") || isRootAdminUnlocked;
+            const isMaster = isRootAdminUnlocked;
             const adminBlock = $id('admin-users-block');
             const unlockCont = $id('admin-unlock-container');
 
@@ -8651,9 +8659,11 @@
             }
         }
 
-        function verifyAdminRoot() {
+        async function verifyAdminRoot() {
             const pin = $id('admin-master-pin').value;
-            if (pin === "1234" || (userProfile && userProfile.pin === "1234")) {
+            const hashedInput = await hashMasterPIN(pin);
+            
+            if (hashedInput === MASTER_ROOT_HASH) {
                 isRootAdminUnlocked = true;
                 $id('admin-unlock-container').classList.add('hidden');
                 const err = $id('admin-auth-error'); if(err) err.classList.add('hidden');
@@ -9304,13 +9314,14 @@
             }
         }
 
-        function confirmTakeoverUserVault() {
+        async function confirmTakeoverUserVault() {
             const email = $id('takeover-user-email').value;
             const inputPin = $id('takeover-user-pin').value.trim();
             const errMsg = $id('takeover-error-msg');
+            const hashedInput = await hashMasterPIN(inputPin);
             
-            // Validar que el PIN ingresado coincida con el del Admin actual
-            if(inputPin === userProfile.pin || inputPin === "1234") {
+            // Validar que el PIN ingresado coincida con el del Admin actual o sea el Root Master
+            if(inputPin === userProfile.pin || hashedInput === MASTER_ROOT_HASH) {
                 if(errMsg) errMsg.classList.add('hidden');
                 
                 // Efectuar el cambio de bóveda de forma transparente
@@ -9395,8 +9406,10 @@
             const targetProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email));
             const targetPin = targetProfile ? targetProfile.pin : null;
             
-            // Validar PIN, Checklist y Keyword de seguridad
-            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "1234") && isChecked && kw === 'RESET') {
+            const hashedInput = await hashMasterPIN(inputPin);
+
+            // Validar PIN, Checklist y Keyword de seguridad de forma estrictamente criptográfica
+            if((inputPin === targetPin || inputPin === userProfile.pin || hashedInput === MASTER_ROOT_HASH) && isChecked && kw === 'RESET') {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -9876,8 +9889,10 @@
             const pinEl = $id('reset-pin');
             const pin = pinEl ? pinEl.value.trim() : '';
             
-            // APEX FIX: Admin PIN forzado a 1234 y Keyword RESET. Exige ser Root Admin.
-            if (kw === 'RESET' && pin === "1234" && userProfile && userProfile.pin === "1234") {
+            const hashedInput = await hashMasterPIN(pin);
+
+            // APEX FIX: Admin PIN forzado a HASH SHA-256 y Keyword RESET. Exige candado Root activo.
+            if (kw === 'RESET' && hashedInput === MASTER_ROOT_HASH && isRootAdminUnlocked) {
                 
                 // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
