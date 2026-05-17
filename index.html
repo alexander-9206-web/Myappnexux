@@ -1799,7 +1799,8 @@
                         <input type="text" id="f-pse-icon" class="form-input text-sm" placeholder="Ej: fa-bolt">
                     </div>
                     
-                    <div class="grid grid-cols-3 gap-3 border-t border-slate-100 pt-4 mt-2">
+                    <!-- APEX FIX: Añadido selector de Hora para notificaciones de pago (Fricción Cero) -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-slate-100 pt-4 mt-2">
                         <div>
                             <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Frecuencia</label>
                             <select id="f-pse-freq" class="form-input text-sm font-bold bg-slate-50 text-indigo-700">
@@ -1815,6 +1816,10 @@
                         <div>
                             <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Pago Lím.</label>
                             <input type="number" id="f-pse-payday" min="1" max="31" class="form-input text-sm font-bold bg-slate-50 text-indigo-700" placeholder="Día">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora Aviso</label>
+                            <input type="time" id="f-pse-time" value="09:00" class="form-input text-sm font-bold bg-slate-50 text-indigo-700">
                         </div>
                     </div>
 
@@ -3443,7 +3448,7 @@
 
         function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
         
-        // APEX FIX: Motor de Recordatorios Push (JS Fallback Foreground)
+        // APEX FIX: Motor de Recordatorios Push Multidía (JS Fallback Foreground)
         function startReminderEngine() {
             setInterval(() => {
                 if (!state.tasks || state.tasks.length === 0) return;
@@ -3452,23 +3457,37 @@
                 const tStr = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
 
                 state.tasks.forEach(t => {
-                    if (!t.completed && t.date === dStr && t.timeAlarm === tStr && !t.alarmTriggered) {
-                        t.alarmTriggered = true; // Evita disparos múltiples en el mismo minuto
-                        saveState();
+                    // APEX FIX: Validar si la hora coincide y si NO ha sonado hoy
+                    if (!t.completed && t.timeAlarm === tStr && t.lastAlarmDate !== dStr) {
+                        let isTriggerDay = false;
                         
-                        // Si la app está abierta, fuerza la notificación nativa usando el puente Swift inmediato
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.immediateAlarmHandler) {
-                            window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({ 
-                                id: 'rem_' + t.id, 
-                                title: "Recordatorio: " + t.title, 
-                                body: t.description || "Tienes una tarea pendiente." 
-                            }));
-                        } else if (Notification.permission === "granted") {
-                            new Notification("Recordatorio: " + t.title, { body: t.description || "Tienes una tarea pendiente." });
+                        if (t.date === dStr || t.reminderDate === dStr) {
+                            isTriggerDay = true;
+                        } else if (t.reminderDate && t.date) {
+                            // Validar si el día actual está dentro de la ventana de los 3 días antes de pagar
+                            const currD = new Date(dStr + 'T00:00:00').getTime();
+                            const remD = new Date(t.reminderDate + 'T00:00:00').getTime();
+                            const dueD = new Date(t.date + 'T00:00:00').getTime();
+                            if (currD >= remD && currD <= dueD) isTriggerDay = true;
+                        }
+
+                        if (isTriggerDay) {
+                            t.lastAlarmDate = dStr; // Sella el día actual para no duplicar llamadas ni molestar
+                            saveState();
+                            
+                            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.immediateAlarmHandler) {
+                                window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({ 
+                                    id: 'rem_' + t.id, 
+                                    title: "Recordatorio: " + t.title, 
+                                    body: t.description || "Tienes una tarea pendiente." 
+                                }));
+                            } else if (Notification.permission === "granted") {
+                                new Notification("Recordatorio: " + t.title, { body: t.description || "Tienes una tarea pendiente." });
+                            }
                         }
                     }
                 });
-            }, 10000); // Evalúa la hora cada 10 segundos para máxima precisión
+            }, 10000); 
         }
 
         function updateCurrencyLabels() {
@@ -3755,12 +3774,25 @@
             if(t) { 
                 t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); 
                 
-                // APEX FIX: Sincronización estricta. Reprograma si desmarcas la tarea.
+                // APEX FIX: Sincronización estricta. Cancela en cadena o reprograma el lote multidía
                 if (window.webkit && window.webkit.messageHandlers) {
                     if (t.completed) {
-                        if (window.webkit.messageHandlers.cancelAlarmHandler) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                        if (window.webkit.messageHandlers.cancelAlarmHandler) {
+                            window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                            for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
+                        }
                     } else if (t.date && t.timeAlarm) {
-                        if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                        if (window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                            if (id.startsWith('task_pse_')) {
+                                for(let i=0; i<=3; i++) {
+                                    let nD = new Date(t.date + 'T00:00:00'); nD.setDate(nD.getDate() - i);
+                                    let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                                    let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                                    window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i, title: "Aviso: " + t.title, body: dMsg + " " + (t.description||''), date: nDStr, time: t.timeAlarm.substring(0, 5), priority: 'high' }));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -6657,45 +6689,60 @@
                 state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday });
             }
 
-            // APEX FIX: Generación/Actualización de Tarea Automática (Recordatorio PSE con -3 días)
-            if (freq !== 'none' && cutoff > 0) {
+            // APEX FIX: Generación/Actualización de Tarea Automática (Recordatorio PSE en Segundo Plano)
+            if (freq !== 'none' && (cutoff > 0 || payday > 0)) {
                 if(!state.tasks) state.tasks = [];
                 const taskId = 'task_pse_' + currentPseId;
                 
                 let now = new Date();
                 now.setHours(0,0,0,0);
-                let nextCutoff = new Date(now);
+                let nextTarget = new Date(now);
+                
+                let targetDay = payday > 0 ? payday : cutoff;
                 
                 if (freq === 'monthly') {
-                    nextCutoff = new Date(now.getFullYear(), now.getMonth(), cutoff);
-                    if (nextCutoff <= now) nextCutoff.setMonth(nextCutoff.getMonth() + 1);
+                    nextTarget = new Date(now.getFullYear(), now.getMonth(), targetDay);
+                    if (nextTarget <= now) nextTarget.setMonth(nextTarget.getMonth() + 1);
                 } else if (freq === 'weekly') {
-                    let currentDay = now.getDay() || 7; // 1=Lun, 7=Dom
-                    let dist = cutoff - currentDay;
+                    let currentDay = now.getDay() || 7; 
+                    let dist = targetDay - currentDay;
                     if (dist <= 0) dist += 7;
-                    nextCutoff.setDate(now.getDate() + dist);
+                    nextTarget.setDate(now.getDate() + dist);
                 }
                 
-                let reminderDate = new Date(nextCutoff);
-                reminderDate.setDate(reminderDate.getDate() - 3); // 3 días antes de la fecha de corte
+                // Fecha de Visualización Oficial (Día Asignado para UI)
+                const paymentDateStr = nextTarget.getFullYear() + '-' + String(nextTarget.getMonth()+1).padStart(2,'0') + '-' + String(nextTarget.getDate()).padStart(2,'0');
                 
-                const dateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
+                // Fecha de Notificación Background (-3 Días para Contenedor iOS)
+                let reminderDate = new Date(nextTarget);
+                reminderDate.setDate(reminderDate.getDate() - 3);
+                const reminderDateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
+
                 const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
-                const taskDesc = 'Recordatorio PSE Automático. Día de pago límite: ' + (payday ? payday : 'Verificar portal') + '. Día de corte exacto: ' + nextCutoff.toLocaleDateString('es-CO');
+                const taskDesc = 'Aviso de pago inminente. Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
 
                 const existingTask = state.tasks.find(t => t.id === taskId);
                 if (existingTask) {
-                    existingTask.date = dateStr;
+                    existingTask.date = paymentDateStr; // En el calendario solo se visualiza el día límite de pago
+                    existingTask.reminderDate = reminderDateStr; // Hook interno
                     existingTask.title = taskTitle;
                     existingTask.description = taskDesc;
                     existingTask.completed = false; // Reactivamos si la habían tachado
                     existingTask.alarmTriggered = false;
+                    
+                    // Reprogramar notificación nativa (Swift iOS) 3 días antes
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
+                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
+                        }));
+                    }
                 } else {
                     state.tasks.push({
                         id: taskId,
                         title: taskTitle,
                         description: taskDesc,
-                        date: dateStr,
+                        date: paymentDateStr, // Visibilidad en calendario en la fecha original 
+                        reminderDate: reminderDateStr, // Variable para contenedor iOS (-3 días)
                         timeAlarm: '09:00',
                         priority: 'high',
                         completed: false,
@@ -6705,10 +6752,10 @@
                         createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
                     });
                     
-                    // Notificación empujada al puente nativo de iOS (Si existe)
+                    // Notificación inicial enviada a Swift (iOS)
                     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
                         window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Recordatorio: " + taskTitle, body: taskDesc, date: dateStr, time: '09:00', priority: 'high' 
+                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
                         }));
                     }
                 }
@@ -7016,10 +7063,8 @@
             const checkboxes = document.querySelectorAll('.task-select-cb:checked');
             if (checkboxes.length === 0) return;
             
-            // 1. Agrupar todos los IDs a borrar en una sola lista (Eficiencia de Memoria)
             const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
             
-            // APEX FIX: Etiquetar para Sincronización P2P cruzada si pertenecen a una bóveda
             idsToDelete.forEach(id => {
                 const t = state.tasks.find(x => x.id === id);
                 if (t && t.vaultId && t.vaultId !== 'personal') {
@@ -7028,24 +7073,22 @@
                 }
             });
 
-            // 2. Purga Atómica: Filtrar el estado una sola vez
             state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.id));
             
-            // 3. Destruir alarmas programadas en el SO Nativo
+            // Destrucción atómica de alarmas (Individual y Multidía)
             idsToDelete.forEach(id => {
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                    for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
                 }
             });
             
-            // 4. Forzar el refresco de los motores y UI
             saveState();
             renderTasksTab();
             updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
         }
 
-        // APEX FIX: Modal simplificado al estilo iOS con control del botón de Eliminar
         function openTaskForm(id = null, prefillDate = null, projectId = null) {
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); 
             const mod = $id('task-modal'); if(!mod) return; mod.classList.remove('hidden');
@@ -7065,7 +7108,7 @@
                     $id('ftk-priority').value = t.priority || 'medium';
                     if($id('ftk-assigned-to')) $id('ftk-assigned-to').value = t.assignedTo || '';
                     if($id('ftk-vault')) $id('ftk-vault').value = t.vaultId || 'personal';
-                    if(delBtn) delBtn.classList.remove('hidden'); // Mostrar botón si es edición
+                    if(delBtn) delBtn.classList.remove('hidden'); 
                 }
             } else {
                 $id('ftk-id').value = '';
@@ -7080,7 +7123,7 @@
                     $id('ftk-vault').value = aV === 'all' ? 'personal' : aV;
                 }
                 else if($id('ftk-vault')) $id('ftk-vault').value = 'personal';
-                if(delBtn) delBtn.classList.add('hidden'); // Ocultar botón si es nueva
+                if(delBtn) delBtn.classList.add('hidden'); 
             }
         }
 
@@ -7090,7 +7133,6 @@
             setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
         }
         
-        // APEX FIX: Nueva función puente para borrar directamente desde el editor de tareas
         function deleteTaskFromEditor(e) {
             if(e && typeof e.preventDefault === 'function') e.preventDefault();
             const id = $id('ftk-id').value;
@@ -7108,7 +7150,6 @@
             const title = $id('ftk-title').value.trim();
             const desc = $id('ftk-desc').value.trim();
             const date = $id('ftk-date').value;
-            // APEX FIX: Esterilización de hora para la lectura de Swift y Background JS
             const timeAlarmRaw = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
             const timeAlarm = timeAlarmRaw.length > 5 ? timeAlarmRaw.substring(0, 5) : timeAlarmRaw;
             const priority = $id('ftk-priority').value;
@@ -7122,7 +7163,7 @@
                 const t = state.tasks.find(x => x.id === id);
                 if(t) {
                     t.title = title; t.description = desc; t.date = date; t.timeAlarm = timeAlarm; t.priority = priority;
-                    t.alarmTriggered = false; // Reset trigger para que la alarma suene de nuevo si se edita
+                    t.lastAlarmDate = null; 
                     if (projectId) t.projectId = projectId;
                     t.vaultId = vaultId;
                     t.assignedTo = assignedTo;
@@ -7130,12 +7171,11 @@
             } else {
                 finalId = 'task_' + Date.now();
                 const creatorName = userProfile && userProfile.name ? userProfile.name : 'Usuario';
-                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, alarmTriggered: false, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName, assignedTo: assignedTo });
+                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, lastAlarmDate: null, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName, assignedTo: assignedTo });
             }
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
 
-            // APEX FIX: Integración nativa con contenedor iOS
             if (date && timeAlarm && window.webkit && window.webkit.messageHandlers) {
                 const payload = {
                     id: finalId,
@@ -7146,9 +7186,8 @@
                     priority: priority
                 };
                 if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
-                console.log("[APEX SYS] Comando de Alarma/Push esterilizado enviado al contenedor iOS:", payload);
             } else if (!window.webkit && Notification.permission !== "granted") {
-                Notification.requestPermission(); // Solicitud para PWA en Mac/PC
+                Notification.requestPermission(); 
             }
         }
 
@@ -7158,14 +7197,26 @@
                 t.completed = !t.completed; 
                 saveState(); renderTasksTab(); updateDashboard(); 
                 
-                // APEX FIX: Cancelar notificación si se completa la tarea
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, completed: t.completed }));
+                // APEX FIX: Destrucción o reactivación en cadena de notificaciones
+                if (window.webkit && window.webkit.messageHandlers) {
+                    if (t.completed && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
+                    } else if (!t.completed && t.date && t.timeAlarm && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
+                        if (id.startsWith('task_pse_')) {
+                            for(let i=0; i<=3; i++) {
+                                let nD = new Date(t.date + 'T00:00:00'); nD.setDate(nD.getDate() - i);
+                                let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                                let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                                window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i, title: "Aviso: " + t.title, body: dMsg + " " + (t.description||''), date: nDStr, time: t.timeAlarm.substring(0, 5), priority: 'high' }));
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // APEX FIX: Función global de eliminación purificada y resistente a fallos de evento en iOS (Fricción Cero)
         function executeTaskDeletion(e, id) {
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
             
@@ -7179,21 +7230,188 @@
             saveState(); renderTasksTab(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
             
-            // Cancelar notificación nativa al eliminar
+            // Destrucción atómica
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id, deleted: true }));
+                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
+                for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
             }
         }
         
         // --- APEX FIX: ORGANIZACIÓN Y PROCRASTINACIÓN (DAILY BRIEFING RESTAURADO SIN POMODORO) ---
-        function checkDailyBriefing() {
-            const now = new Date();
-            const todayStr = now.toLocaleDateString('es-CO');
-            const lastBriefing = localStorage.getItem(`nexus_briefing_${currentUser}`);
-            if (lastBriefing !== todayStr) {
-                localStorage.setItem(`nexus_briefing_${currentUser}`, todayStr);
-                showDailyBriefing();
+        function openNewPSEForm(id = null, prefillName = null) {
+            const mod = $id('new-pse-modal'); if(!mod) return;
+            const titleEl = $id('pse-form-title');
+            
+            if (id) {
+                const link = state.pseLinks.find(l => l.id === id);
+                if (link) {
+                    $id('f-pse-id').value = link.id;
+                    $id('f-pse-name').value = link.name;
+                    $id('f-pse-ref-name').value = link.refName || '';
+                    $id('f-pse-ref').value = link.reference || '';
+                    $id('f-pse-url').value = link.url;
+                    $id('f-pse-icon').value = link.icon.replace('fa-', ''); 
+                    if($id('f-pse-freq')) $id('f-pse-freq').value = link.freq || 'none';
+                    if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
+                    if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
+                    if($id('f-pse-time')) $id('f-pse-time').value = link.time || '09:00';
+                    if(titleEl) titleEl.innerText = "Editar Enlace";
+                }
+            } else {
+                $id('f-pse-id').value = '';
+                
+                if (prefillName) {
+                    $id('f-pse-name').value = prefillName;
+                    const existingLink = state.pseLinks.find(l => l.name === prefillName);
+                    if (existingLink) {
+                        $id('f-pse-url').value = existingLink.url;
+                        $id('f-pse-icon').value = existingLink.icon.replace('fa-', '');
+                    } else {
+                        $id('f-pse-url').value = '';
+                        $id('f-pse-icon').value = '';
+                    }
+                } else {
+                    $id('f-pse-name').value = '';
+                    $id('f-pse-url').value = '';
+                    $id('f-pse-icon').value = '';
+                }
+                
+                $id('f-pse-ref-name').value = '';
+                $id('f-pse-ref').value = '';
+                if($id('f-pse-freq')) $id('f-pse-freq').value = 'none';
+                if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = '';
+                if($id('f-pse-payday')) $id('f-pse-payday').value = '';
+                if($id('f-pse-time')) $id('f-pse-time').value = '09:00';
+                if(titleEl) titleEl.innerText = "Nuevo Enlace";
             }
+            mod.classList.remove('hidden');
+        }
+
+        function closeNewPSEForm() {
+            const mod = $id('new-pse-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        function savePSELink(e) {
+            e.preventDefault();
+            const id = $id('f-pse-id').value;
+            const name = $id('f-pse-name').value.trim();
+            const refName = $id('f-pse-ref-name').value.trim();
+            const reference = $id('f-pse-ref').value.trim();
+            const url = $id('f-pse-url').value.trim();
+            let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
+            if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; 
+
+            const freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
+            const cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
+            const payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
+            const timeAlarm = $id('f-pse-time') ? $id('f-pse-time').value : '09:00';
+
+            if (!name || !url) return alert("El nombre y la URL son obligatorios.");
+            if (!state.pseLinks) state.pseLinks = [];
+
+            let currentPseId = id;
+
+            if (id) {
+                const link = state.pseLinks.find(l => l.id === id);
+                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; link.time = timeAlarm; }
+            } else {
+                currentPseId = 'pse_' + Date.now();
+                state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
+            }
+
+            // APEX FIX: Generación/Actualización de Tarea Automática Multidía (Soporta -3, -2, -1 y Día Cero)
+            if (freq !== 'none' && (cutoff > 0 || payday > 0)) {
+                if(!state.tasks) state.tasks = [];
+                const taskId = 'task_pse_' + currentPseId;
+                
+                let now = new Date();
+                now.setHours(0,0,0,0);
+                let nextTarget = new Date(now);
+                
+                let targetDay = payday > 0 ? payday : cutoff;
+                
+                if (freq === 'monthly') {
+                    nextTarget = new Date(now.getFullYear(), now.getMonth(), targetDay);
+                    if (nextTarget <= now) nextTarget.setMonth(nextTarget.getMonth() + 1);
+                } else if (freq === 'weekly') {
+                    let currentDay = now.getDay() || 7; 
+                    let dist = targetDay - currentDay;
+                    if (dist <= 0) dist += 7;
+                    nextTarget.setDate(now.getDate() + dist);
+                }
+                
+                const paymentDateStr = nextTarget.getFullYear() + '-' + String(nextTarget.getMonth()+1).padStart(2,'0') + '-' + String(nextTarget.getDate()).padStart(2,'0');
+                
+                let reminderDate = new Date(nextTarget);
+                reminderDate.setDate(reminderDate.getDate() - 3);
+                const reminderDateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
+
+                const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
+                const taskDesc = 'Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
+
+                const existingTask = state.tasks.find(t => t.id === taskId);
+                if (existingTask) {
+                    existingTask.date = paymentDateStr; 
+                    existingTask.reminderDate = reminderDateStr; 
+                    existingTask.title = taskTitle;
+                    existingTask.description = taskDesc;
+                    existingTask.timeAlarm = timeAlarm;
+                    existingTask.completed = false; 
+                    existingTask.lastAlarmDate = null; 
+                    
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId }));
+                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i }));
+                    }
+
+                    for (let i = 3; i >= 0; i--) {
+                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
+                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
+                        }
+                    }
+                } else {
+                    state.tasks.push({
+                        id: taskId,
+                        title: taskTitle,
+                        description: taskDesc,
+                        date: paymentDateStr, 
+                        reminderDate: reminderDateStr, 
+                        timeAlarm: timeAlarm,
+                        priority: 'high',
+                        completed: false,
+                        lastAlarmDate: null,
+                        createdAt: new Date().toISOString(),
+                        vaultId: 'personal',
+                        createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
+                    });
+                    
+                    for (let i = 3; i >= 0; i--) {
+                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
+                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
+                        }
+                    }
+                }
+            } else {
+                if (state.tasks) {
+                    const taskIdToClear = 'task_pse_' + currentPseId;
+                    state.tasks = state.tasks.filter(t => t.id !== taskIdToClear);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear }));
+                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear + '_rem' + i }));
+                    }
+                }
+            }
+
+            saveState(); renderPSELinks(); closeNewPSEForm();
+            if(typeof renderTasksTab === 'function') renderTasksTab();
         }
 
         function showDailyBriefing() {
