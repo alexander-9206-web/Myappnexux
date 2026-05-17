@@ -1918,21 +1918,7 @@
                 else if(action === 'cc_purchase_overdraft') saveCCPurchase(null, true);
                 else if(action === 'delete_tx') deleteTx(null, payload, true);
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
-                else if(action === 'reconnect_google') triggerNativeGoogleLogin(); // APEX FIX: Reconexión SSoT
             }, 300);
-        }
-
-        // APEX FIX: Diagnóstico interactivo de nube y auto-sanación de Token
-        function checkCloudConnection() {
-            if (fbUser && window.db) {
-                alert("✅ SSoT En Línea.\n\nTu conexión con el servidor Firebase es estable y está sincronizando en tiempo real.");
-            } else {
-                if (userProfile && userProfile.isGoogle) {
-                    triggerUIConfirm("⚠️ Token Expirado.\n\nAl limpiar la caché, tu permiso de red caducó pero tu bóveda local sigue activa.\n\n¿Deseas reconectar tu cuenta de Google ahora para volver a estar en línea?", "reconnect_google");
-                } else {
-                    alert("⚠️ Modo Offline.\n\nEstás utilizando una bóveda puramente local. Para activar la sincronización en la nube, necesitas iniciar sesión con Google desde la pantalla principal.");
-                }
-            }
         }
 
         // APEX FIX: Sistema de Sandbox para evitar bloqueos por dominio no autorizado en Firebase
@@ -2359,33 +2345,15 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    onAuthStateChanged(auth, async (user) => {
+                    // APEX FIX: Autenticación anónima purgada (Regla estricta "solo google y correo")
+                    onAuthStateChanged(auth, (user) => {
+                        fbUser = user;
                         if(user) {
-                            fbUser = user;
                             updateCloudBadge(true, false);
                             resolve(true);
                         } else {
-                            // APEX FIX: Identificación Crítica de Token Expirado
-                            if (userProfile && userProfile.isGoogle) {
-                                updateCloudBadge(false);
-                                const dcb = document.getElementById('dash-cloud-badge');
-                                if(dcb) {
-                                    dcb.className = "w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-sm border bg-red-50 text-red-600 border-red-200 cursor-pointer animate-pulse";
-                                    dcb.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500 text-[12px]" title="Token Expirado - Reconectar Google"></i>';
-                                }
-                                resolve(false);
-                            } else {
-                                try {
-                                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                                    const anonCred = await signInAnonymously(auth);
-                                    fbUser = anonCred.user;
-                                    updateCloudBadge(true, false);
-                                    resolve(true);
-                                } catch(e) {
-                                    updateCloudBadge(false);
-                                    resolve(false);
-                                }
-                            }
+                            updateCloudBadge(false);
+                            resolve(false);
                         }
                     });
                 });
@@ -2943,132 +2911,21 @@
                 
                 if (snap.exists()) {
                     const data = snap.data();
-                    adminSecurityData = data;
                     if (data.adminEmails && data.adminEmails.includes(email)) {
-                        isRootAdmin = true;
-                        
-                        // APEX FIX: Si existe el documento pero nunca configuró PIN, forzar bloqueo.
-                        if(!data.rootPin) {
-                             isRootAdminUnlocked = false;
-                        } else {
-                             // Si está abriendo la app por primera vez en la sesión, forzar petición de PIN.
-                             // En el futuro, si se quiere guardar en caché, se puede usar sessionStorage.
-                             isRootAdminUnlocked = false; 
-                        }
+                        isRootAdminUnlocked = true;
                         return true;
                     }
                 } else {
                     // El primer usuario que inicie sesión se convierte en Root Admin de por vida en Firebase
-                    const newAdminData = { adminEmails: [email], createdAt: new Date().toISOString() };
-                    await setDoc(adminRef, newAdminData, { merge: true });
-                    adminSecurityData = newAdminData;
-                    isRootAdmin = true;
-                    isRootAdminUnlocked = false; // Requiere configurar su PIN por primera vez
+                    await setDoc(adminRef, { adminEmails: [email], createdAt: new Date().toISOString() }, { merge: true });
+                    isRootAdminUnlocked = true;
                     return true;
                 }
             } catch (e) {
                 console.warn("[APEX] Fricción en verificación Admin Nube", e);
             }
-            isRootAdmin = false;
             isRootAdminUnlocked = false;
             return false;
-        }
-
-        // APEX FIX: Funciones de Seguridad para Super Administrador Root
-        function showAdminAuthBox() {
-            $id('btn-show-admin-auth').classList.add('hidden');
-            $id('admin-auth-box').classList.remove('hidden');
-            
-            if (adminSecurityData && adminSecurityData.rootPin) {
-                $id('admin-login-step').classList.remove('hidden');
-                $id('admin-setup-step').classList.add('hidden');
-                $id('admin-recovery-step').classList.add('hidden');
-                setTimeout(() => $id('admin-master-pin').focus(), 100);
-            } else {
-                $id('admin-login-step').classList.add('hidden');
-                $id('admin-setup-step').classList.remove('hidden');
-                $id('admin-recovery-step').classList.add('hidden');
-                setTimeout(() => $id('admin-setup-pin').focus(), 100);
-            }
-        }
-
-        async function saveAdminSetup() {
-            const pin = $id('admin-setup-pin').value.trim();
-            const q1 = $id('admin-sq1').value.trim().toLowerCase();
-            const q2 = $id('admin-sq2').value.trim().toLowerCase();
-            const q3 = $id('admin-sq3').value.trim().toLowerCase();
-            
-            if (pin.length !== 4 || !q1 || !q2 || !q3) return alert("Completa todos los campos y usa un PIN de 4 dígitos.");
-
-            try {
-                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const adminRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'admin_config');
-                
-                const securityPayload = { rootPin: pin, securityQ1: q1, securityQ2: q2, securityQ3: q3 };
-                await setDoc(adminRef, securityPayload, { merge: true });
-                
-                adminSecurityData = { ...adminSecurityData, ...securityPayload };
-                isRootAdminUnlocked = true;
-                
-                alert("✅ Seguridad Root configurada correctamente.");
-                
-                // Permitir la navegación normal ahora que configuró el PIN
-                switchTab('home'); 
-            } catch(e) { alert("Error guardando configuración de seguridad en Firebase."); }
-        }
-
-        function verifyAdminRoot() {
-            const pin = $id('admin-master-pin').value.trim();
-            const err = $id('admin-auth-error');
-            
-            if (adminSecurityData && adminSecurityData.rootPin === pin) {
-                isRootAdminUnlocked = true;
-                if(err) err.classList.add('hidden');
-                $id('admin-master-pin').value = '';
-                
-                // Si estaba bloqueado en el inicio, dejarlo ir al Home. De lo contrario recargar settings.
-                if (state.activeTab === 'settings') renderSettingsTab();
-                else switchTab('home');
-
-            } else {
-                if(err) err.classList.remove('hidden');
-                $id('admin-master-pin').value = '';
-            }
-        }
-
-        function startAdminRecovery() {
-            $id('admin-login-step').classList.add('hidden');
-            $id('admin-recovery-step').classList.remove('hidden');
-            $id('admin-rec-q1').value = ''; $id('admin-rec-q2').value = ''; $id('admin-rec-q3').value = ''; $id('admin-rec-pin').value = '';
-        }
-
-        function cancelAdminRecovery() {
-            $id('admin-recovery-step').classList.add('hidden');
-            $id('admin-login-step').classList.remove('hidden');
-        }
-
-        async function processAdminRecovery() {
-            const q1 = $id('admin-rec-q1').value.trim().toLowerCase();
-            const q2 = $id('admin-rec-q2').value.trim().toLowerCase();
-            const q3 = $id('admin-rec-q3').value.trim().toLowerCase();
-            const newPin = $id('admin-rec-pin').value.trim();
-
-            if (newPin.length !== 4 || !q1 || !q2 || !q3) return alert("Completa todos los campos y usa un PIN de 4 dígitos.");
-
-            if (adminSecurityData && adminSecurityData.securityQ1 === q1 && adminSecurityData.securityQ2 === q2 && adminSecurityData.securityQ3 === q3) {
-                try {
-                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const adminRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'admin_config');
-                    await setDoc(adminRef, { rootPin: newPin }, { merge: true });
-                    adminSecurityData.rootPin = newPin;
-                    isRootAdminUnlocked = true;
-                    alert("✅ PIN Root restablecido con éxito.");
-                    
-                    if (state.activeTab === 'settings') renderSettingsTab();
-                    else switchTab('home');
-
-                } catch(e) { alert("Error comunicándose con la base de datos."); }
-            } else { alert("❌ Respuestas incorrectas. Acceso denegado."); }
         }
 
         async function processLoginSuccess(email) {
@@ -3087,40 +2944,13 @@
                     await bootApp(); 
                     await initCloud(); // Asegurar DB instanciada
                     await checkAdminStatus(email); // Valida en la nube si tienes acceso maestro
-                    
-                    // APEX FIX: Interceptor de Primer Inicio para Admin
-                    enforceAdminSecurityGuard();
-
                     fetchCloudState(); 
                 }, 300); 
             } else {
                 await bootApp();
                 await initCloud();
                 await checkAdminStatus(email);
-                
-                enforceAdminSecurityGuard();
-
                 fetchCloudState();
-            }
-        }
-        
-        // APEX FIX: Función guardiana que obliga al Root Admin a crear o poner su PIN antes de usar la app
-        function enforceAdminSecurityGuard() {
-            if (isRootAdmin && !isRootAdminUnlocked) {
-                // Forzar ir a la pestaña de configuración
-                switchTab('settings');
-                
-                // Desplegar automáticamente el cuadro de PIN/Preguntas secretas
-                setTimeout(() => {
-                    const unlockContainer = $id('admin-unlock-container');
-                    if(unlockContainer) {
-                        unlockContainer.classList.remove('hidden');
-                        showAdminAuthBox();
-                        
-                        // Scroll hacia el cuadro para asegurar que lo vea en móviles
-                        unlockContainer.scrollIntoView({behavior: 'smooth', block: 'center'});
-                    }
-                }, 100);
             }
         }
 
@@ -8825,25 +8655,12 @@
             if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
-            // APEX FIX: Validación y Visualización Robusta de Super Administrador
-            const isMaster = isRootAdmin;
-            const isMasterUnlocked = isRootAdmin && isRootAdminUnlocked;
+            // APEX FIX: Validación Cero Fricción basada en Token de Nube
+            const isMaster = isRootAdminUnlocked;
             const adminBlock = $id('admin-users-block');
-            const adminNetworkBlock = $id('admin-network-block');
-            const unlockContainer = $id('admin-unlock-container');
-
-            // Mostrar el contenedor de desbloqueo SOLAMENTE al SuperAdmin si aún no ha puesto el PIN
-            if(unlockContainer) {
-                if (isMaster && !isMasterUnlocked) {
-                    unlockContainer.classList.remove('hidden');
-                    // APEX FIX: No ocultamos la caja de auth para evitar romper la UI del guardián
-                } else {
-                    unlockContainer.classList.add('hidden');
-                }
-            }
 
             if(adminBlock) {
-                if(isMasterUnlocked) {
+                if(isMaster) {
                     adminBlock.classList.remove('hidden');
                     loadAdminGlobalUsers();
                     if(typeof renderAdminModules === 'function') renderAdminModules();
@@ -8851,18 +8668,10 @@
                     adminBlock.classList.add('hidden');
                 }
             }
-            
-            if(adminNetworkBlock) {
-                if(isMasterUnlocked) {
-                    adminNetworkBlock.classList.remove('hidden');
-                } else {
-                    adminNetworkBlock.classList.add('hidden');
-                }
-            }
 
             const dz = $id('danger-zone-container');
             if(dz) {
-                if(isMasterUnlocked) {
+                if(isMaster) {
                     dz.classList.remove('hidden');
                 } else {
                     dz.classList.add('hidden');
@@ -9148,8 +8957,7 @@
                 }
                 currentData.settings.disabledModules = disabledMods;
                 
-                // APEX FIX: Guardar el objeto settings completo para evitar borrar preferencias del usuario (Orden, Tema)
-                await setDoc(coreRef, { settings: currentData.settings }, { merge: true });
+                await setDoc(coreRef, { settings: { disabledModules: disabledMods } }, { merge: true });
                 console.log(`[APEX] Permiso de ${modId} actualizado para ${email} en Firebase`);
                 
             } catch(e) {
@@ -9585,17 +9393,8 @@
             const kw = $id('del-user-keyword').value.toUpperCase();
             const err = $id('del-user-error');
             
-            // APEX FIX: Validación Estricta de Nube (SSoT) para borrado de usuarios. Solo el Super Admin puede ejecutar esto.
-            if (!isRootAdminUnlocked) {
-                if(err) {
-                    err.innerText = "ACCESO DENEGADO. Se requieren privilegios de Administrador Root para destruir una bóveda de red.";
-                    err.classList.remove('hidden');
-                }
-                return;
-            }
-
-            // Validar Autorización de formulario
-            if(isChecked && kw === 'RESET') {
+            // Validar Autorización de Nube (SSoT)
+            if(isRootAdminUnlocked && isChecked && kw === 'RESET') {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -9639,10 +9438,7 @@
                 }
                 
             } else {
-                if(err) {
-                    err.innerText = "Revisa la palabra RESET y la casilla.";
-                    err.classList.remove('hidden');
-                }
+                if(err) err.classList.remove('hidden');
             }
         }
 
@@ -9856,35 +9652,15 @@
 
         // --- BACKUP Y RESTAURACIÓN ---
         function exportBackup() {
-            const jsonStr = JSON.stringify(state);
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
+            const dlNode = document.createElement('a');
             const d = new Date();
             const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
-            const fileName = `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
-
-            // APEX FIX: Enrutamiento Inteligente para Descargas en Contenedor iOS (WKWebView)
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                try {
-                    // Codificación Base64 segura para caracteres especiales y emojis (UTF-8)
-                    const base64Data = btoa(unescape(encodeURIComponent(jsonStr)));
-                    
-                    window.webkit.messageHandlers.appInterface.postMessage({
-                        action: 'download',
-                        filename: fileName,
-                        base64: base64Data
-                    });
-                } catch(e) {
-                    alert("Error generando copia de seguridad: " + e.message);
-                }
-            } else {
-                // Fallback Fricción Cero para navegadores web de PC/Mac
-                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
-                const dlNode = document.createElement('a');
-                dlNode.setAttribute("href", dataStr);
-                dlNode.setAttribute("download", fileName);
-                document.body.appendChild(dlNode);
-                dlNode.click();
-                dlNode.remove();
-            }
+            dlNode.setAttribute("href", dataStr);
+            dlNode.setAttribute("download", `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`);
+            document.body.appendChild(dlNode);
+            dlNode.click();
+            dlNode.remove();
         }
 
         function importBackup(event) {
