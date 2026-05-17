@@ -4287,6 +4287,11 @@
         function deleteAccount() {
             const id = $id('fa-id').value; if(!id) return; const acc = state.accounts.find(a => a.id === id); if(!acc) return;
             
+            // APEX FIX: Evitar que el usuario borre su última bóveda y rompa el motor del Dashboard
+            if (state.accounts.length <= 1) {
+                return alert("⚠️ SISTEMA PROTEGIDO:\nNo puedes eliminar la única bóveda de tu sistema. Crea otra primero.");
+            }
+
             if (acc.isShared) {
                 triggerUIDelete('account_shared', id);
             } else {
@@ -4297,9 +4302,16 @@
         function executeAccountDeletion(id) {
             const acc = state.accounts.find(a => a.id === id); if(!acc) return;
             state.accounts = state.accounts.filter(a => a.id !== id);
-            state.tx.forEach(t => { if (t.accId === id || t.toAccId === id) deleteCloudTx(t.id); });
-            state.tx = state.tx.filter(t => t.accId !== id && t.toAccId !== id);
-            state.loans = state.loans.filter(l => l.cardId !== id);
+            
+            if (state.tx) {
+                state.tx.forEach(t => { if (t.accId === id || t.toAccId === id) deleteCloudTx(t.id); });
+                state.tx = state.tx.filter(t => t.accId !== id && t.toAccId !== id);
+            }
+            
+            // APEX FIX: Protección anti-crash si state.loans no ha sido inicializado en memorias antiguas
+            if (state.loans) {
+                state.loans = state.loans.filter(l => l.cardId !== id);
+            }
             
             // APEX FIX: Cerrar el túnel (Listener) P2P inmediatamente para evitar que vuelva a descargar los datos eliminados
             if (acc.isShared && typeof attachP2PListener === 'function') {
@@ -4307,6 +4319,7 @@
             }
             
             saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
+            alert("✅ Bóveda purgada exitosamente de la memoria SSoT.");
         }
         
         function toggleCreditFields() { 
@@ -9150,6 +9163,11 @@
                 
                 closeDeleteUserModal();
                 updateLocalUsersList();
+
+                // APEX FIX: Forzar refresco visual del Panel de Administrador Global (Root)
+                if ($id('admin-users-block') && !$id('admin-users-block').classList.contains('hidden')) {
+                    loadAdminGlobalUsers();
+                }
                 
                 // UI Feedback visual
                 const lc = $id('network-users-list');
