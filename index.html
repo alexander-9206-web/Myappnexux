@@ -2084,16 +2084,10 @@
         function bioUnlockDelete() {
             triggerBiometricAuth(() => {
                 $id('del-user-pin').value = '9999';
-                // Trigger manual del input checklist (si quieres automatizar el borrado total, asumes checklist)
+                // Trigger manual del input checklist y palabra de seguridad (Wipeout Automático)
+                $id('del-user-keyword').value = 'RESET';
+                $id('del-user-check').checked = true;
                 confirmDeleteUserVault();
-            });
-        }
-
-        function bioUnlockReset() {
-            triggerBiometricAuth(() => {
-                $id('reset-pin').value = '9999';
-                // Para el reseteo la confirmación visual de la palabra "RESET" es mandatoria de todas formas.
-                executeFactoryReset();
             });
         }
 
@@ -2395,7 +2389,7 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2427,8 +2421,18 @@
                 import("https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js")
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
-                return new Promise((resolve) => {
-                    // APEX FIX: Autenticación anónima purgada (Regla estricta "solo google y correo")
+                return new Promise(async (resolve) => {
+                    // APEX FIX: Restauración de Autenticación Anónima (Para usuarios de Bóveda Local / PIN)
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch(e) {
+                        console.warn("[APEX] Auth initialization fallback", e);
+                    }
+
                     onAuthStateChanged(auth, (user) => {
                         fbUser = user;
                         if(user) {
@@ -2999,10 +3003,12 @@
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
                     await bootApp(); 
+                    await initCloud(); // APEX FIX: Garantizar que la base de datos esté montada antes del fetch
                     fetchCloudState(); 
                 }, 300); 
             } else {
                 await bootApp();
+                await initCloud(); // APEX FIX: Garantizar que la base de datos esté montada antes del fetch
                 fetchCloudState();
             }
         }
@@ -8764,7 +8770,14 @@
                 
                 // Convertir a array para ordenar
                 const users = [];
-                snap.forEach(doc => users.push(doc.data()));
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    // APEX FIX: GHOST HUNTING. Si el email no existe, usamos el ID del documento físico.
+                    data._trueId = doc.id; 
+                    data.email = data.email || doc.id;
+                    data.name = data.name || '👻 INDEFINIDO';
+                    users.push(data);
+                });
                 users.sort((a,b) => new Date(b.lastSyncSize || 0) - new Date(a.lastSyncSize || 0));
 
                 const MAX_QUOTA_KB = 10240; // Cuota teórica de 10MB para perfil SSoT
@@ -8776,22 +8789,25 @@
                     const lastSync = data.lastSyncSize ? new Date(data.lastSyncSize).toLocaleString('es-CO', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : 'Sin actividad';
                     
                     const avatarHtml = data.avatar ? `<img src="${data.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user-shield text-[14px]"></i>`;
+                    
+                    // Alerta visual para cuentas fantasma corruptas
+                    const nameColor = data.name === '👻 INDEFINIDO' ? 'text-red-500' : 'text-slate-800';
 
                     html += `<div class="flex justify-between items-center p-3 bg-white rounded-[1.2rem] border border-red-100 shadow-sm mb-2 hover:border-red-300 transition-all">
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full ${isCurrent && !data.avatar ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
                             <div class="flex flex-col">
-                                <p class="text-[11px] font-black uppercase text-slate-800">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
+                                <p class="text-[11px] font-black uppercase ${nameColor}">${data.name} ${isCurrent ? '<span class="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded ml-1 shadow-sm">ACTUAL</span>' : ''}</p>
                                 <p class="text-[9px] font-bold text-slate-500 mt-0.5">${data.email}</p>
                                 <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5"><i class="fa-solid fa-database mr-1 text-blue-400"></i>Uso: ${usagePct}% (${sizeKB} KB) • Ult: ${lastSync}</p>
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center justify-end gap-2 w-24">
                             ${!isCurrent ? `
-                            <button onclick="openRemotePermissions('${data.email}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
-                            <button onclick="openUserEdit('${data.email}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                            <button onclick="document.getElementById('edit-user-original-email').value='${data.email}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
-                            <button onclick="openDeleteUserModal('${data.email}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                            <button onclick="openRemotePermissions('${data._trueId}', '${data.name}')" class="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors shadow-sm" title="Gestionar Permisos"><i class="fa-solid fa-toggle-on text-[10px]"></i></button>
+                            <button onclick="openUserEdit('${data._trueId}')" class="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm" title="Editar Perfil / PIN"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                            <button onclick="document.getElementById('edit-user-original-email').value='${data._trueId}'; controlUserVault();" class="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center hover:bg-amber-100 transition-colors shadow-sm" title="Tomar Control"><i class="fa-solid fa-key text-[10px]"></i></button>
+                            <button onclick="openDeleteUserModal('${data._trueId}')" class="w-8 h-8 bg-red-50 text-red-600 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Destruir Bóveda de Raíz"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
                         </div>
                     </div>`;
                 });
@@ -9471,7 +9487,7 @@
         }
 
         async function confirmDeleteUserVault() {
-            const email = $id('del-user-email').value;
+            const email = $id('del-user-email').value; // Ahora este valor es el ID REAL (doc.id) infalible.
             const inputPin = $id('del-user-pin').value.trim();
             const isChecked = $id('del-user-check').checked;
             const kw = $id('del-user-keyword').value.toUpperCase();
@@ -9491,17 +9507,25 @@
                 localStorage.removeItem('nexus_db_' + email);
                 localStorage.removeItem('nexus_briefing_' + email);
                 
-                // Borrado Nube (Firebase)
+                // Borrado Nube (Firebase SSoT Wipeout)
                 if (window.db) {
                     try {
-                        const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        const { doc, deleteDoc, collection, getDocs, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                        
+                        // 1. Eliminar perfil del directorio público
                         await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
                         
-                        // APEX FIX: Borrado de raíz profundo (Core y transacciones) para este usuario específico
-                        await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'core'));
-                        const currentYear = new Date().getFullYear();
-                        for (let y = currentYear - 3; y <= currentYear + 3; y++) {
-                            await deleteDoc(doc(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data', 'tx_' + y));
+                        // 2. Destrucción Dinámica de la Bóveda Privada (Batch Delete)
+                        // Esto garantiza que si el usuario tiene datos de 2021 o 2050, todo se borra sin adivinar años.
+                        const vaultRef = collection(window.db, 'artifacts', window.appId, 'users', email, 'nexus_data');
+                        const vaultDocs = await getDocs(vaultRef);
+                        
+                        if (!vaultDocs.empty) {
+                            const batch = writeBatch(window.db);
+                            vaultDocs.forEach(d => {
+                                batch.delete(d.ref);
+                            });
+                            await batch.commit();
                         }
                     } catch(e) {
                         console.warn("[APEX] Fricción purgada de Nube", e);
