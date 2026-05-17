@@ -2359,24 +2359,32 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    // APEX FIX: Restauración de Firebase Auth para bóvedas locales (PIN / Avatar)
                     onAuthStateChanged(auth, async (user) => {
                         if(user) {
                             fbUser = user;
                             updateCloudBadge(true, false);
                             resolve(true);
                         } else {
-                            // Fallback silencioso: Permite conexión a Firestore SSoT aunque entres con PIN
-                            try {
-                                const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                                const anonCred = await signInAnonymously(auth);
-                                fbUser = anonCred.user;
-                                updateCloudBadge(true, false);
-                                resolve(true);
-                            } catch(e) {
-                                console.warn("[APEX] Fricción de red local", e);
+                            // APEX FIX: Identificación Crítica de Token Expirado
+                            if (userProfile && userProfile.isGoogle) {
                                 updateCloudBadge(false);
+                                const dcb = document.getElementById('dash-cloud-badge');
+                                if(dcb) {
+                                    dcb.className = "w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-sm border bg-red-50 text-red-600 border-red-200 cursor-pointer animate-pulse";
+                                    dcb.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500 text-[12px]" title="Token Expirado - Reconectar Google"></i>';
+                                }
                                 resolve(false);
+                            } else {
+                                try {
+                                    const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                                    const anonCred = await signInAnonymously(auth);
+                                    fbUser = anonCred.user;
+                                    updateCloudBadge(true, false);
+                                    resolve(true);
+                                } catch(e) {
+                                    updateCloudBadge(false);
+                                    resolve(false);
+                                }
                             }
                         }
                     });
