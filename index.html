@@ -66,8 +66,16 @@
             
             <!-- Elección Inicial (NUEVO) -->
             <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-slate-700">
+                <button onclick="triggerNativeGoogleLogin()" class="w-full bg-white text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-3">
+                    <i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google
+                </button>
+                <div class="relative flex items-center py-2">
+                    <div class="flex-grow border-t border-slate-700"></div>
+                    <span class="flex-shrink-0 mx-4 text-[8px] font-black text-slate-500 uppercase tracking-widest">O usa tu bóveda local</span>
+                    <div class="flex-grow border-t border-slate-700"></div>
+                </div>
                 <button onclick="showExistingUsers()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-users"></i> Ingresar a Bóveda
+                    <i class="fa-solid fa-envelope"></i> Ingresar con Correo
                 </button>
                 <button onclick="toggleNewUserForm(true)" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-700 transition-colors active:scale-95 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-plus"></i> Crear Nueva Bóveda
@@ -2206,7 +2214,7 @@
             updateCloudBadge(false, true); 
             try {
                 const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
-                const { getAuth, signInAnonymously, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 
                 // APEX OPTIMIZATION: Importar motores de caché offline avanzada
                 const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -2239,15 +2247,7 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    const initAuth = async () => {
-                        try {
-                            await signInAnonymously(auth);
-                        } catch (err) {
-                            console.error("[APEX SYS] Error conectando a Firebase Auth:", err);
-                        }
-                    };
-                    initAuth();
-
+                    // APEX FIX: Autenticación anónima purgada (Regla estricta "solo google y correo")
                     onAuthStateChanged(auth, (user) => {
                         fbUser = user;
                         if(user) {
@@ -2779,6 +2779,68 @@
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
         }
+
+        // ============================================================================
+        // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
+        // ============================================================================
+        function triggerNativeGoogleLogin() {
+            const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
+            if (btn) {
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-lg"></i> Conectando...';
+                btn.disabled = true;
+            }
+
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native_google_login) {
+                window.webkit.messageHandlers.native_google_login.postMessage("login_request");
+            } else {
+                alert("⚠️ Esta función requiere la App Nativa de iOS para aislar la ventana de autenticación de Google.");
+                if (btn) {
+                    btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
+                    btn.disabled = false;
+                }
+            }
+        }
+
+        // Esta función es llamada por Swift inyectando los datos cuando el popup finaliza
+        window.receiveNativeAuthToken = async (idToken, email, name, photoUrl) => {
+            try {
+                // Iniciar y enlazar el Auth de Firebase mediante el Token conseguido nativamente
+                const { getAuth, GoogleAuthProvider, signInWithCredential } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth();
+                const credential = GoogleAuthProvider.credential(idToken);
+                
+                const result = await signInWithCredential(auth, credential);
+                fbUser = result.user;
+                
+                // Mapear el usuario de Google al sistema de bóvedas locales de Nexus SSoT
+                const userEmail = email || fbUser.email;
+                const userName = name || fbUser.displayName || 'Usuario Google';
+                
+                let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
+                if (!profile) {
+                    profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: photoUrl || fbUser.photoURL, lastSeen: Date.now() }; 
+                } else {
+                    profile.lastSeen = Date.now();
+                    profile.isGoogle = true;
+                    if (!profile.avatar && (photoUrl || fbUser.photoURL)) profile.avatar = photoUrl || fbUser.photoURL;
+                }
+                localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(profile));
+                
+                userProfile = profile;
+                
+                await processLoginSuccess(userEmail);
+                if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                
+            } catch (error) {
+                console.error("[APEX NATIVE AUTH] Error:", error);
+                alert("Error de autenticación: " + error.message);
+                const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
+                if (btn) {
+                    btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
+                    btn.disabled = false;
+                }
+            }
+        };
 
         async function unlockSession() {
             const input = $id('session-pin-input').value;
