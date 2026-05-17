@@ -9652,15 +9652,35 @@
 
         // --- BACKUP Y RESTAURACIÓN ---
         function exportBackup() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
-            const dlNode = document.createElement('a');
+            const jsonStr = JSON.stringify(state);
             const d = new Date();
             const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
-            dlNode.setAttribute("href", dataStr);
-            dlNode.setAttribute("download", `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`);
-            document.body.appendChild(dlNode);
-            dlNode.click();
-            dlNode.remove();
+            const fileName = `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+
+            // APEX FIX: Enrutamiento Inteligente para Descargas en Contenedor iOS (WKWebView)
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                try {
+                    // Codificación Base64 segura para caracteres especiales y emojis (UTF-8)
+                    const base64Data = btoa(unescape(encodeURIComponent(jsonStr)));
+                    
+                    window.webkit.messageHandlers.appInterface.postMessage({
+                        action: 'download',
+                        filename: fileName,
+                        base64: base64Data
+                    });
+                } catch(e) {
+                    alert("Error generando copia de seguridad: " + e.message);
+                }
+            } else {
+                // Fallback Fricción Cero para navegadores web de PC/Mac
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
+                const dlNode = document.createElement('a');
+                dlNode.setAttribute("href", dataStr);
+                dlNode.setAttribute("download", fileName);
+                document.body.appendChild(dlNode);
+                dlNode.click();
+                dlNode.remove();
+            }
         }
 
         function importBackup(event) {
