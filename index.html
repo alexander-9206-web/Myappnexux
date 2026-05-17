@@ -164,7 +164,7 @@
             <div class="px-4 sm:px-6 py-4 sm:py-5 flex justify-between items-center">
                 <div class="flex items-center gap-3"><img src="icono.png" alt="Logo" class="w-7 h-7 rounded-lg shadow-sm object-cover" onerror="this.style.display='none'"><div><h1 class="text-xl font-black tracking-tighter uppercase theme-text">Nexus <span class="text-slate-400 text-xs">AR</span></h1><p id="header-user-badge" class="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-0.5">User</p></div></div>
                 <div class="flex items-center gap-2">
-                    <span id="dash-cloud-badge" class="bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all"><div id="dash-cloud-dot" class="w-1.5 h-1.5 rounded-full bg-slate-400 transition-all animate-pulse"></div> Nube</span>
+                    <span id="dash-cloud-badge" class="bg-slate-100 text-slate-500 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1.5 transition-all shadow-sm"><div id="dash-cloud-dot" class="w-2 h-2 rounded-full bg-slate-400 transition-all"></div> <span id="dash-cloud-text">LOCAL</span></span>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
                     <button onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
                 </div>
@@ -2240,18 +2240,18 @@
                                 }
                             });
                         }
-                        if (hasChanges) {
-                            state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
-                            if(currentUser) NexusIDB.saveState(currentUser, state);
-                            if (sessionUnlocked) {
-                                if(state.activeTab === 'tasks') renderTasksTab();
-                                updateDashboard();
+                            if (hasChanges) {
+                                state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
+                                if(currentUser) NexusIDB.saveState(currentUser, state);
+                                if (sessionUnlocked) {
+                                    if(state.activeTab === 'tasks') renderTasksTab();
+                                    updateDashboard();
+                                }
                             }
-                        }
+                        });
                     });
                 });
-            });
-        }
+            }
 
         async function initCloud() {
             if (window.db) {
@@ -2314,16 +2314,29 @@
         }
 
         function updateCloudBadge(active, syncing = false) {
-            const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); 
-            if(!dcb || !dcd) return;
-            if(active) {
-                dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1 transition-all";
-                dcd.className = "w-1.5 h-1.5 rounded-full bg-blue-500 transition-all";
-                if(syncing) dcd.classList.add('animate-pulse'); else dcd.classList.remove('animate-pulse');
+            const dcb = $id('dash-cloud-badge'); const dcd = $id('dash-cloud-dot'); const dct = $id('dash-cloud-text');
+            if(!dcb || !dcd || !dct) return;
+            
+            if (!active && syncing) {
+                // Estado: Conectando a Firebase
+                dcb.className = "bg-amber-50 text-amber-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-amber-200 flex items-center gap-1.5 transition-all shadow-sm";
+                dcd.className = "w-2 h-2 rounded-full bg-amber-500 transition-all animate-pulse";
+                dct.innerText = "CONECTANDO";
+            } else if (!active) {
+                // Estado: Desconectado / Local
+                dcb.className = "bg-slate-100 text-slate-500 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1.5 transition-all shadow-sm";
+                dcd.className = "w-2 h-2 rounded-full bg-slate-400 transition-all";
+                dct.innerText = "LOCAL";
+            } else if (syncing) {
+                // Estado: Sincronizando datos
+                dcb.className = "bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-blue-200 flex items-center gap-1.5 transition-all shadow-sm";
+                dcd.className = "w-2 h-2 rounded-full bg-blue-500 transition-all animate-pulse";
+                dct.innerText = "SYNC";
             } else {
-                dcb.className = "bg-slate-100 text-slate-400 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-slate-200 flex items-center gap-1 transition-all";
-                dcd.className = "w-1.5 h-1.5 rounded-full bg-slate-400 transition-all";
-                dcd.classList.remove('animate-pulse');
+                // Estado: En liña e preparado
+                dcb.className = "bg-emerald-50 text-emerald-600 text-[8px] font-black uppercase px-2 py-1.5 rounded-full border border-emerald-200 flex items-center gap-1.5 transition-all shadow-sm";
+                dcd.className = "w-2 h-2 rounded-full bg-emerald-500 transition-all";
+                dct.innerText = "EN LIÑA";
             }
         }
 
