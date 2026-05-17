@@ -5429,10 +5429,23 @@
             const tV = fTx.reduce((s,t) => {
                 // APEX FIX: Control contable estricto
                 if (t.isProjected) return s; 
+                
+                const rType = t.renderType || t.type;
+                const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
+                
+                // APEX FIX: Sumar flujos de cuentas aisladas si se filtra explícitamente por esa cuenta
+                if (fAcc !== 'all') {
+                    if (rType === 'afterpay') return s; // Contrato madre no suma a caja
+                    const isOut = rType === 'expense' || (rType === 'transfer' && t.accId === fAcc);
+                    const isIn = rType === 'income' || (rType === 'transfer' && t.toAccId === fAcc);
+                    if (isIn) return s + amt;
+                    if (isOut) return s - amt;
+                    return s;
+                }
+                
                 if (t.type === 'transfer' || t.type === 'isolated') return s; // Las transferencias neutrales y aisladas no suman al flujo SSoT global
                 if (t.renderType === 'afterpay') return s; // El contrato madre Afterpay es un pasivo, no deduce caja real
                 
-                const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
                 return t.type === 'income' ? s + amt : (t.type === 'expense' ? s - amt : s);
             }, 0); 
             
@@ -5486,6 +5499,10 @@
                 const origAmt = t.original_amount || t.amount;
                 const rType = t.renderType || t.type; // APEX FIX: Extrae tipo visual base
                 
+                // APEX FIX: Polaridad estricta para cuentas aisladas (Terceros/P2P) y Transferencias
+                const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAcc);
+                const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAcc);
+
                 let isPar = false;
                 if (dbShowDuplicates) {
                     const sig = `${t.note || ''}|${t.cat || ''}|${origAmt}|${t.date ? t.date.split('T')[0] : ''}`;
@@ -5494,14 +5511,14 @@
                 }
 
                 let cT = '', iB = '', iClass = '';
-                if (rType === 'income') { cT = isPar ? 'text-red-700' : 'text-emerald-800'; iB = 'bg-emerald-100 text-emerald-800'; iClass = 'fa-arrow-up'; }
+                if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
                 else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (rType === 'expense' && ((t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
-                else if (rType === 'expense' && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
-                else if (rType === 'expense') { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
+                else if (isOutflow && ((t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+                else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
+                else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
-                const sign = (t.type === 'expense' || t.type === 'afterpay') ? '-' : (t.type === 'income' ? '+' : ''); // APEX FIX: Fuerza el signo negativo al contrato madre visualmente
+                const sign = isOutflow ? '-' : (isInflow ? '+' : ''); // APEX FIX: Fuerza el signo correcto
                 const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
                 
                 // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
@@ -5567,6 +5584,9 @@
                 const curSel = $id('db-currency'); 
                 const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
 
+                const fAccEl = $id('db-filter-account'); 
+                const fAccValue = fAccEl ? fAccEl.value : 'all';
+
                 // APEX FIX: Filtro sanitizador para remover emojis y evitar errores de renderizado en el PDF
                 const stripText = (str) => {
                     if (!str) return '';
@@ -5576,10 +5596,17 @@
                 let totalInc = 0;
                 let totalExp = 0;
 
-                // Calcular Resumen Inicial basado estrictamente en el filtro
+                // Calcular Resumen Inicial basado estrictamente en el filtro visual y polaridad
                 currentFilteredTx.forEach(t => {
                     const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
-                    const sign = (t.type === 'expense' || t.type === 'afterpay') ? '-' : (t.type === 'income' ? '+' : '');
+                    const rType = t.renderType || t.type;
+                    
+                    const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAccValue);
+                    const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAccValue);
+                    
+                    let sign = '';
+                    if (isOutflow) sign = '-';
+                    else if (isInflow) sign = '+';
                     
                     if (sign === '+') totalInc += amt;
                     else if (sign === '-') totalExp += amt;
@@ -5591,12 +5618,12 @@
                 const fsEl = $id('db-filter-start'); const startDate = fsEl && fsEl.value ? new Date(fsEl.value + 'T12:00:00').toLocaleDateString('es-CO') : 'Inicio';
                 const feEl = $id('db-filter-end'); const endDate = feEl && feEl.value ? new Date(feEl.value + 'T12:00:00').toLocaleDateString('es-CO') : 'Fin';
                 const ftEl = $id('db-filter-type'); const fType = ftEl ? ftEl.options[ftEl.selectedIndex].text : 'Todas';
-                const fcEl = $id('db-filter-cat'); // APEX FIX: Referencia restaurada para evitar el Crash Local
+                const fcEl = $id('db-filter-cat'); 
                 
                 // Aplicar el sanitizador a las variables visuales del PDF
                 const fCat = fcEl ? stripText(fcEl.options[fcEl.selectedIndex].text) : 'Todas';
                 const fCurrEl = $id('db-filter-currency'); const fCurrFilter = fCurrEl ? fCurrEl.options[fCurrEl.selectedIndex].text : 'Todas';
-                const fAccEl = $id('db-filter-account'); const fAcc = fAccEl ? stripText(fAccEl.options[fAccEl.selectedIndex].text) : 'Todas';
+                const fAcc = fAccEl ? stripText(fAccEl.options[fAccEl.selectedIndex].text) : 'Todas';
                 const fCostEl = $id('db-filter-cost'); const fCost = fCostEl ? fCostEl.options[fCostEl.selectedIndex].text : 'Todas';
 
                 const incStr = '+' + fmt(totalInc, targetCurr);
@@ -5646,7 +5673,7 @@
                 doc.setTextColor(100, 116, 139); // slate-500
                 doc.text("Total Abonos (+)", 18, boxY + 7);
                 doc.setFontSize(11);
-                doc.setTextColor(15, 23, 42); // slate-900 (Sin verde)
+                doc.setTextColor(16, 185, 129); // emerald-500
                 doc.setFont(undefined, 'bold');
                 doc.text(incStr, 18, boxY + 15);
 
@@ -5658,7 +5685,7 @@
                 doc.setFont(undefined, 'normal');
                 doc.text("Total Cargos (-)", 80, boxY + 7);
                 doc.setFontSize(11);
-                doc.setTextColor(15, 23, 42); // slate-900 (Sin rojo)
+                doc.setTextColor(239, 68, 68); // red-500
                 doc.setFont(undefined, 'bold');
                 doc.text(expStr, 80, boxY + 15);
 
@@ -5670,7 +5697,8 @@
                 doc.setFont(undefined, 'normal');
                 doc.text("Flujo Neto / Saldo", 142, boxY + 7);
                 doc.setFontSize(11);
-                doc.setTextColor(15, 23, 42); // slate-900 (Sin colores dinámicos)
+                if (net >= 0) doc.setTextColor(16, 185, 129); // emerald-500
+                else doc.setTextColor(239, 68, 68); // red-500
                 doc.setFont(undefined, 'bold');
                 doc.text(netStr, 142, boxY + 15);
 
@@ -5688,11 +5716,16 @@
                     const dDate = new Date(t.date);
                     const dateStr = dDate.toLocaleDateString('es-CO') + ' ' + String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
                     const accName = stripText(state.accounts.find(a=>a.id===t.accId)?.name||'--');
-                    const sign = (t.type === 'expense' || t.type === 'afterpay') ? '-' : (t.type === 'income' ? '+' : '');
+                    
+                    const rType = t.renderType || t.type;
+                    const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAccValue);
+                    const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAccValue);
+                    const sign = isOutflow ? '-' : (isInflow ? '+' : '');
+                    
                     const amtStr = sign + fmt(t.original_amount || t.amount, t.original_currency || t.currency);
                     
                     const concept = stripText(t.note || t.cat || '');
-                    const typeStr = t.type === 'income' ? 'Ingreso' : (t.type === 'expense' ? 'Gasto' : t.type);
+                    const typeStr = rType === 'income' ? 'Ingreso' : (rType === 'expense' ? 'Gasto' : (rType === 'afterpay' ? 'Afterpay' : 'Transf.'));
 
                     return [dateStr, concept, stripText(t.cat), accName, typeStr, amtStr];
                 });
