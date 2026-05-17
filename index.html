@@ -545,6 +545,28 @@
                 <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text"><i class="fa-solid fa-house"></i></button><h2 class="text-2xl font-black uppercase theme-text">Configuración</h2></div>
                 <button onclick="openForm('income')" type="button" class="w-10 h-10 bg-emerald-500 text-white rounded-full shadow-lg shadow-emerald-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
             </div>
+
+            <!-- APEX FIX: WhatsApp-Style User Profile Header -->
+            <div class="theme-card rounded-[2.5rem] border shadow-sm relative overflow-hidden">
+                <div class="absolute top-0 left-0 right-0 h-24 bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-500 opacity-20"></div>
+                <div class="px-6 pt-10 pb-8 flex flex-col items-center relative z-10">
+                    <div class="relative mb-3">
+                        <div id="settings-profile-avatar" class="w-24 h-24 md:w-28 md:h-28 rounded-full border-4 border-white shadow-xl flex items-center justify-center bg-slate-100 text-slate-400 overflow-hidden text-5xl">
+                            <i class="fa-solid fa-user"></i>
+                        </div>
+                        <button onclick="openUserEdit(currentUser)" class="absolute bottom-1 right-1 w-8 h-8 bg-indigo-500 text-white rounded-full flex items-center justify-center border-2 border-white shadow-md active:scale-95 transition-transform hover:bg-indigo-600">
+                            <i class="fa-solid fa-pen text-[10px]"></i>
+                        </button>
+                    </div>
+                    <h3 id="settings-profile-name" class="text-xl md:text-2xl font-black theme-text tracking-tight text-center">Cargando...</h3>
+                    <p id="settings-profile-email" class="text-xs md:text-sm font-bold text-slate-400 mt-1 text-center">---</p>
+                    <div class="flex gap-2 mt-4">
+                        <span class="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-[9px] font-black uppercase border border-emerald-100 shadow-sm flex items-center gap-1.5"><div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div> Bóveda Activa</span>
+                        <span id="settings-profile-type" class="bg-slate-50 text-slate-600 px-3 py-1.5 rounded-full text-[9px] font-black uppercase border border-slate-200 shadow-sm flex items-center gap-1.5">...</span>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 flex flex-col">
                     <div id="edit-user-panel" class="hidden bg-blue-50/50 p-5 rounded-2xl border border-blue-100 mb-4">
@@ -8364,6 +8386,22 @@
                 const cInc = $id('set-color-inc'); if(cInc) cInc.value = state.theme.inc;
                 const cExp = $id('set-color-exp'); if(cExp) cExp.value = state.theme.exp;
             }
+            
+            // APEX FIX: Poblar tarjeta de perfil estilo WhatsApp
+            if (userProfile) {
+                const av = $id('settings-profile-avatar');
+                if (av) av.innerHTML = userProfile.avatar ? `<img src="${userProfile.avatar}" referrerpolicy="no-referrer" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user"></i>`;
+                const nm = $id('settings-profile-name'); if(nm) nm.innerText = userProfile.name;
+                const em = $id('settings-profile-email'); if(em) em.innerText = userProfile.email;
+                const tp = $id('settings-profile-type'); 
+                if(tp) {
+                    if (userProfile.isGoogle) {
+                        tp.innerHTML = `<i class="fa-brands fa-google text-red-500"></i> Cuenta Google`;
+                    } else {
+                        tp.innerHTML = `<i class="fa-solid fa-key text-slate-500"></i> Cuenta Local`;
+                    }
+                }
+            }
 
             updateLocalUsersList(); updateCatManageView(); if (typeof scanP2PRadarDirect === 'function') scanP2PRadarDirect();
             if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
@@ -8983,7 +9021,11 @@
 
             localStorage.setItem(key, JSON.stringify(p));
             
-            if(email === currentUser) { userProfile = p; $id('header-user-badge').innerText = p.name; } 
+            if(email === currentUser) { 
+                userProfile = p; 
+                $id('header-user-badge').innerText = p.name; 
+                if(typeof renderSettingsTab === 'function') renderSettingsTab();
+            } 
             
             // APEX FIX: Sincronizar edición en nube
             if (window.db) {
