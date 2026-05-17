@@ -2106,8 +2106,13 @@
                         }
 
                         // 2. Inyectar o actualizar transacciones del socio y recalcular balance inteligentemente
-                        if (data.txs && Array.isArray(data.txs)) {
-                            data.txs.forEach(netTx => {
+                        // APEX FIX: Soporte de Sincronización Bidireccional (Mapas vs Arrays)
+                        let incomingTxs = [];
+                        if (data.txs && Array.isArray(data.txs)) incomingTxs = incomingTxs.concat(data.txs);
+                        if (data.txsMap) incomingTxs = incomingTxs.concat(Object.values(data.txsMap));
+
+                        if (incomingTxs.length > 0) {
+                            incomingTxs.forEach(netTx => {
                                 // Ignoramos la entrada si ya sabemos que fue eliminada
                                 if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
 
@@ -2222,8 +2227,13 @@
                             });
                         }
 
-                        if (data.tasks && Array.isArray(data.tasks)) {
-                            data.tasks.forEach(netTask => {
+                        // APEX FIX: Soporte Bidireccional para Tareas Compartidas
+                        let incomingTasks = [];
+                        if (data.tasks && Array.isArray(data.tasks)) incomingTasks = incomingTasks.concat(data.tasks);
+                        if (data.tasksMap) incomingTasks = incomingTasks.concat(Object.values(data.tasksMap));
+
+                        if (incomingTasks.length > 0) {
+                            incomingTasks.forEach(netTask => {
                                 if (state.deletedSharedTasks && state.deletedSharedTasks.includes(netTask.id)) return;
                                 const mappedTask = { ...netTask, vaultId: vault.remoteId }; 
                                 const idx = state.tasks.findIndex(t => t.id === mappedTask.id);
@@ -2437,7 +2447,8 @@
                 syncPending = false;
                 updateCloudBadge(true, true);
                 try {
-                    const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    // APEX FIX: Importación de arrayUnion para eliminación bidireccional segura
+                    const { doc, writeBatch, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const batch = writeBatch(window.db);
                     let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
@@ -2497,16 +2508,23 @@
                         let deletedTxs = state.deletedSharedTxs || [];
                         if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
-                        // APEX OPTIMIZATION: Dirty Checking para Bóvedas P2P con firma compacta
+                        // APEX OPTIMIZATION: Dirty Checking y Fusión Bidireccional (Mapas en lugar de Arrays)
+                        const txsMap = {};
+                        sharedTxs.forEach(t => { txsMap[t.id] = t; });
+
                         const sharedPayload = { 
                             name: sharedAcc.name.replace('👥 ', ''),
                             owner: currentUser,
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
-                            txs: sharedTxs,
-                            deletedTxs: deletedTxs, 
+                            txsMap: txsMap,
                             updatedAt: new Date().toISOString() 
                         };
+
+                        if (deletedTxs.length > 0) {
+                            sharedPayload.deletedTxs = arrayUnion(...deletedTxs);
+                        }
+
                         const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); // Hash compacto
                         
                         if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] !== sharedStr) {
@@ -2517,17 +2535,25 @@
                         }
                     });
 
-                    // APEX FIX: Sincronización Subida de Tareas P2P a Firebase
+                    // APEX FIX: Sincronización Subida de Tareas P2P a Firebase Bidireccional
                     (state.taskVaults || []).filter(v => v.isShared && v.remoteId).forEach(vault => {
                         const sTasks = (state.tasks || []).filter(t => t.vaultId === vault.remoteId);
                         let dTasks = state.deletedSharedTasks || [];
+                        
+                        const tasksMap = {};
+                        sTasks.forEach(t => { tasksMap[t.id] = t; });
+
                         const sharedPayload = {
                             name: vault.name,
                             owner: currentUser,
-                            tasks: sTasks,
-                            deletedTasks: dTasks,
+                            tasksMap: tasksMap,
                             updatedAt: new Date().toISOString()
                         };
+
+                        if (dTasks.length > 0) {
+                            sharedPayload.deletedTasks = arrayUnion(...dTasks);
+                        }
+
                         const sharedStr = JSON.stringify({ t: sTasks, d: dTasks });
                         if (lastCloudSyncHash['stask_' + vault.remoteId] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
