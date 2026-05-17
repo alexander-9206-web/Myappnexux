@@ -2028,8 +2028,36 @@
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // APEX FIX: Motor de Biometría WebAuthn (FaceID/TouchID/Windows Hello)
-        async function triggerBiometricAuth(successCallback) {
+        // APEX FIX: Motor de Biometría Híbrido (iOS Nativo + WebAuthn)
+        let activeBiometricCallback = null;
+
+        window.onBiometricResult = function(success) {
+            if (success) {
+                // FaceID aceptado: Abrir Bóveda / Caja Negra
+                if (activeBiometricCallback) {
+                    activeBiometricCallback();
+                } else {
+                    alert("Identidad verificada exitosamente.");
+                }
+            } else {
+                // FaceID cancelado o fallido
+                alert("Acceso denegado.");
+            }
+            activeBiometricCallback = null;
+        };
+
+        async function triggerBiometricAuth(successCallback, reasonMsg = 'Verifica tu identidad para entrar a la bóveda') {
+            // 1. Disparador del FaceID en iOS (Prioridad Máxima)
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                activeBiometricCallback = successCallback;
+                window.webkit.messageHandlers.appInterface.postMessage({
+                    action: 'authenticate',
+                    reason: reasonMsg
+                });
+                return;
+            }
+
+            // 2. Fallback WebAuthn (PWA / Navegador Safari Desktop)
             if (!window.PublicKeyCredential) {
                 alert("⚠️ Tu dispositivo o navegador actual no soporta biometría nativa.");
                 return;
@@ -2054,7 +2082,7 @@
                 });
 
                 if (credential) {
-                    successCallback(); // Éxito en la validación local
+                    successCallback(); // Éxito en la validación local PWA
                 }
             } catch (err) {
                 console.warn("[APEX Security] Biometría cancelada o denegada: ", err);
@@ -2071,14 +2099,14 @@
             triggerBiometricAuth(() => {
                 $id('admin-master-pin').value = '9999';
                 verifyAdminRoot();
-            });
+            }, 'Verifica tu identidad para habilitar los controles de administrador.');
         }
 
         function bioUnlockTakeover() {
             triggerBiometricAuth(() => {
                 $id('takeover-user-pin').value = '9999';
                 confirmTakeoverUserVault();
-            });
+            }, 'Verifica tu identidad para tomar el control de esta bóveda.');
         }
 
         function bioUnlockDelete() {
@@ -2088,7 +2116,15 @@
                 $id('del-user-keyword').value = 'RESET';
                 $id('del-user-check').checked = true;
                 confirmDeleteUserVault();
-            });
+            }, 'Verifica tu identidad para DESTRUIR esta bóveda permanentemente.');
+        }
+
+        function bioUnlockReset() {
+            triggerBiometricAuth(() => {
+                $id('reset-pin').value = '9999';
+                $id('reset-keyword').value = 'RESET';
+                executeFactoryReset();
+            }, 'Verifica tu identidad para realizar un FORMATEO DE FÁBRICA a toda la base de datos.');
         }
 
         // APEX FIX: Variables globales de nube
