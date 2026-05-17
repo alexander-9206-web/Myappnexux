@@ -2359,15 +2359,25 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise((resolve) => {
-                    // APEX FIX: Autenticación anónima purgada (Regla estricta "solo google y correo")
-                    onAuthStateChanged(auth, (user) => {
-                        fbUser = user;
+                    // APEX FIX: Restauración de Firebase Auth para bóvedas locales (PIN / Avatar)
+                    onAuthStateChanged(auth, async (user) => {
                         if(user) {
+                            fbUser = user;
                             updateCloudBadge(true, false);
                             resolve(true);
                         } else {
-                            updateCloudBadge(false);
-                            resolve(false);
+                            // Fallback silencioso: Permite conexión a Firestore SSoT aunque entres con PIN
+                            try {
+                                const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                                const anonCred = await signInAnonymously(auth);
+                                fbUser = anonCred.user;
+                                updateCloudBadge(true, false);
+                                resolve(true);
+                            } catch(e) {
+                                console.warn("[APEX] Fricción de red local", e);
+                                updateCloudBadge(false);
+                                resolve(false);
+                            }
                         }
                     });
                 });
