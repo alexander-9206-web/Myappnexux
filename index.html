@@ -50,7 +50,7 @@
             overscroll-behavior: contain;
         }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
-        .fixed.inset-0.backdrop-blur-md > div::-webkit-scroAllbar,
+        .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
         #login-screen > div::-webkit-scrollbar,
         #session-lock-screen > div::-webkit-scrollbar { 
             display: none; 
@@ -2104,8 +2104,8 @@
                                 if (!state.deletedSharedTxs.includes(delId)) state.deletedSharedTxs.push(delId);
                             });
                         }
-
-                        // 2. Inyectar o actualizar transacciones del socio y recalcular balance inteligentemente
+                        
+                        // APEX FIX: Inyectar o actualizar transacciones del socio y recalcular balance inteligentemente
                         // APEX FIX: Soporte de Sincronización Bidireccional (Mapas vs Arrays)
                         let incomingTxs = [];
                         if (data.txs && Array.isArray(data.txs)) incomingTxs = incomingTxs.concat(data.txs);
@@ -2117,8 +2117,10 @@
                                 if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
 
                                 const mappedTx = { ...netTx };
-                                if (mappedTx.accId === localAcc.remoteId) mappedTx.accId = localAcc.id;
-                                if (mappedTx.toAccId === localAcc.remoteId) mappedTx.toAccId = localAcc.id;
+                                const localOrig = state.accounts.find(a => a.remoteId === mappedTx.accId);
+                                if (localOrig) mappedTx.accId = localOrig.id;
+                                const localDest = state.accounts.find(a => a.remoteId === mappedTx.toAccId);
+                                if (localDest) mappedTx.toAccId = localDest.id;
 
                                 const idx = state.tx.findIndex(t => t.id === mappedTx.id);
                                 if (idx === -1) {
@@ -2496,8 +2498,10 @@
                             .slice(0, 300) 
                             .map(t => {
                                 const netTx = { ...t };
-                                if (netTx.accId === sharedAcc.id) netTx.accId = sharedAcc.remoteId;
-                                if (netTx.toAccId === sharedAcc.id) netTx.toAccId = sharedAcc.remoteId;
+                                const origShared = state.accounts.find(a => a.id === netTx.accId && a.isShared);
+                                if (origShared) netTx.accId = origShared.remoteId;
+                                const destShared = state.accounts.find(a => a.id === netTx.toAccId && a.isShared);
+                                if (destShared) netTx.toAccId = destShared.remoteId;
                                 return netTx;
                             });
 
@@ -2576,10 +2580,10 @@
                 } finally {
                     isSyncing = false;
                     setTimeout(() => updateCloudBadge(true, false), 500); 
-                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura
-                    if (syncPending) setTimeout(() => triggerCloudSync(), 1500);
+                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura y acelerada (300ms)
+                    if (syncPending) setTimeout(() => triggerCloudSync(), 300);
                 }
-            }, 1500); // APEX OPTIMIZATION: Latencia de subida reducida de 2.5s a 1.5s para sensación de tiempo real
+            }, 300); // APEX OPTIMIZATION: Latencia de subida reducida a 300ms para sensación de tiempo real estricta
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
