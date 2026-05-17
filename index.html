@@ -2783,20 +2783,61 @@
         // ============================================================================
         // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
         // ============================================================================
-        function triggerNativeGoogleLogin() {
+        async function triggerNativeGoogleLogin() {
             const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
             if (btn) {
-                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-lg"></i> Conectando...';
+                // 🟢 Estado visual de carga impecable
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-400 text-lg"></i> Conectando...';
                 btn.disabled = true;
             }
 
+            // 1. Detección Inteligente: ¿Estamos dentro de la App Nativa iOS?
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native_google_login) {
+                console.log("🚀 [APEX] Entorno nativo detectado. Delegando Auth a Swift...");
                 window.webkit.messageHandlers.native_google_login.postMessage("login_request");
+                // El contenedor Swift se encargará de resetear el botón si el usuario cancela
             } else {
-                alert("⚠️ Esta función requiere la App Nativa de iOS para aislar la ventana de autenticación de Google.");
-                if (btn) {
-                    btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
-                    btn.disabled = false;
+                // 2. Fallback "Fricción Cero": Si se abre desde un Navegador Web (Safari, Chrome, Vercel)
+                console.log("🌐 [APEX] Entorno Web detectado. Activando Popup Firebase Auth...");
+                try {
+                    // 🟢 FIX CRÍTICO: Asegurar que el motor SSoT de Firebase esté despierto ANTES de pedir credenciales
+                    await initCloud();
+
+                    const { getAuth, GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    const auth = getAuth();
+                    const provider = new GoogleAuthProvider();
+                    
+                    const result = await signInWithPopup(auth, provider);
+                    fbUser = result.user;
+                    
+                    // Mapeo unificado a la base de datos SSoT local
+                    const userEmail = fbUser.email;
+                    const userName = fbUser.displayName || 'Usuario Google';
+                    
+                    let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
+                    if (!profile) {
+                        profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now() }; 
+                    } else {
+                        profile.lastSeen = Date.now();
+                        profile.isGoogle = true;
+                        if (!profile.avatar && fbUser.photoURL) profile.avatar = fbUser.photoURL;
+                    }
+                    localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(profile));
+                    userProfile = profile;
+                    
+                    await processLoginSuccess(userEmail);
+                    if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                } catch (error) {
+                    console.error("[APEX WEB AUTH] Error:", error);
+                    // Solo mostramos alerta si NO fue que el usuario cerró la ventana intencionalmente
+                    if (error.code !== 'auth/popup-closed-by-user') {
+                        alert("Error de autenticación web: " + error.message);
+                    }
+                    // Restauración visual del botón
+                    if (btn) {
+                        btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
+                        btn.disabled = false;
+                    }
                 }
             }
         }
@@ -2804,6 +2845,9 @@
         // Esta función es llamada por Swift inyectando los datos cuando el popup finaliza
         window.receiveNativeAuthToken = async (idToken, email, name, photoUrl) => {
             try {
+                // 🟢 FIX CRÍTICO: Despertar a Firebase para poder inyectarle la credencial que Swift consiguió
+                await initCloud();
+
                 // Iniciar y enlazar el Auth de Firebase mediante el Token conseguido nativamente
                 const { getAuth, GoogleAuthProvider, signInWithCredential } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth();
