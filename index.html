@@ -9238,18 +9238,79 @@
                 try {
                     const importedState = JSON.parse(e.target.result);
                     if (importedState && importedState.tx && importedState.accounts) {
+                        
+                        // APEX FIX: Apagar temporalmente el listener de Firebase para evitar sobreescritura (Race Condition)
+                        if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
+                            unsubscribeSnapshot();
+                            unsubscribeSnapshot = null;
+                        }
+
                         state = importedState;
+                        
+                        // APEX FIX: Auto-Migración Profunda para backups antiguos y prevención de Null Pointers
+                        if (!state.settings) state.settings = { baseCurrency: 'COP', apLimit: 5000000, apPayDay: 5 };
+                        if (!state.activeCurrency) state.activeCurrency = 'GLOBAL';
+                        if (!state.context) state.context = 'day';
+                        if (!state.categories) state.categories = { global: [] };
+                        if (!state.catParents) state.catParents = { global: [] };
+                        if (!state.taskVaults) state.taskVaults = [];
+                        if (!state.pseLinks) state.pseLinks = [];
+                        if (!state.goals) state.goals = [];
+                        if (!state.budgets) state.budgets = {};
+
                         await NexusIDB.saveState(currentUser, state);
-                        alert("✅ Bóveda restaurada correctamente.");
-                        location.reload();
+                        
+                        // APEX FIX: Forzar Sincronización Inmediata a Nube
+                        if (typeof triggerCloudSync === 'function') {
+                            lastCloudSyncHash = {}; // Invalidar hash para forzar subida total
+                            if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
+                            triggerCloudSync();
+                            
+                            // Reactivar el Listener SSoT después de asentar la subida (2000ms de gracia)
+                            setTimeout(() => {
+                                if (typeof fetchCloudState === 'function') fetchCloudState();
+                            }, 2000);
+                        }
+                        
+                        // APEX FIX: Recargar Interfaz In-DOM Profunda (Evita DOM fantasma en pestañas ocultas)
+                        const gc = document.getElementById('global-currency'); 
+                        if(gc) gc.value = state.activeCurrency;
+                        
+                        applyThemeCSS();
+                        updateCurrencyLabels();
+                        populateFilters();
+                        if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
+                        
+                        // Forzar renderizado en cascada
+                        if (typeof renderAccounts === 'function') renderAccounts();
+                        if (typeof renderAccountsTab === 'function') renderAccountsTab();
+                        if (typeof renderLoansList === 'function') renderLoansList();
+                        if (typeof renderAfterpay === 'function') renderAfterpay();
+                        if (typeof renderDatabase === 'function') renderDatabase();
+                        if (typeof renderAnalysis === 'function') renderAnalysis();
+                        if (typeof renderReport === 'function') renderReport();
+                        if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
+                        if (typeof renderBudgetTab === 'function') renderBudgetTab();
+                        if (typeof renderCalendar === 'function') renderCalendar();
+                        if (typeof renderTasksTab === 'function') renderTasksTab();
+                        if (typeof renderProjectsTab === 'function') renderProjectsTab();
+
+                        updateDashboard();
+                        
+                        if(state.activeTab) switchTab(state.activeTab);
+                        else switchTab('home');
+
+                        alert("✅ Bóveda restaurada y sincronizada con la red correctamente.");
                     } else {
                         throw new Error("Invalid Format");
                     }
                 } catch(err) {
-                    alert("Error: El archivo JSON está corrupto o no pertenece a Nexus AR.");
+                    console.error("[APEX SYS] Error Restaurando:", err);
+                    alert("⚠️ Error: El archivo JSON está corrupto o no pertenece a Nexus AR.");
                 }
             };
             reader.readAsText(file);
+            event.target.value = ''; // Limpiar el input file
         }
 
         function setupAutoBackup() {
