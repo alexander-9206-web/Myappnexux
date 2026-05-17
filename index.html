@@ -2881,7 +2881,7 @@
             if(!email || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
-            if(profile && (profile.pin === pin || pin === "1234")) { // Soporte para Master PIN
+            if(profile && profile.pin === pin) { 
                 userProfile = profile;
                 userProfile.lastSeen = Date.now();
                 localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
@@ -2894,12 +2894,38 @@
                 }
                 
                 pinInput.value = ''; // Limpiar tras éxito
-                // APEX FIX: Invocar el flujo global unificado para cerrar pantalla visualmente
                 await processLoginSuccess(email);
             } else {
                 alert("PIN Incorrecto.");
                 pinInput.value = '';
             }
+        }
+
+        // APEX FIX: Sistema SSoT Admin Checker "First-User-Wins"
+        async function checkAdminStatus(email) {
+            if (!window.db || !email) return false;
+            try {
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const adminRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'admin_config');
+                const snap = await getDoc(adminRef);
+                
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data.adminEmails && data.adminEmails.includes(email)) {
+                        isRootAdminUnlocked = true;
+                        return true;
+                    }
+                } else {
+                    // El primer usuario que inicie sesión se convierte en Root Admin de por vida en Firebase
+                    await setDoc(adminRef, { adminEmails: [email], createdAt: new Date().toISOString() }, { merge: true });
+                    isRootAdminUnlocked = true;
+                    return true;
+                }
+            } catch (e) {
+                console.warn("[APEX] Fricción en verificación Admin Nube", e);
+            }
+            isRootAdminUnlocked = false;
+            return false;
         }
 
         async function processLoginSuccess(email) {
@@ -2916,10 +2942,14 @@
                     loginScreen.classList.add('hidden'); 
                     loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
                     await bootApp(); 
+                    await initCloud(); // Asegurar DB instanciada
+                    await checkAdminStatus(email); // Valida en la nube si tienes acceso maestro
                     fetchCloudState(); 
                 }, 300); 
             } else {
                 await bootApp();
+                await initCloud();
+                await checkAdminStatus(email);
                 fetchCloudState();
             }
         }
@@ -2929,8 +2959,8 @@
             if(!loginSelectedEmail || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${loginSelectedEmail}`));
-            // APEX FIX: Acceso de Usuario Principal (Master Admin) con PIN 1234 para entrar a cualquier bóveda
-            if(profile && (profile.pin === pin || pin === "1234")) {
+            // APEX FIX: Purga de llaves duras. Validación local pura.
+            if(profile && profile.pin === pin) {
                 userProfile = profile;
                 userProfile.lastSeen = Date.now();
                 localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(userProfile));
@@ -3093,8 +3123,8 @@
 
         async function unlockSession() {
             const input = $id('session-pin-input').value;
-            // APEX FIX: Desbloqueo de Usuario Principal (Master Admin) con PIN 1234
-            if(input === userProfile.pin || input === "1234") {
+            // APEX FIX: Purga llave dura 1234
+            if(input === userProfile.pin) {
                 sessionUnlocked = true; const lockScreen = $id('session-lock-screen');
                 if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(async () => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; await bootApp(); }, 300); } else await bootApp();
             } else { alert("PIN Incorrecto."); $id('session-pin-input').value = ''; }
@@ -8625,19 +8655,17 @@
             if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
 
-            const isMaster = (userProfile && userProfile.pin === "1234") || isRootAdminUnlocked;
+            // APEX FIX: Validación Cero Fricción basada en Token de Nube
+            const isMaster = isRootAdminUnlocked;
             const adminBlock = $id('admin-users-block');
-            const unlockCont = $id('admin-unlock-container');
 
             if(adminBlock) {
                 if(isMaster) {
                     adminBlock.classList.remove('hidden');
-                    if(unlockCont) unlockCont.classList.add('hidden');
                     loadAdminGlobalUsers();
                     if(typeof renderAdminModules === 'function') renderAdminModules();
                 } else {
                     adminBlock.classList.add('hidden');
-                    if(unlockCont) unlockCont.classList.remove('hidden');
                 }
             }
 
@@ -8648,23 +8676,6 @@
                 } else {
                     dz.classList.add('hidden');
                 }
-            }
-        }
-
-        function verifyAdminRoot() {
-            const pin = $id('admin-master-pin').value;
-            if (pin === "1234" || (userProfile && userProfile.pin === "1234")) {
-                isRootAdminUnlocked = true;
-                $id('admin-unlock-container').classList.add('hidden');
-                const err = $id('admin-auth-error'); if(err) err.classList.add('hidden');
-                renderSettingsTab();
-                setTimeout(() => {
-                    const block = $id('admin-users-block');
-                    if(block) block.scrollIntoView({behavior: 'smooth', block: 'start'});
-                }, 100);
-            } else {
-                const err = $id('admin-auth-error'); if(err) err.classList.remove('hidden');
-                $id('admin-master-pin').value = '';
             }
         }
 
@@ -9283,9 +9294,6 @@
             if(mod) {
                 $id('takeover-user-target').innerText = email;
                 $id('takeover-user-email').value = email;
-                $id('takeover-user-pin').value = '';
-                const errMsg = $id('takeover-error-msg');
-                if(errMsg) errMsg.classList.add('hidden');
                 
                 // Forzar despliegue visual en iOS (eliminar hidden y asegurar opacidad)
                 mod.classList.remove('hidden');
@@ -9306,13 +9314,9 @@
 
         function confirmTakeoverUserVault() {
             const email = $id('takeover-user-email').value;
-            const inputPin = $id('takeover-user-pin').value.trim();
-            const errMsg = $id('takeover-error-msg');
             
-            // Validar que el PIN ingresado coincida con el del Admin actual
-            if(inputPin === userProfile.pin || inputPin === "1234") {
-                if(errMsg) errMsg.classList.add('hidden');
-                
+            // Validar que tenga el pase de nube activo (Root Admin)
+            if(isRootAdminUnlocked) {
                 // Efectuar el cambio de bóveda de forma transparente
                 localStorage.setItem('nexus_current_user', email);
                 NexusIDB.saveSession(email);
@@ -9324,8 +9328,7 @@
                 // Recargar el motor para inyectar la nueva bóveda
                 location.reload();
             } else {
-                if(errMsg) errMsg.classList.remove('hidden');
-                $id('takeover-user-pin').value = '';
+                alert("Acceso denegado. No posees privilegios de administrador de red.");
             }
         }
 
@@ -9364,7 +9367,6 @@
                 $id('del-user-email').value = email;
                 $id('del-user-check').checked = false;
                 if($id('del-user-keyword')) $id('del-user-keyword').value = '';
-                if($id('del-user-pin')) $id('del-user-pin').value = '';
                 
                 const err = $id('del-user-error');
                 if(err) err.classList.add('hidden');
@@ -9387,16 +9389,12 @@
 
         async function confirmDeleteUserVault() {
             const email = $id('del-user-email').value;
-            const inputPin = $id('del-user-pin').value.trim();
             const isChecked = $id('del-user-check').checked;
             const kw = $id('del-user-keyword').value.toUpperCase();
             const err = $id('del-user-error');
             
-            const targetProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email));
-            const targetPin = targetProfile ? targetProfile.pin : null;
-            
-            // Validar PIN, Checklist y Keyword de seguridad
-            if((inputPin === targetPin || inputPin === userProfile.pin || inputPin === "1234") && isChecked && kw === 'RESET') {
+            // Validar Autorización de Nube (SSoT)
+            if(isRootAdminUnlocked && isChecked && kw === 'RESET') {
                 if(err) err.classList.add('hidden');
                 
                 // Borrado Local
@@ -9441,7 +9439,6 @@
                 
             } else {
                 if(err) err.classList.remove('hidden');
-                $id('del-user-pin').value = '';
             }
         }
 
@@ -9862,7 +9859,6 @@
             $id('btn-init-reset').classList.add('hidden');
             $id('reset-confirm-zone').classList.remove('hidden');
             $id('reset-keyword').value = '';
-            if($id('reset-pin')) $id('reset-pin').value = '';
             $id('reset-error-msg').classList.add('hidden');
         }
 
@@ -9873,11 +9869,9 @@
 
         async function executeFactoryReset() {
             const kw = $id('reset-keyword').value.toUpperCase();
-            const pinEl = $id('reset-pin');
-            const pin = pinEl ? pinEl.value.trim() : '';
             
-            // APEX FIX: Admin PIN forzado a 1234 y Keyword RESET. Exige ser Root Admin.
-            if (kw === 'RESET' && pin === "1234" && userProfile && userProfile.pin === "1234") {
+            // APEX FIX: Exige ser Root Admin Validado en Firebase.
+            if (kw === 'RESET' && isRootAdminUnlocked) {
                 
                 // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
