@@ -408,6 +408,8 @@
                     <button onclick="toggleDbDuplicates()" id="db-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
                     <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
                     <button onclick="exportDatabasePDF()" class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-1" title="Exportar PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                    <!-- APEX FIX: Botón de Interfaz de IA -->
+                    <button onclick="openAIAuditor()" class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95 border border-indigo-100 flex items-center gap-1" title="Auditor IA"><i class="fa-solid fa-wand-magic-sparkles"></i> IA</button>
                 </div>
                 <div class="flex items-center gap-2">
                     <select id="db-currency" onchange="renderDatabase()" class="text-[8px] font-black uppercase bg-purple-100 text-purple-700 px-1 py-0.5 rounded outline-none cursor-pointer">
@@ -1671,6 +1673,39 @@
             </div>
         </div>
 
+        <!-- APEX FIX: MODAL AUDITOR IA (GEMINI 2.5) -->
+        <div id="ai-auditor-modal" class="fixed inset-0 z-[160] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-lg md:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-200 shadow-2xl flex flex-col max-h-[90vh]">
+                <div class="flex justify-between items-center mb-2 shrink-0">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-indigo-600 flex items-center gap-2"><i class="fa-solid fa-wand-magic-sparkles"></i> Auditor Inteligente</h3>
+                    <button type="button" onclick="closeAIAuditor()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 active:scale-90 transition-transform"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                
+                <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex items-center justify-between shrink-0">
+                    <div>
+                        <p class="text-[10px] font-black uppercase text-indigo-800 tracking-widest">Datos en Contexto</p>
+                        <p class="text-[8px] font-bold text-indigo-600 mt-1">Se analizarán <span id="ai-context-count" class="font-black">0</span> registros financieros según tu filtro actual.</p>
+                    </div>
+                    <i class="fa-solid fa-microchip text-indigo-300 text-2xl"></i>
+                </div>
+
+                <div class="flex-1 overflow-y-auto hide-scrollbar space-y-4 pr-2">
+                    <div id="ai-response-container" class="hidden flex flex-col gap-2">
+                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 shadow-inner">
+                            <div id="ai-response-text" class="text-xs text-slate-700 leading-relaxed space-y-3">
+                                <!-- Respuesta generada dinámicamente -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="shrink-0 space-y-3 pt-2 border-t border-slate-100/50">
+                    <textarea id="ai-user-query" rows="2" class="form-input text-xs w-full bg-slate-50 border-slate-200 focus:border-indigo-400 outline-none transition-colors resize-none" placeholder="Ej: Resume mis mayores gastos y dame un consejo de ahorro..."></textarea>
+                    <button id="btn-ask-ai" onclick="executeAIAudit()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg active:scale-95 transition-transform flex justify-center items-center gap-2"><i class="fa-solid fa-paper-plane"></i> Analizar Datos</button>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL PROYECTOS -->
         <div id="new-project-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-lg md:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp">
@@ -2168,6 +2203,9 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
         let isRootAdminUnlocked = false;
+
+        // APEX FIX: Constante global de API Key manejada en runtime
+        const apiKey = "";
 
         // APEX FIX: Motor Criptográfico SHA-256 para validación de SuperAdmin (Root)
         const MASTER_ROOT_HASH = '9a1a4bf004724b946f04c6436f56cb1144f8ab4f86d8eb3ecfa8959d57fb4284'; // Hash para el PIN "9999"
@@ -6469,6 +6507,108 @@
             } catch (error) {
                 console.error("Error al exportar PDF:", error);
                 alert("⚠️ Error procesando el documento. Revisa la consola para más detalles.");
+            }
+        }
+
+        // APEX FIX: Funciones del Auditor IA (Google Gemini 2.5 Flash)
+        function openAIAuditor() {
+            const mod = $id('ai-auditor-modal');
+            if(!mod) return;
+            
+            if (!currentFilteredTx || currentFilteredTx.length === 0) {
+                return alert("No hay datos en pantalla para analizar. Ajusta tus filtros primero.");
+            }
+            
+            $id('ai-context-count').innerText = currentFilteredTx.length;
+            $id('ai-user-query').value = '';
+            $id('ai-response-container').classList.add('hidden');
+            $id('ai-response-text').innerHTML = '';
+            
+            mod.classList.remove('hidden');
+        }
+
+        function closeAIAuditor() {
+            const mod = $id('ai-auditor-modal');
+            if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        async function fetchWithRetry(url, options, maxRetries = 5) {
+            const delays = [1000, 2000, 4000, 8000, 16000];
+            for (let i = 0; i <= maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    if (i === maxRetries) throw e;
+                    await new Promise(res => setTimeout(res, delays[i]));
+                }
+            }
+        }
+
+        async function executeAIAudit() {
+            const userQuestion = $id('ai-user-query').value.trim();
+            if(!userQuestion) return alert("Por favor, escribe una pregunta para la IA.");
+
+            const btn = $id('btn-ask-ai');
+            const origBtnText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Generando Insights...';
+            btn.disabled = true;
+            
+            $id('ai-response-container').classList.remove('hidden');
+            $id('ai-response-text').innerHTML = '<p class="text-[10px] text-indigo-500 font-bold uppercase tracking-widest animate-pulse text-center py-4"><i class="fa-solid fa-satellite-dish mr-2"></i>Conectando con Google Gemini...</p>';
+
+            // Preparar payload de datos: Se minimiza para optimizar tokens
+            const dataToAnalyze = currentFilteredTx.map(t => ({
+                fecha: t.date.split('T')[0],
+                concepto: t.note || t.cat,
+                tipo: t.renderType || t.type,
+                monto: t.original_amount || t.amount,
+                divisa: t.original_currency || t.currency
+            }));
+
+            const prompt = `Actúa como un analista financiero experto (CFO) de Nexus AR Finance.
+A continuación te proporciono un conjunto de datos financieros extraídos de la auditoría del usuario, en formato JSON.
+Analiza estos datos y responde a la pregunta del usuario de forma concisa, profesional y con insights accionables.
+
+PREGUNTA DEL USUARIO: ${userQuestion}
+
+DATOS CONTABLES:
+${JSON.stringify(dataToAnalyze)}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: "Eres el auditor IA de Nexus AR Finance. Tu objetivo es dar claridad financiera, identificar fugas de capital y sugerir optimizaciones. Respuestas siempre en español. Formatea el texto usando markdown básico (**negritas**, listas)." }] }
+            };
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                const result = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const textResponse = result.candidates?.[0]?.content?.parts?.[0]?.text || "El modelo no pudo generar una respuesta.";
+                
+                // Parseo de Markdown básico a HTML para Vanilla JS
+                let formattedResponse = textResponse
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-700 font-black">$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    .replace(/\n\n/g, '</p><p class="mt-2">')
+                    .replace(/\n/g, '<br>')
+                    .replace(/^- (.*?)(?=<br>|<\/p>|$)/gm, '<li class="ml-4 list-disc marker:text-indigo-400 mb-1">$1</li>');
+
+                $id('ai-response-text').innerHTML = `<p>${formattedResponse}</p>`;
+
+            } catch (error) {
+                console.error("[APEX IA Error]", error);
+                $id('ai-response-text').innerHTML = '<p class="text-[10px] text-red-500 font-bold text-center py-4 uppercase tracking-widest"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Error de conexión con el motor de IA.</p>';
+            } finally {
+                btn.innerHTML = origBtnText;
+                btn.disabled = false;
             }
         }
 
