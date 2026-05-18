@@ -2239,51 +2239,47 @@
         // APEX FIX: Motor de Biometría Híbrido (iOS Nativo + WebAuthn)
         let activeBiometricCallback = null;
 
-        // 1. Preparar la función que Swift llamará de vuelta
+        // 1. Preparar la función receptora ANTES de llamar al nativo
         window.onBiometricResult = function(success) {
-            if (success) {
-                console.log("Acceso concedido por el sistema nativo.");
-                // Ejecutar lógica de entrada / FaceID aceptado
+            // Tolerancia de tipos para recibir respuestas limpias de Swift
+            if (success === true || success === "true" || success === 1) {
+                console.log("[APEX] Identidad confirmada por el contenedor nativo. Desbloqueando UI...");
                 if (activeBiometricCallback) {
                     activeBiometricCallback();
-                } else {
-                    alert("Identidad verificada exitosamente.");
                 }
             } else {
-                console.log("Acceso denegado o Face ID cancelado.");
-                // Ejecutar lógica de rechazo / FaceID cancelado o fallido
-                alert("Acceso denegado.");
+                console.warn("[APEX] FaceID fallido o cancelado.");
+                // Retirar las alertas invasivas para que el usuario simplemente ingrese el PIN si el FaceID falla
             }
             activeBiometricCallback = null;
         };
 
-        async function triggerBiometricAuth(successCallback, reasonMsg = 'Desbloquea tu bóveda personal en Nexus') {
-            // 2. Disparar el evento hacia Swift (Prioridad Máxima)
+        async function triggerBiometricAuth(successCallback, reasonMsg = 'Verificación biométrica Apex requerida') {
+            activeBiometricCallback = successCallback;
+
+            // 2. Disparar el mensaje a través del puente de iOS
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
-                activeBiometricCallback = successCallback;
                 window.webkit.messageHandlers.appInterface.postMessage({
                     action: "authenticate",
-                    reason: reasonMsg
+                    reason: reasonMsg // Este es el texto que verá en iOS
                 });
                 return;
             }
 
+            console.error("[APEX] Entorno no nativo. Ejecutando fallback web (WebAuthn)...");
+
             // Fallback WebAuthn (PWA / Navegador Safari Desktop)
-            if (!window.PublicKeyCredential) {
-                console.warn("[APEX] Biometría nativa no soportada por el navegador. Fallback a PIN.");
-                return; // Fricción Cero: Salimos silenciosamente para permitir el uso fluido del PIN
+            if (!window.PublicKeyCredential) return;
+            
+            // APEX FIX: Uso de la variable cacheada en lugar de await para evitar 
+            // romper la cadena del Gesto del Usuario y colapsar el WebKit.
+            if (!isBiometricsAvailableGlobal) {
+                console.warn("[APEX] FaceID / TouchID no disponible en este dispositivo. Fallback a PIN.");
+                return; 
             }
             
             try {
-                // APEX FIX: Pre-chequeo estricto instantáneo. 
-                // Esto evita el modal en blanco nativo de iOS que muestra un contador de tiempo buscando llaves de seguridad USB/NFC.
-                const isBioAvailable = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-                if (!isBioAvailable) {
-                    console.warn("[APEX] FaceID / TouchID inactivo o no disponible. Haciendo fallback fluido a PIN.");
-                    return; 
-                }
-
-                // Configuración de Identidad Simulada (Para solicitar lectura de rostro/huella sin registro backend)
+                // Configuración de Identidad Simulada (Para solicitar lectura de rostro sin registro backend)
                 const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
                 const userId = new Uint8Array(16); window.crypto.getRandomValues(userId);
                 let rpId = window.location.hostname;
@@ -2301,21 +2297,15 @@
                         user: { id: userId, name: "root_admin", displayName: "NEXUS Root Admin" },
                         pubKeyCredParams: [ { type: "public-key", alg: -7 }, { type: "public-key", alg: -257 } ],
                         authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
-                        timeout: 15000 // APEX FIX: Reducido drásticamente de 60s a 15s para evitar pantallas congeladas
+                        timeout: 15000 
                     }
                 });
 
                 if (credential) {
-                    successCallback(); // Éxito en la validación local PWA
+                    successCallback(); 
                 }
             } catch (err) {
                 console.warn("[APEX Security] Biometría cancelada o denegada: ", err);
-                if (err.name === 'SecurityError') {
-                    alert("⚠️ El entorno web actual bloquea Face ID. Usa tu PIN.");
-                } else if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
-                    // Si no fue una cancelación voluntaria, enviamos alerta sutil
-                    alert("⚠️ Autenticación biométrica interrumpida. Usa tu PIN.");
-                }
             }
         }
 
