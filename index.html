@@ -1100,6 +1100,23 @@
         <button onclick="toggleFab()" type="button" id="fab-toggle-btn" class="w-14 h-14 md:w-16 md:h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl transition-transform duration-300 active:scale-90"><i class="fa-solid fa-plus"></i></button>
     </div>
 
+    <!-- MODAL SCORE -->
+    <div id="score-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border shadow-2xl">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xl font-black uppercase tracking-tighter theme-text"><i class="fa-solid fa-ranking-star mr-2 text-indigo-500"></i>Nexus Score</h3>
+                <button type="button" onclick="closeScoreModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="text-center space-y-4">
+                <div class="w-32 h-32 mx-auto rounded-full border-8 border-emerald-400 flex items-center justify-center bg-emerald-50 shadow-inner transition-colors duration-500">
+                    <span id="score-modal-val" class="text-4xl font-black text-emerald-600 tabular-nums tracking-tighter transition-colors duration-500">--</span>
+                </div>
+                <p class="text-xs text-slate-500 font-bold leading-relaxed">Tu Score se calcula de 300 a 850 basándose en tu patrimonio líquido, nivel de endeudamiento y capacidad de ahorro a corto plazo.</p>
+            </div>
+            <button type="button" onclick="closeScoreModal()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Entendido</button>
+        </div>
+    </div>
+
     <!-- MODAL FORMULARIO TRANSACCIONES SSoT -->
     <div id="tx-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
         <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
@@ -3792,7 +3809,7 @@
         function closeNumpad() { const modal = $id('numpad-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); numpadTargetId = null; }, 300); }
 
         function updateDashboard() {
-            let uNW = 0; const bC = state.settings.baseCurrency; let totAssets = 0; let totLiab = 0;
+            let uNW = 0; const bC = state.settings.baseCurrency || 'COP'; let totAssets = 0; let totLiab = 0;
             (state.accounts || []).forEach(a => { 
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
                 let bal = a.type === 'credit' ? -a.balance : a.balance; uNW += convertCurrency(bal, a.currency, bC); if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
@@ -3805,7 +3822,17 @@
             let scT = bC === 'COP' ? 1000000 : 250; let dynamicScore = 550 + (totAssets / scT) * 15 - (totLiab / scT) * 20;
             if (totAssets > 0 && totLiab === 0) dynamicScore += 50; if (totLiab > totAssets * 1.5) dynamicScore -= 100;
             dynamicScore = Math.floor(Math.max(300, Math.min(850, dynamicScore)));
-            if(scoreEl) scoreEl.innerText = dynamicScore; if(scoreModalVal) scoreModalVal.innerText = dynamicScore;
+            
+            // APEX FIX: Asignación dinámica de colores al Score según Salud Financiera
+            if(scoreEl) {
+                scoreEl.innerText = dynamicScore;
+                scoreEl.className = dynamicScore >= 700 ? 'text-emerald-400' : (dynamicScore >= 500 ? 'text-amber-400' : 'text-red-400');
+            }
+            if(scoreModalVal) {
+                scoreModalVal.innerText = dynamicScore;
+                scoreModalVal.className = `text-4xl font-black tabular-nums tracking-tighter transition-colors duration-500 ${dynamicScore >= 700 ? 'text-emerald-600' : (dynamicScore >= 500 ? 'text-amber-500' : 'text-red-600')}`;
+                scoreModalVal.parentElement.className = `w-32 h-32 mx-auto rounded-full border-8 flex items-center justify-center shadow-inner transition-colors duration-500 ${dynamicScore >= 700 ? 'border-emerald-400 bg-emerald-50' : (dynamicScore >= 500 ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50')}`;
+            }
             
             const aTx = getEnrichedTx(); const cTx = getContextTx(aTx);
             
