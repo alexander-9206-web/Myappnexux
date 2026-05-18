@@ -706,7 +706,7 @@
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <button onclick="forceAppUpdate()" class="w-full bg-orange-500 text-white p-4 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-palette mr-1"></i> Reset UI</button>
-                    <button onclick="triggerUIDelete('update_web_app', null)" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Act. PWA</button>
+                    <button onclick="forceWebUpdate()" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Act. PWA</button>
                 </div>
                 <button onclick="logout()" class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-black uppercase text-[10px] shadow-sm active:scale-95 transition-transform border border-red-100 mt-2"><i class="fa-solid fa-right-from-bracket mr-1"></i> Salir / Cambiar Bóveda</button>
             </div>
@@ -1938,6 +1938,23 @@
                 else if(action === 'delete_tx') deleteTx(null, payload, true);
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
                 else if(action === 'reconcile_zero') executeReconcileZero(payload);
+                else if(action === 'update_app') {
+                    if (typeof forceNativeCacheWipe === 'function') forceNativeCacheWipe();
+                    if (!state.settings) state.settings = {};
+                    state.settings.themePreset = 'default';
+                    state.settings.fontStyle = 'system';
+                    state.settings.textSize = '16px';
+                    state.settings.hideDecimals = false;
+                    state.theme = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
+                    saveState();
+                    window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
+                }
+                else if(action === 'update_web_app') {
+                    if ('caches' in window) { caches.keys().then(names => { for (let name of names) caches.delete(name); }); }
+                    if ('serviceWorker' in navigator) { navigator.serviceWorker.getRegistrations().then(function(registrations) { for(let registration of registrations) { registration.unregister(); } }); }
+                    document.cookie.split(";").forEach(function(c) { document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); });
+                    window.location.href = window.location.pathname + '?v=' + new Date().getTime();
+                }
             }, 300);
         }
 
@@ -3411,7 +3428,11 @@
         
         // APEX FIX: Forzar actualización de caché y sistema (Integrado a UI Modal)
         function forceAppUpdate() {
-            triggerUIDelete('update_app', null);
+            triggerUIConfirm('¿Restablecer configuraciones globales?\n\nEl sistema restaurará la vista, colores y divisas por defecto, además limpiará la caché de red nativa.', 'update_app');
+        }
+
+        function forceWebUpdate() {
+            triggerUIConfirm('¿Buscar e instalar actualizaciones de la WebApp?\n\nEsto recargará la aplicación limpiando las cookies y la caché PWA para asegurar que tengas la última versión del código.', 'update_web_app');
         }
         
         function forceNativeCacheWipe() {
@@ -8053,8 +8074,6 @@
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'task_vault') msgEl.innerText = `¿Desvincular esta bóveda de tareas compartidas?\n\nLas tareas desaparecerán de tu vista local, pero seguirán en la nube para los demás usuarios vinculados.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
-            else if(type === 'update_app') msgEl.innerText = `¿Restablecer configuraciones globales?\n\nEl sistema restaurará la vista, colores y divisas por defecto, además limpiará la caché de red nativa.`;
-            else if(type === 'update_web_app') msgEl.innerText = `¿Buscar e instalar actualizaciones de la WebApp?\n\nEsto recargará la aplicación limpiando las cookies y la caché PWA para asegurar que tengas la última versión del código.`;
 
             mod.classList.remove('hidden');
         }
@@ -8124,38 +8143,6 @@
                 populateTaskVaultSelects();
                 renderTasksTab();
                 attachTaskP2PListener();
-            } else if (type === 'update_app') {
-                if (typeof forceNativeCacheWipe === 'function') forceNativeCacheWipe();
-                
-                // Reset de configuraciones globales
-                state.settings = { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false };
-                state.theme = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
-                saveState();
-                
-                window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
-                return;
-            } else if (type === 'update_web_app') {
-                // Borrado de caché PWA
-                if ('caches' in window) {
-                    caches.keys().then(names => {
-                        for (let name of names) caches.delete(name);
-                    });
-                }
-                
-                // Desregistro de Service Workers
-                if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                        for(let registration of registrations) { registration.unregister(); }
-                    });
-                }
-                
-                // Borrado de Cookies
-                document.cookie.split(";").forEach(function(c) { 
-                    document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
-                });
-                
-                window.location.href = window.location.pathname + '?v=' + new Date().getTime();
-                return;
             }
             closeUIDeleteModal();
         }
