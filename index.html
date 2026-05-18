@@ -78,14 +78,11 @@
             <!-- Elección Inicial (MODERNIZADO) -->
             <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-white/10 relative z-10">
                 
-                <!-- Contenedor Dinámico para Usuario Reciente (Avatar) -->
-                <div id="login-recent-user-box" class="hidden flex flex-col items-center justify-center p-5 bg-white/5 rounded-3xl border border-white/10 mb-4 shadow-inner backdrop-blur-sm transition-all hover:bg-white/10">
-                    <div id="login-recent-avatar" class="w-20 h-20 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center text-3xl shadow-xl overflow-hidden mb-3 border-2 border-indigo-500/50"></div>
-                    <p id="login-recent-name" class="text-sm font-black text-white uppercase tracking-wider"></p>
-                    <p id="login-recent-email" class="text-[10px] text-slate-400 font-bold mb-4 tracking-widest"></p>
-                    <div class="w-full flex gap-2">
-                        <input type="password" id="login-recent-pin" maxlength="4" pattern="[0-9]*" inputmode="numeric" placeholder="PIN" class="form-input text-center tracking-[0.5em] text-sm flex-1 bg-black/50 border-white/10 text-white outline-none focus:border-indigo-500 rounded-2xl py-3 shadow-inner font-black placeholder:tracking-normal">
-                        <button onclick="handleLoginRecent()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-2xl font-black uppercase text-xs shadow-lg shadow-indigo-500/30 active:scale-95 transition-all"><i class="fa-solid fa-unlock"></i></button>
+                <!-- Sesiones Iniciadas (Inicio Rápido) -->
+                <div id="login-recent-avatars-container" class="hidden w-full mb-4">
+                    <p class="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-3 text-center">Sesiones Iniciadas</p>
+                    <div id="login-recent-avatars-list" class="flex justify-center gap-4 overflow-x-auto hide-scrollbar pb-2">
+                        <!-- Avatares dinámicos JS -->
                     </div>
                 </div>
 
@@ -2804,6 +2801,7 @@
                 
                 // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
                 fetchLoginUsers(false);
+                showInitialLoginChoice(); // APEX FIX: Forzar explícitamente el reseteo visual a las opciones globales
                 
                 // NO inicializamos Firebase de inmediato para ahorrar batería y carga. Se dispara a petición.
             } else {
@@ -2838,12 +2836,10 @@
             // 2. Función de pintado aislada para ejecución inmediata
             const renderList = () => {
                 let html = '';
-                let mostRecentUser = null; // APEX FIX: Rastreador de último usuario
+                // APEX FIX: Ordenar usuarios por último acceso para Avatares Rápidos
+                const sortedUsers = Array.from(usersMap.values()).sort((a,b) => (b.lastSeen || 0) - (a.lastSeen || 0));
 
-                Array.from(usersMap.values()).forEach(p => {
-                    if (!mostRecentUser || (p.lastSeen && p.lastSeen > (mostRecentUser.lastSeen || 0))) {
-                        mostRecentUser = p;
-                    }
+                sortedUsers.forEach(p => {
                     const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
                     html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
                         <div class="flex items-center gap-3 overflow-hidden">
@@ -2856,29 +2852,31 @@
                     </div>`;
                     localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
                 });
+                
                 if(!html && !scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No hay bóvedas locales. Usa el buscador en red o crea una.</p>';
                 else if(!html && scanCloud) html = '<p class="text-[10px] text-center text-slate-500 font-bold py-4"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Buscando bóvedas en la red...</p>';
                 list.innerHTML = html;
                 filterLoginUsers(); // Aplicar el filtro si el usuario ya escribió algo
                 
-                // APEX FIX: Inyectar Usuario Reciente en la pantalla principal (Fricción Cero)
-                const recentBox = $id('login-recent-user-box');
-                if (recentBox) {
-                    if (mostRecentUser) {
-                        $id('login-recent-name').innerText = mostRecentUser.name;
-                        $id('login-recent-email').innerText = mostRecentUser.email;
-                        const avBox = $id('login-recent-avatar');
-                        if (avBox) avBox.innerHTML = mostRecentUser.avatar ? `<img src="${mostRecentUser.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[30px]"></i>`;
-                        recentBox.dataset.email = mostRecentUser.email;
-                        recentBox.classList.remove('hidden');
-                        
-                        // Autoplay para UX: Si tocas enter en el pin, inicia sesión
-                        const recPinInput = $id('login-recent-pin');
-                        if (recPinInput) {
-                            recPinInput.onkeypress = (e) => { if(e.key === 'Enter') handleLoginRecent(); };
-                        }
+                // APEX FIX: Inyectar Avatares de Inicio Rápido Múltiples (Reemplaza el cuadro gigante)
+                let recentHtml = '';
+                sortedUsers.slice(0, 4).forEach(p => {
+                    const avatarContent = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[18px]"></i>`;
+                    recentHtml += `
+                    <div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="flex flex-col items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 transition-all w-16 shrink-0">
+                        <div class="w-14 h-14 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center overflow-hidden border-2 border-indigo-500/50 shadow-md">${avatarContent}</div>
+                        <p class="text-[8px] font-black text-slate-300 w-full truncate text-center uppercase tracking-widest">${p.name.split(' ')[0]}</p>
+                    </div>`;
+                });
+
+                const recentContainer = $id('login-recent-avatars-container');
+                const recentList = $id('login-recent-avatars-list');
+                if (recentContainer && recentList) {
+                    if (recentHtml) {
+                        recentList.innerHTML = recentHtml;
+                        recentContainer.classList.remove('hidden');
                     } else {
-                        recentBox.classList.add('hidden');
+                        recentContainer.classList.add('hidden');
                     }
                 }
             };
@@ -2990,38 +2988,6 @@
                 }
             } else {
                 showInitialLoginChoice();
-            }
-        }
-
-        // APEX FIX: Implementación faltante para el login rápido de usuario reciente
-        async function handleLoginRecent() {
-            const recentBox = $id('login-recent-user-box');
-            if(!recentBox) return;
-            const email = recentBox.dataset.email;
-            const pinInput = $id('login-recent-pin');
-            const pin = pinInput.value.trim();
-            
-            if(!email || pin.length !== 4) return alert("Ingresa un PIN de 4 dígitos.");
-            
-            const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
-            if(profile && profile.pin === pin) { 
-                userProfile = profile;
-                userProfile.lastSeen = Date.now();
-                localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
-                
-                if (window.db) {
-                    try {
-                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
-                    } catch(e) { console.warn("[APEX] Error sync lastSeen", e); }
-                }
-                
-                pinInput.value = ''; // Limpiar tras éxito
-                // APEX FIX: Invocar el flujo global unificado para cerrar pantalla visualmente
-                await processLoginSuccess(email);
-            } else {
-                alert("PIN Incorrecto.");
-                pinInput.value = '';
             }
         }
 
@@ -3329,10 +3295,13 @@
                 window.sharedUnsubscribers = {};
             }
             
+            // Destrucción absoluta de anclas de sesión
             localStorage.removeItem('nexus_current_user'); 
             NexusIDB.saveSession(null);
-            document.cookie = "nexus_current_user=; max-age=0; path=/";
-            location.reload(); 
+            document.cookie = "nexus_current_user=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            
+            // APEX FIX: Forzar recarga limpia hacia la ruta raíz burlando la caché de iOS/PWA para asegurar el despliegue del menú global múltiple
+            window.location.href = window.location.pathname + '?v=' + new Date().getTime(); 
         }
         
         function setApMode(mode) {
@@ -10106,7 +10075,8 @@
                     zone.innerHTML = `<div class="p-6 bg-red-100 rounded-2xl text-center animate-slideUp"><i class="fa-solid fa-skull-crossbones text-red-600 text-4xl mb-3"></i><p class="text-[10px] text-red-800 font-black uppercase tracking-widest">Base de Datos Erradicada.<br>Reiniciando Sistema a Cero...</p></div>`;
                 }
                 
-                setTimeout(() => location.reload(), 2500);
+                // APEX FIX: Cache buster también en el factory reset
+                setTimeout(() => { window.location.href = window.location.pathname + '?reset=' + Date.now(); }, 2500);
             } else {
                 $id('reset-error-msg').classList.remove('hidden');
             }
