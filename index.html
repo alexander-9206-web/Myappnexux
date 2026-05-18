@@ -2028,33 +2028,36 @@
         // APEX FIX: Motor de Biometría Híbrido (iOS Nativo + WebAuthn)
         let activeBiometricCallback = null;
 
+        // 1. Preparar la función que Swift llamará de vuelta
         window.onBiometricResult = function(success) {
             if (success) {
-                // FaceID aceptado: Abrir Bóveda / Caja Negra
+                console.log("Acceso concedido por el sistema nativo.");
+                // Ejecutar lógica de entrada / FaceID aceptado
                 if (activeBiometricCallback) {
                     activeBiometricCallback();
                 } else {
                     alert("Identidad verificada exitosamente.");
                 }
             } else {
-                // FaceID cancelado o fallido
+                console.log("Acceso denegado o Face ID cancelado.");
+                // Ejecutar lógica de rechazo / FaceID cancelado o fallido
                 alert("Acceso denegado.");
             }
             activeBiometricCallback = null;
         };
 
-        async function triggerBiometricAuth(successCallback, reasonMsg = 'Verifica tu identidad para entrar a la bóveda') {
-            // 1. Disparador del FaceID en iOS (Prioridad Máxima)
+        async function triggerBiometricAuth(successCallback, reasonMsg = 'Desbloquea tu bóveda personal en Nexus') {
+            // 2. Disparar el evento hacia Swift (Prioridad Máxima)
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
                 activeBiometricCallback = successCallback;
                 window.webkit.messageHandlers.appInterface.postMessage({
-                    action: 'authenticate',
+                    action: "authenticate",
                     reason: reasonMsg
                 });
                 return;
             }
 
-            // 2. Fallback WebAuthn (PWA / Navegador Safari Desktop)
+            // Fallback WebAuthn (PWA / Navegador Safari Desktop)
             if (!window.PublicKeyCredential) {
                 alert("⚠️ Tu dispositivo o navegador actual no soporta biometría nativa.");
                 return;
