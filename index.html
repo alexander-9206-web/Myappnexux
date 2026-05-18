@@ -757,11 +757,15 @@
                 </div>
             </div>
             
-            <!-- APEX FIX: Matriz de botones actualizada con la acción de Forzar Actualización PWA -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 md:max-w-2xl md:mx-auto">
+            <!-- APEX FIX: Matriz de botones actualizada con la acción de Forzar Actualización PWA y Reset Config -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 md:max-w-4xl md:mx-auto">
                 <button onclick="exportBackup()" class="w-full bg-black text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar</button>
                 <button onclick="document.getElementById('restore-backup-file-main').click()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-upload mr-1"></i> Importar</button>
-                <button onclick="forceAppUpdate()" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Buscar Actualizaciones</button>
+                
+                <button onclick="forceAppUpdate()" class="w-full bg-orange-500 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-gear mr-1"></i> Reset Config.</button>
+                
+                <button onclick="triggerUIDelete('update_web_app', null)" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-cloud-arrow-down mr-1"></i> Act. WebApp</button>
+                
                 <button onclick="logout()" class="w-full bg-slate-200 text-slate-700 p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-right-from-bracket mr-1"></i> Salir</button>
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
@@ -7966,7 +7970,8 @@
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'task_vault') msgEl.innerText = `¿Desvincular esta bóveda de tareas compartidas?\n\nLas tareas desaparecerán de tu vista local, pero seguirán en la nube para los demás usuarios vinculados.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
-            else if(type === 'update_app') msgEl.innerText = `¿Buscar e instalar actualizaciones del sistema?\n\nEsto recargará la aplicación limpiando la caché para asegurar que tengas la última versión del código.`;
+            else if(type === 'update_app') msgEl.innerText = `¿Restablecer configuraciones globales?\n\nEl sistema restaurará la vista, colores y divisas por defecto, además limpiará la caché de red nativa.`;
+            else if(type === 'update_web_app') msgEl.innerText = `¿Buscar e instalar actualizaciones de la WebApp?\n\nEsto recargará la aplicación limpiando las cookies y la caché PWA para asegurar que tengas la última versión del código.`;
 
             mod.classList.remove('hidden');
         }
@@ -8037,13 +8042,36 @@
                 renderTasksTab();
                 attachTaskP2PListener();
             } else if (type === 'update_app') {
-                forceNativeCacheWipe();
+                if (typeof forceNativeCacheWipe === 'function') forceNativeCacheWipe();
+                
+                // Reset de configuraciones globales
+                state.settings = { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false };
+                state.theme = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
+                saveState();
+                
+                window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
+                return;
+            } else if (type === 'update_web_app') {
+                // Borrado de caché PWA
+                if ('caches' in window) {
+                    caches.keys().then(names => {
+                        for (let name of names) caches.delete(name);
+                    });
+                }
+                
+                // Desregistro de Service Workers
                 if ('serviceWorker' in navigator) {
                     navigator.serviceWorker.getRegistrations().then(function(registrations) {
                         for(let registration of registrations) { registration.unregister(); }
                     });
                 }
-                window.location.href = window.location.pathname + '?refresh=' + new Date().getTime();
+                
+                // Borrado de Cookies
+                document.cookie.split(";").forEach(function(c) { 
+                    document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+                });
+                
+                window.location.href = window.location.pathname + '?v=' + new Date().getTime();
                 return;
             }
             closeUIDeleteModal();
