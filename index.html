@@ -3980,17 +3980,45 @@
             state.periodFilter = { type: 'all', cat: 'all' }; updateDashboard(); if(state.activeTab === 'analysis') renderAnalysis();
         }
 
+        // APEX FIX: Motor de Renderizado Sólido (Previene Flashing y Scroll Resets al actualizar datos)
         function switchTab(id) {
-            id = id || 'home'; const menu = $id('fab-menu'); const btn = $id('fab-toggle-btn');
+            id = id || 'home'; 
+            const isSameTab = (state.activeTab === id);
+            state.activeTab = id;
+
+            const menu = $id('fab-menu'); const btn = $id('fab-toggle-btn');
             if (menu && !menu.classList.contains('hidden')) { menu.classList.add('hidden'); if (btn) btn.style.transform = 'rotate(0deg)'; }
-            const fm = $id('finances-menu'); const fd = $id('finances-detail'); if (fm && fd) { fm.classList.remove('hidden'); fd.classList.add('hidden'); }
-            const ll = $id('loans-view-list'); const ld = $id('loans-view-detail'); if (ll && ld) { ll.classList.remove('hidden'); ld.classList.add('hidden'); }
-            const isBack = id === 'home' && state.activeTab !== 'home'; state.activeTab = id;
-            $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
-            const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
-            const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes', 'tasks', 'projects'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
             
-            if(id === 'loans') renderLoansList(); if(id === 'analysis') renderAnalysis(); if(id === 'afterpay') renderAfterpay(); if(id === 'report') renderReport(); if(id === 'accounts') renderAccountsTab(); if(id === 'settings') renderSettingsTab(); if(id === 'database') initDatabaseTab(); if(id === 'calendar') renderCalendar(); if(id === 'finances') renderFinancesUnified(); if(id === 'budget') renderBudgetTab(); if(id === 'scanner') initScanner(); if(id === 'taxes') renderTaxes(); if(id === 'tasks') renderTasksTab(); if(id === 'projects') renderProjectsTab();
+            // Si la pestaña ya está activa, bloqueamos el colapso del DOM para mantener el Scroll intacto
+            if (!isSameTab || !$id('tab-' + id)?.classList.contains('active')) {
+                const fm = $id('finances-menu'); const fd = $id('finances-detail'); if (fm && fd) { fm.classList.remove('hidden'); fd.classList.add('hidden'); }
+                const ll = $id('loans-view-list'); const ld = $id('loans-view-detail'); if (ll && ld) { ll.classList.remove('hidden'); ld.classList.add('hidden'); }
+                
+                const isBack = id === 'home'; 
+                $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
+                const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
+                
+                const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes', 'tasks', 'projects'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
+                
+                // Solo inicializamos estados pesados si estamos entrando de cero a la pestaña
+                if(id === 'database') initDatabaseTab(); 
+                if(id === 'scanner') initScanner(); 
+            }
+            
+            // Actualización In-Place de Datos (Fricción Cero)
+            if(id === 'loans') renderLoansList(); 
+            if(id === 'analysis') renderAnalysis(); 
+            if(id === 'afterpay') renderAfterpay(); 
+            if(id === 'report') renderReport(); 
+            if(id === 'accounts') renderAccountsTab(); 
+            if(id === 'settings') renderSettingsTab(); 
+            if(id === 'database' && isSameTab) renderDatabase(); 
+            if(id === 'calendar') renderCalendar(); 
+            if(id === 'finances') renderFinancesUnified(); 
+            if(id === 'budget') renderBudgetTab(); 
+            if(id === 'taxes') renderTaxes(); 
+            if(id === 'tasks') renderTasksTab(); 
+            if(id === 'projects') renderProjectsTab();
         }
 
         function toggleFab() { 
