@@ -176,18 +176,20 @@
         <!-- 🟢 DASHBOARD -->
         <section id="tab-home" class="tab-content active space-y-6 md:space-y-8">
             
-            <!-- APEX FIX: Header de Resumen y Score Separados -->
-            <div class="flex justify-between items-center px-1 mt-2">
-                <div>
-                    <h2 id="wealth-title" class="text-[10px] md:text-xs font-black theme-text uppercase tracking-widest">Patrimonio Unificado</h2>
-                    <p class="text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mt-0.5 tracking-widest">Equiv: <span id="net-worth-total" class="font-black theme-text">--</span> <span id="base-curr-label" class="font-black theme-text">COP</span></p>
+            <!-- APEX FIX: Master Container de Patrimonio Global (Acordeón) -->
+            <div class="theme-card p-5 md:p-6 rounded-[2rem] border shadow-sm mb-6 flex flex-col group relative overflow-hidden transition-all mt-2">
+                <div class="flex justify-between items-center cursor-pointer select-none" onclick="toggleGlobalWealth()">
+                    <div>
+                        <h2 id="wealth-title" class="text-[9px] md:text-[10px] font-black uppercase tracking-widest flex items-center gap-2 text-slate-400">Patrimonio Global Unificado <i id="icon-global-wealth" class="fa-solid fa-chevron-down text-indigo-400"></i></h2>
+                        <p class="text-2xl sm:text-3xl font-black tabular-nums tracking-tighter theme-text mt-1"><span id="net-worth-total">--</span> <span id="base-curr-label" class="text-sm opacity-50">COP</span></p>
+                    </div>
+                    <button onclick="event.stopPropagation(); showScoreModal()" type="button" class="bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm transition-colors px-3 py-1.5 md:px-4 md:py-2 rounded-xl text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 active:scale-95">Score: <span id="nexus-score" class="text-emerald-600">--</span></button>
                 </div>
-                <button onclick="showScoreModal()" type="button" class="theme-card border shadow-sm transition-colors px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 active:scale-95">Score: <span id="nexus-score" class="text-emerald-500">--</span> <i class="fa-solid fa-circle-info text-[8px] ml-1 opacity-50"></i></button>
-            </div>
-
-            <!-- APEX FIX: Tarjetas Verticales Multidivisa (Patrimonio + Flujo Integrado) -->
-            <div id="net-worth-container" class="flex flex-col gap-3 w-full mb-6">
-                <!-- Se inyectan las wealth-cards negras aquí dinámicamente -->
+                <div id="global-wealth-content" class="mt-4 pt-4 border-t border-slate-100/50 flex flex-col gap-3 w-full animate-slideUp">
+                    <div id="net-worth-container" class="flex flex-col gap-3 w-full">
+                        <!-- Se inyectan las wealth-cards negras aquí dinámicamente -->
+                    </div>
+                </div>
             </div>
 
             <div id="view-day" class="space-y-8">
@@ -3928,6 +3930,14 @@
                 scoreModalVal.className = `text-4xl font-black tabular-nums tracking-tighter transition-colors duration-500 ${dynamicScore >= 700 ? 'text-emerald-600' : (dynamicScore >= 500 ? 'text-amber-500' : 'text-red-600')}`;
                 scoreModalVal.parentElement.className = `w-32 h-32 mx-auto rounded-full border-8 flex items-center justify-center shadow-inner transition-colors duration-500 ${dynamicScore >= 700 ? 'border-emerald-400 bg-emerald-50' : (dynamicScore >= 500 ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50')}`;
             }
+
+            // APEX FIX: Restaurar estado visual del acordeón de Patrimonio Global
+            if (state.ui && state.ui['global_wealth_view'] === false) {
+                const gwContent = $id('global-wealth-content');
+                const gwIcon = $id('icon-global-wealth');
+                if (gwContent) { gwContent.classList.add('hidden'); gwContent.classList.remove('flex'); }
+                if (gwIcon) { gwIcon.classList.remove('fa-chevron-down'); gwIcon.classList.add('fa-chevron-right'); }
+            }
             
             const aTx = getEnrichedTx(); const cTx = getContextTx(aTx);
             
@@ -4381,6 +4391,25 @@
         }
 
         // APEX FIX: Controlador Lógico de Listas Desprendibles (Acordeón) y Persistencia Visual
+        function toggleGlobalWealth() {
+            const content = $id('global-wealth-content');
+            const icon = $id('icon-global-wealth');
+            if(!content) return;
+            let isOpen = false;
+            if(content.classList.contains('hidden')) {
+                content.classList.remove('hidden'); content.classList.add('flex');
+                if(icon) { icon.classList.remove('fa-chevron-right'); icon.classList.add('fa-chevron-down'); }
+                isOpen = true;
+            } else {
+                content.classList.add('hidden'); content.classList.remove('flex');
+                if(icon) { icon.classList.remove('fa-chevron-down'); icon.classList.add('fa-chevron-right'); }
+                isOpen = false;
+            }
+            if (!state.ui) state.ui = {};
+            state.ui['global_wealth_view'] = isOpen;
+            saveState();
+        }
+
         function toggleAccGroup(id) {
             const el = $id(id);
             const icon = $id('icon-' + id);
