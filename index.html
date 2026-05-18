@@ -1191,7 +1191,7 @@
                 <div class="w-32 h-32 mx-auto rounded-full border-8 border-emerald-400 flex items-center justify-center bg-emerald-50 shadow-inner transition-colors duration-500">
                     <span id="score-modal-val" class="text-4xl font-black text-emerald-600 tabular-nums tracking-tighter transition-colors duration-500">--</span>
                 </div>
-                <p class="text-xs text-slate-500 font-bold leading-relaxed">Tu Score se calcula de 300 a 850 basándose en tu patrimonio líquido, nivel de endeudamiento y capacidad de ahorro a corto plazo.</p>
+                <p class="text-xs text-slate-500 font-bold leading-relaxed">Tu Score se calcula de 300 a 850 mediante un algoritmo logarítmico que evalúa tu <b>Ratio de Endeudamiento</b> frente a tu liquidez real, ajustándose a magnitudes financieras estándar.</p>
             </div>
             <button type="button" onclick="closeScoreModal()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Entendido</button>
         </div>
@@ -4349,8 +4349,25 @@
             const nwTotEl = $id('net-worth-total'); if(nwTotEl) nwTotEl.innerText = fmt(uNW, bC);
             const baseCurrLabel = $id('base-curr-label'); if(baseCurrLabel) baseCurrLabel.innerText = bC;
             
-            let scT = bC === 'COP' ? 1000000 : 250; let dynamicScore = 550 + (totAssets / scT) * 15 - (totLiab / scT) * 20;
-            if (totAssets > 0 && totLiab === 0) dynamicScore += 50; if (totLiab > totAssets * 1.5) dynamicScore -= 100;
+            // APEX FIX: Motor de Score Financiero Mejorado (Basado en Ratios y Logaritmos para evitar roturas por inflación)
+            let dynamicScore = 550;
+            const debtRatio = totAssets > 0 ? (totLiab / totAssets) : (totLiab > 0 ? 1 : 0);
+            
+            // Bonificaciones y penalizaciones por endeudamiento
+            if (totAssets > 0 && totLiab === 0) dynamicScore += 100;
+            else if (debtRatio < 0.2) dynamicScore += 50;
+            else if (debtRatio > 0.5 && debtRatio <= 0.8) dynamicScore -= 80;
+            else if (debtRatio > 0.8) dynamicScore -= 150;
+
+            // Escala logarítmica de Patrimonio (Convierte a una magnitud estándar ~USD para aplicar el logaritmo de manera justa en cualquier divisa)
+            let magAssets = totAssets; let magLiab = totLiab;
+            if (bC === 'COP') { magAssets /= 4000; magLiab /= 4000; }
+            else if (bC === 'MXN') { magAssets /= 17; magLiab /= 17; }
+            else if (bC === 'EUR') { magAssets *= 1.1; magLiab *= 1.1; }
+
+            if (magAssets > 1) dynamicScore += (Math.log10(magAssets) * 35);
+            if (totAssets === 0 && magLiab > 1) dynamicScore -= (Math.log10(magLiab) * 50);
+
             dynamicScore = Math.floor(Math.max(300, Math.min(850, dynamicScore)));
             
             // APEX FIX: Corrección de dependencias que ocultaban los módulos
