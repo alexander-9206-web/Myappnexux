@@ -2051,6 +2051,37 @@
         <script>
         const $id = id => document.getElementById(id); const $qAll = sel => document.querySelectorAll(sel);
         
+        // APEX FIX: Sistema Global de Saneamiento y Restricción de Entradas (Fricción Cero)
+        document.addEventListener('input', function(e) {
+            const t = e.target;
+            if (!t.tagName || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) return;
+
+            // 1. Campos Numéricos Estrictos (PINs, Días, Cortes)
+            if (t.inputMode === 'numeric' || (t.type === 'number' && (t.id.includes('cutoff') || t.id.includes('payday') || t.id.includes('count')))) {
+                t.value = t.value.replace(/[^0-9]/g, '');
+            }
+            
+            // 2. Porcentajes y Tasas (Permiten números y un único punto decimal)
+            else if (t.type === 'number') {
+                t.value = t.value.replace(/[^0-9.]/g, '');
+                if((t.value.match(/\./g) || []).length > 1) t.value = t.value.replace(/\.$/, '');
+            }
+
+            // 3. Nombres (Solo Texto, Números, Espacios y Emojis. Cero caracteres especiales)
+            const nameFields = ['login-new-name', 'edit-user-name', 'fa-name', 'fl-name', 'fp-name', 'f-proj-name', 'f-phase-name', 'ftk-title', 'ftk-assigned-to', 'new-task-vault-name', 'g-name', 'f-pse-name', 'f-pse-ref-name', 'f-cat-parent', 'f-cat-sub', 'manage-cat-parent', 'manage-cat-sub'];
+            if (nameFields.includes(t.id)) {
+                // Regex con flag 'u' para soportar rangos Unicode avanzados (Emojis)
+                t.value = t.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ0-9\s\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+            }
+
+            // 4. Notas y Descripciones (Texto Seguro contra Inyección de Código / XSS)
+            const safeFields = ['f-note', 'ftk-desc', 'f-pse-ref', 'set-backup-folder', 'del-user-keyword', 'reset-keyword', 'ui-prompt-input'];
+            if (safeFields.includes(t.id) || t.tagName === 'TEXTAREA') {
+                // Permite puntuación normal pero prohíbe caracteres de código (< > ' " ; { } [ ] \ | ^ ~)
+                t.value = t.value.replace(/[<>'"`;|\\\{\}\[\]^~]/g, '');
+            }
+        });
+
         // APEX FIX: Comportamiento Nativo Estricto (Bloqueo de Copiar/Pegar/Click Derecho fuera de inputs)
         document.addEventListener('contextmenu', e => {
             if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) e.preventDefault();
