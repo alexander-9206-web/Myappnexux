@@ -182,8 +182,11 @@
                             <div class="flex items-center gap-2 mb-1">
                                 <p id="wealth-title" class="text-[9px] md:text-xs font-black text-white/50 uppercase tracking-widest">Patrimonio Global Unificado</p>
                             </div>
-                            <h2 id="net-worth" class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter">$0</h2>
-                            <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1">Convertido a <span id="base-curr-label" class="text-white">COP</span></p>
+                            <!-- APEX FIX: Contenedor Multidivisa Dinámico -->
+                            <div id="net-worth-container" class="flex flex-col gap-1 my-2">
+                                <h2 class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter text-white">$0</h2>
+                            </div>
+                            <p class="text-[8px] md:text-[10px] font-bold text-white/30 uppercase mt-1 border-t border-white/10 pt-2 inline-block">Equivalente Total: <span id="net-worth-total" class="text-white font-black text-[10px] md:text-xs">--</span> <span id="base-curr-label" class="text-white">COP</span></p>
                         </div>
                         <div class="text-right"><button onclick="showScoreModal()" type="button" class="bg-white/10 hover:bg-white/20 transition-colors px-4 py-1.5 rounded-full text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 shadow-sm">Score: <span id="nexus-score" class="text-emerald-400">--</span> <i class="fa-solid fa-circle-info text-[8px] ml-1 opacity-50"></i></button></div>
                     </div>
@@ -3809,15 +3812,47 @@
         function closeNumpad() { const modal = $id('numpad-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); numpadTargetId = null; }, 300); }
 
         function updateDashboard() {
-            let uNW = 0; const bC = state.settings.baseCurrency || 'COP'; let totAssets = 0; let totLiab = 0;
+            const bC = state.settings.baseCurrency || 'COP'; let totAssets = 0; let totLiab = 0;
+            let nwByCurrency = {};
+            
             (state.accounts || []).forEach(a => { 
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
-                let bal = a.type === 'credit' ? -a.balance : a.balance; uNW += convertCurrency(bal, a.currency, bC); if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+                let bal = a.type === 'credit' ? -a.balance : a.balance; 
+                nwByCurrency[a.currency] = (nwByCurrency[a.currency] || 0) + bal;
+                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
-            (state.loans || []).forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
             
-            const netWorthEl = $id('net-worth'); const baseCurrLabel = $id('base-curr-label'); const scoreEl = $id('nexus-score'); const scoreModalVal = $id('score-modal-val');
-            if(netWorthEl) netWorthEl.innerText = fmt(uNW, bC); if(baseCurrLabel) baseCurrLabel.innerText = bC;
+            (state.loans || []).forEach(l => { 
+                totLiab += convertCurrency(l.balance, l.currency, bC); 
+                nwByCurrency[l.currency] = (nwByCurrency[l.currency] || 0) - l.balance;
+            });
+            
+            state.tx.filter(t => t.type === 'afterpay').forEach(t => {
+                const quotas = t.apQuotas || 4; const pending = ((t.original_amount || t.amount) / quotas) * (quotas - (t.apPaid || 0));
+                totLiab += convertCurrency(pending, t.original_currency || t.currency, bC);
+                nwByCurrency[t.original_currency || t.currency] = (nwByCurrency[t.original_currency || t.currency] || 0) - pending;
+            });
+            
+            let uNW = totAssets - totLiab;
+            
+            const nwCont = $id('net-worth-container');
+            if(nwCont) {
+                let html = '';
+                const sortedCur = Object.keys(nwByCurrency).sort();
+                if(sortedCur.length === 0) {
+                     html = `<h2 class="text-4xl md:text-5xl lg:text-6xl font-black tabular-nums tracking-tighter text-white">$0</h2>`;
+                } else {
+                     sortedCur.forEach(c => {
+                         const v = nwByCurrency[c];
+                         const cCls = v >= 0 ? 'text-white' : 'text-red-400';
+                         html += `<h2 class="text-3xl md:text-4xl lg:text-5xl font-black tabular-nums tracking-tighter ${cCls}">${fmt(v, c)} <span class="text-sm md:text-xl opacity-50">${c}</span></h2>`;
+                     });
+                }
+                nwCont.innerHTML = html;
+            }
+
+            const nwTotEl = $id('net-worth-total'); if(nwTotEl) nwTotEl.innerText = fmt(uNW, bC);
+            const baseCurrLabel = $id('base-curr-label'); if(baseCurrLabel) baseCurrLabel.innerText = bC;
             
             let scT = bC === 'COP' ? 1000000 : 250; let dynamicScore = 550 + (totAssets / scT) * 15 - (totLiab / scT) * 20;
             if (totAssets > 0 && totLiab === 0) dynamicScore += 50; if (totLiab > totAssets * 1.5) dynamicScore -= 100;
