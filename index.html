@@ -10273,6 +10273,16 @@
             const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
             const fileName = `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
             const jsonStr = JSON.stringify(state, null, 2);
+            
+            // APEX FIX: Soporte Nativo iOS (Swift) para forzar la apertura de la app "Archivos" y elegir carpeta
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.exportFileHandler) {
+                window.webkit.messageHandlers.exportFileHandler.postMessage({
+                    filename: fileName,
+                    content: jsonStr
+                });
+                return;
+            }
+
             const blob = new Blob([jsonStr], { type: "application/json" });
 
             // Intento 1: API Nativa de Guardar (Soporte moderno Desktop - Fricción Cero)
@@ -10280,16 +10290,16 @@
                 try {
                     const handle = await window.showSaveFilePicker({
                         suggestedName: fileName,
-                        types: [{ description: 'JSON File', accept: {'application/json': ['.json']} }],
+                        types: [{ description: 'Archivo JSON', accept: {'application/json': ['.json']} }],
                     });
                     const writable = await handle.createWritable();
                     await writable.write(blob);
                     await writable.close();
-                    alert("✅ Copia de seguridad guardada exitosamente.");
+                    alert("✅ Copia de seguridad guardada exitosamente en la carpeta seleccionada.");
                     return;
                 } catch (e) {
                     if (e.name !== 'AbortError') console.warn("Error API de archivos:", e);
-                    else return; // El usuario canceló el diálogo
+                    return; // Salir silenciosamente si el usuario cancela el diálogo
                 }
             }
 
@@ -10300,17 +10310,16 @@
                     await navigator.share({
                         files: [file],
                         title: fileName,
-                        text: 'Copia de Seguridad - NEXUS AR FINANCE'
+                        text: 'Copia de Seguridad SSoT - NEXUS AR FINANCE'
                     });
-                    console.log("JSON gestionado por la interfaz nativa (Share Sheet).");
                     return;
                 } catch(e) {
                     if (e.name !== 'AbortError') console.warn("Error Share Sheet:", e);
-                    else return;
                 }
             }
 
             // Fallback (Descarga Directa tradicional)
+            // Nota: Para que el navegador pida carpeta, el usuario debe tener activa la opción "Preguntar dónde guardar" en sus ajustes.
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
             const dlNode = document.createElement('a');
             dlNode.setAttribute("href", dataStr);
@@ -10318,7 +10327,8 @@
             document.body.appendChild(dlNode);
             dlNode.click();
             dlNode.remove();
-            alert("✅ Archivo JSON descargado en su carpeta predeterminada.");
+            
+            alert("✅ Archivo JSON exportado.\n\nNota: Si el navegador no te permitió elegir una carpeta, es porque tienes activada la 'Descarga Automática'.\nDebes activar la opción 'Preguntar dónde guardar cada archivo' en los ajustes de tu navegador (Safari/Chrome).");
         }
 
         function importBackup(event) {
