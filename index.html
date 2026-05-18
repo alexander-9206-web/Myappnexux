@@ -2513,87 +2513,99 @@
         }
 
         async function fetchCloudState() {
-            if (!fbUser || !window.db || !currentUser) return;
-            try {
-                // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
-                const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                updateCloudBadge(true, true);
-                
-                // APEX FIX: El SSoT ahora enlaza la base de datos a tu CORREO (currentUser), no al ID Anónimo temporal del dispositivo.
-                // Esto te permite abrir la app en cualquier celular/PC y ver tus datos intactos.
-                const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
-                
-                if (unsubscribeSnapshot) unsubscribeSnapshot();
-                
-                // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
-                unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
-                    let hasChanges = false;
-                    let incomingTxByYear = {};
+            if (!fbUser || !window.db || !currentUser) return Promise.resolve();
+            return new Promise(async (resolve) => {
+                try {
+                    // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
+                    const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    updateCloudBadge(true, true);
                     
-                    snapshot.docChanges().forEach((change) => {
-                        if (!change.doc.metadata.hasPendingWrites) {
-                            hasChanges = true;
-                            const data = change.doc.data();
-                            
-                            if (change.doc.id === 'core') {
-                                // Preservamos las transacciones locales y fusionamos el resto de variables
-                                const currentTx = state.tx || [];
-                                state = { ...state, ...data };
-                                state.tx = currentTx;
-                            } else if (change.doc.id.startsWith('tx_')) {
-                                // Capturamos las transacciones agrupadas por año
-                                const year = change.doc.id.split('_')[1];
-                                incomingTxByYear[year] = data.tx || [];
+                    // APEX FIX: El SSoT ahora enlaza la base de datos a tu CORREO (currentUser), no al ID Anónimo temporal del dispositivo.
+                    // Esto te permite abrir la app en cualquier celular/PC y ver tus datos intactos.
+                    const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
+                    
+                    if (unsubscribeSnapshot) unsubscribeSnapshot();
+                    
+                    let isFirstLoad = true; // APEX FIX: Candado atómico para primer render
+                    
+                    // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
+                    unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
+                        let hasChanges = false;
+                        let incomingTxByYear = {};
+                        
+                        snapshot.docChanges().forEach((change) => {
+                            if (!change.doc.metadata.hasPendingWrites) {
+                                hasChanges = true;
+                                const data = change.doc.data();
+                                
+                                if (change.doc.id === 'core') {
+                                    // Preservamos las transacciones locales y fusionamos el resto de variables
+                                    const currentTx = state.tx || [];
+                                    state = { ...state, ...data };
+                                    state.tx = currentTx;
+                                } else if (change.doc.id.startsWith('tx_')) {
+                                    // Capturamos las transacciones agrupadas por año
+                                    const year = change.doc.id.split('_')[1];
+                                    incomingTxByYear[year] = data.tx || [];
+                                }
                             }
+                        });
+
+                        if (hasChanges) {
+                            // Reconstruimos el array de transacciones sin duplicar datos
+                            if (Object.keys(incomingTxByYear).length > 0) {
+                                let newTxArray = [];
+                                const localTxByYear = {};
+                                
+                                (state.tx || []).forEach(t => {
+                                    const y = new Date(t.date).getFullYear() || new Date().getFullYear();
+                                    if(!localTxByYear[y]) localTxByYear[y] = [];
+                                    localTxByYear[y].push(t);
+                                });
+                                
+                                for (const y in incomingTxByYear) {
+                                    localTxByYear[y] = incomingTxByYear[y];
+                                }
+                                
+                                for (const y in localTxByYear) {
+                                    newTxArray = newTxArray.concat(localTxByYear[y]);
+                                }
+                                state.tx = newTxArray;
+                            }
+
+                            if(currentUser) {
+                                NexusIDB.saveState(currentUser, state).then(() => {
+                                    if (sessionUnlocked) { 
+                                        applyThemeCSS();
+                                        updateCurrencyLabels();
+                                        updateModuleVisibility();
+                                        updateDashboard(); 
+                                        if(state.activeTab === 'settings') renderSettingsTab();
+                                        if(state.activeTab) switchTab(state.activeTab); 
+                                    }
+                                    // Liberar promesa solo tras renderizar la data descargada
+                                    if(isFirstLoad) { isFirstLoad = false; resolve(); }
+                                });
+                            }
+                            console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
+                        } else {
+                            if(isFirstLoad) { isFirstLoad = false; resolve(); }
                         }
+                        updateCloudBadge(true, false);
+                    }, (error) => {
+                        console.error("[APEX SYS] Error de Snapshot Firestore", error);
+                        updateCloudBadge(false);
+                        if(isFirstLoad) resolve();
                     });
 
-                    if (hasChanges) {
-                        // Reconstruimos el array de transacciones sin duplicar datos
-                        if (Object.keys(incomingTxByYear).length > 0) {
-                            let newTxArray = [];
-                            const localTxByYear = {};
-                            
-                            (state.tx || []).forEach(t => {
-                                const y = new Date(t.date).getFullYear() || new Date().getFullYear();
-                                if(!localTxByYear[y]) localTxByYear[y] = [];
-                                localTxByYear[y].push(t);
-                            });
-                            
-                            for (const y in incomingTxByYear) {
-                                localTxByYear[y] = incomingTxByYear[y];
-                            }
-                            
-                            for (const y in localTxByYear) {
-                                newTxArray = newTxArray.concat(localTxByYear[y]);
-                            }
-                            state.tx = newTxArray;
-                        }
+                    attachP2PListener();
+                    attachTaskP2PListener(); 
 
-                        if(currentUser) {
-                            NexusIDB.saveState(currentUser, state).then(() => {
-                                if (sessionUnlocked) { 
-                                    applyThemeCSS();
-                                    updateCurrencyLabels();
-                                    updateModuleVisibility();
-                                    updateDashboard(); 
-                                    if(state.activeTab === 'settings') renderSettingsTab();
-                                    if(state.activeTab) switchTab(state.activeTab); 
-                                }
-                            });
-                        }
-                        console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
-                    }
-                    updateCloudBadge(true, false);
-                }, (error) => {
-                    console.error("[APEX SYS] Error de Snapshot Firestore", error);
-                    updateCloudBadge(false);
-                });
-
-                attachP2PListener();
-                attachTaskP2PListener(); // APEX FIX: Conexión de Tareas Compartidas en Arranque
-
-            } catch(e) { console.error(e); }
+                } catch(e) { 
+                    console.error(e); 
+                    resolve();
+                }
+            });
         }
 
         function triggerCloudSync() {
@@ -3001,21 +3013,27 @@
             
             currentUser = email; sessionUnlocked = true; 
             
-            const loginScreen = $id('login-screen');
-            if(loginScreen) { 
-                loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
-                setTimeout(async () => { 
-                    loginScreen.classList.add('hidden'); 
-                    loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
-                    await bootApp(); 
-                    await initCloud(); // APEX FIX: Garantizar que la base de datos esté montada antes del fetch
-                    fetchCloudState(); 
-                }, 300); 
-            } else {
-                await bootApp();
-                await initCloud(); // APEX FIX: Garantizar que la base de datos esté montada antes del fetch
-                fetchCloudState();
-            }
+            // APEX FIX: Await Atómico. No liberamos la pantalla de carga hasta asegurar que Firebase respondió.
+            return new Promise((resolve) => {
+                const loginScreen = $id('login-screen');
+                if(loginScreen) { 
+                    loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
+                    setTimeout(async () => { 
+                        loginScreen.classList.add('hidden'); 
+                        loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
+                        await bootApp(); 
+                        await initCloud(); 
+                        await fetchCloudState(); 
+                        resolve();
+                    }, 300); 
+                } else {
+                    bootApp().then(async () => {
+                        await initCloud();
+                        await fetchCloudState();
+                        resolve();
+                    });
+                }
+            });
         }
 
         async function handleLoginExisting() {
@@ -3161,26 +3179,44 @@
                 
                 let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
                 if (!profile) {
-                    profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: photoUrl || fbUser.photoURL, lastSeen: Date.now() }; 
+                    profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now() }; 
                 } else {
                     profile.lastSeen = Date.now();
                     profile.isGoogle = true;
-                    if (!profile.avatar && (photoUrl || fbUser.photoURL)) profile.avatar = photoUrl || fbUser.photoURL;
+                    if (!profile.avatar && fbUser.photoURL) profile.avatar = fbUser.photoURL;
                 }
                 localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(profile));
-                
                 userProfile = profile;
                 
+                // APEX FIX: Purga de triggerCloudSync() para evitar WIPEs en dispositivos limpios
                 await processLoginSuccess(userEmail);
-                if (typeof triggerCloudSync === 'function') triggerCloudSync();
                 
             } catch (error) {
                 console.error("[APEX NATIVE AUTH] Error:", error);
-                alert("Error de autenticación: " + error.message);
-                const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
-                if (btn) {
-                    btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
-                    btn.disabled = false;
+                
+                // Fallback Offline-First: Si Firebase falla pero Apple/Google nativo confirmó identidad
+                if (email) {
+                    const userEmail = email;
+                    const userName = name || 'Usuario Nativo';
+                    let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
+                    if (!profile) {
+                        profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: photoUrl, lastSeen: Date.now() }; 
+                    } else {
+                        profile.lastSeen = Date.now();
+                        profile.isGoogle = true;
+                        if (!profile.avatar && photoUrl) profile.avatar = photoUrl;
+                    }
+                    localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(profile));
+                    
+                    userProfile = profile;
+                    await processLoginSuccess(userEmail);
+                } else {
+                    alert("Error de autenticación: " + error.message);
+                    const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
+                    if (btn) {
+                        btn.innerHTML = '<i class="fa-brands fa-google text-red-500 text-lg"></i> Continuar con Google';
+                        btn.disabled = false;
+                    }
                 }
             }
         };
