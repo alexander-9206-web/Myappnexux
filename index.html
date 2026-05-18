@@ -2132,6 +2132,14 @@
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
         let isRootAdminUnlocked = false;
 
+        // APEX FIX: Caché global de disponibilidad biométrica para evitar pérdida de User Gesture y Crashes en iOS
+        let isBiometricsAvailableGlobal = false;
+        if (window.PublicKeyCredential && typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+            window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(avail => {
+                isBiometricsAvailableGlobal = avail;
+            }).catch(err => console.warn(err));
+        }
+
         // APEX FIX: Motor Criptográfico SHA-256 para validación de SuperAdmin (Root)
         const MASTER_ROOT_HASH = '9a1a4bf004724b946f04c6436f56cb1144f8ab4f86d8eb3ecfa8959d57fb4284'; // Hash para el PIN "9999"
         async function hashMasterPIN(pin) {
@@ -2174,17 +2182,26 @@
             }
 
             // Fallback WebAuthn (PWA / Navegador Safari Desktop)
-            if (!window.PublicKeyCredential) {
-                alert("⚠️ Tu dispositivo o navegador actual no soporta biometría nativa.");
-                return;
+            if (!window.PublicKeyCredential) return;
+            
+            // APEX FIX: Uso de la variable cacheada en lugar de await para evitar 
+            // romper la cadena del Gesto del Usuario y colapsar el WebKit.
+            if (!isBiometricsAvailableGlobal) {
+                console.warn("[APEX] FaceID / TouchID no disponible en este dispositivo. Fallback a PIN.");
+                return; 
             }
             
             try {
-                // Configuración de Identidad Simulada (Para solicitar lectura de rostro/huella sin registro backend)
+                // Configuración de Identidad Simulada (Para solicitar lectura de rostro sin registro backend)
                 const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
                 const userId = new Uint8Array(16); window.crypto.getRandomValues(userId);
                 let rpId = window.location.hostname;
-                if (!rpId || rpId === '') rpId = 'localhost'; // Prevención para Entornos Iframe o Sandbox
+                
+                // Prevención de cuelgues en dominios locales o no seguros
+                if (!rpId || rpId === '' || rpId === '127.0.0.1' || rpId === 'localhost') {
+                    console.warn("[APEX] Entorno de desarrollo local detectado. Biometría Web deshabilitada.");
+                    return;
+                }
                 
                 const credential = await navigator.credentials.create({
                     publicKey: {
@@ -2193,20 +2210,15 @@
                         user: { id: userId, name: "root_admin", displayName: "NEXUS Root Admin" },
                         pubKeyCredParams: [ { type: "public-key", alg: -7 }, { type: "public-key", alg: -257 } ],
                         authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
-                        timeout: 60000
+                        timeout: 15000 
                     }
                 });
 
                 if (credential) {
-                    successCallback(); // Éxito en la validación local PWA
+                    successCallback(); 
                 }
             } catch (err) {
                 console.warn("[APEX Security] Biometría cancelada o denegada: ", err);
-                if (err.name === 'SecurityError') {
-                    alert("⚠️ Entorno Web bloqueado. La biometría exige ejecución fuera de iframes o dominios seguros. Usa tu PIN.");
-                } else if (err.name !== 'NotAllowedError') {
-                    alert("⚠️ Acción biométrica cancelada. Usa tu PIN manual.");
-                }
             }
         }
 
@@ -3112,18 +3124,21 @@
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
             
-            // APEX FIX: Auto-disparo de FaceID/TouchID si el dispositivo lo soporta o ya fue configurado
-            if (profile && (profile.useBiometrics || window.PublicKeyCredential || (window.webkit && window.webkit.messageHandlers))) {
-                triggerBiometricAuth(() => {
-                    if (!profile.useBiometrics) {
-                        profile.useBiometrics = true;
-                        localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-                    }
-                    handleLoginExisting(true); 
-                }, 'Autenticación automática de Nexus');
-            } else {
-                pinInput.focus();
-            }
+            // APEX FIX: Micro-Retraso (100ms) para permitir que el DOM renderice la nueva pestaña
+            // ANTES de lanzar la biometría. Esto evita el Crash total de la PWA en iOS.
+            setTimeout(() => {
+                if (profile && (profile.useBiometrics || isBiometricsAvailableGlobal || (window.webkit && window.webkit.messageHandlers))) {
+                    triggerBiometricAuth(() => {
+                        if (!profile.useBiometrics) {
+                            profile.useBiometrics = true;
+                            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
+                        }
+                        handleLoginExisting(true); 
+                    }, 'Autenticación automática de Nexus');
+                } else {
+                    pinInput.focus();
+                }
+            }, 100);
 
             pinInput.onkeypress = (e) => { if(e.key === 'Enter') handleLoginExisting(); };
         }
