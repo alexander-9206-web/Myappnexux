@@ -2213,21 +2213,26 @@
             if (sharedAccs.length === 0) return;
 
             import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
-                sharedAccs.forEach(localAcc => {
-                    // Evitar duplicar listeners para la misma cuenta
-                    if (window.sharedUnsubscribers[localAcc.remoteId]) return;
+                sharedAccs.forEach(localAccRef => {
+                    const rId = localAccRef.remoteId;
+                    const aId = localAccRef.id;
+                    if (window.sharedUnsubscribers[rId]) return;
 
-                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', localAcc.remoteId);
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', rId);
                     
-                    window.sharedUnsubscribers[localAcc.remoteId] = onSnapshot(docRef, (docSnap) => {
+                    window.sharedUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
                         if (!docSnap.exists()) return;
+                        
+                        // APEX FIX: Obtener referencia VIVA del estado global para evitar mutar objetos fantasma tras recargas
+                        const currentAcc = state.accounts.find(a => a.id === aId);
+                        if (!currentAcc) return; 
                         
                         const data = docSnap.data();
                         let hasSharedChanges = false;
 
-                        // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras (Race Conditions).
-                        if (!localAcc.syncedOnce && data.balance !== undefined) {
-                            localAcc.balance = data.balance;
+                        // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras.
+                        if (!currentAcc.syncedOnce && data.balance !== undefined) {
+                            currentAcc.balance = data.balance;
                             hasSharedChanges = true;
                         }
 
@@ -2241,15 +2246,15 @@
                                     hasSharedChanges = true;
                                     
                                     // Reversión contable local (solo si ya estábamos sincronizados)
-                                    if (localAcc.syncedOnce) {
+                                    if (currentAcc.syncedOnce) {
                                         if (exTx.type === 'transfer') {
                                             const oOrig = state.accounts.find(a => a.id === exTx.accId);
                                             const oDest = state.accounts.find(a => a.id === exTx.toAccId);
-                                            if(oOrig && oOrig.id === localAcc.id) { if(oOrig.type === 'credit') oOrig.balance -= exTx.amount; else oOrig.balance += exTx.amount; }
-                                            if(oDest && oDest.id === localAcc.id) { if(oDest.type === 'credit') oDest.balance += exTx.amount; else oDest.balance -= exTx.amount; }
-                                        } else if (exTx.accId === localAcc.id && exTx.type !== 'afterpay') {
-                                            if (exTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance += exTx.amount; else localAcc.balance -= exTx.amount; }
-                                            if (exTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance -= exTx.amount; else localAcc.balance += exTx.amount; }
+                                            if(oOrig && oOrig.id === currentAcc.id) { if(oOrig.type === 'credit') oOrig.balance -= exTx.amount; else oOrig.balance += exTx.amount; }
+                                            if(oDest && oDest.id === currentAcc.id) { if(oDest.type === 'credit') oDest.balance += exTx.amount; else oDest.balance -= exTx.amount; }
+                                        } else if (exTx.accId === currentAcc.id && exTx.type !== 'afterpay') {
+                                            if (exTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance += exTx.amount; else currentAcc.balance -= exTx.amount; }
+                                            if (exTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance -= exTx.amount; else currentAcc.balance += exTx.amount; }
                                         }
                                     }
                                 }
@@ -2257,15 +2262,12 @@
                             });
                         }
                         
-                        // APEX FIX: Inyectar o actualizar transacciones del socio y recalcular balance inteligentemente
-                        // APEX FIX: Soporte de Sincronización Bidireccional (Mapas vs Arrays)
                         let incomingTxs = [];
                         if (data.txs && Array.isArray(data.txs)) incomingTxs = incomingTxs.concat(data.txs);
                         if (data.txsMap) incomingTxs = incomingTxs.concat(Object.values(data.txsMap));
 
                         if (incomingTxs.length > 0) {
                             incomingTxs.forEach(netTx => {
-                                // Ignoramos la entrada si ya sabemos que fue eliminada
                                 if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
 
                                 const mappedTx = { ...netTx };
@@ -2276,41 +2278,36 @@
 
                                 const idx = state.tx.findIndex(t => t.id === mappedTx.id);
                                 if (idx === -1) {
-                                    // TRANSACCIÓN NUEVA DEL SOCIO
                                     state.tx.push(mappedTx);
                                     hasSharedChanges = true;
                                     
-                                    // Sumar al balance local el delta de la nueva transacción (Event Sourcing)
-                                    if (localAcc.syncedOnce) {
+                                    if (currentAcc.syncedOnce) {
                                         if (mappedTx.type === 'transfer') {
-                                            if (mappedTx.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
-                                            if (mappedTx.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
-                                        } else if (mappedTx.accId === localAcc.id && mappedTx.type !== 'afterpay') {
-                                            if (mappedTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
-                                            if (mappedTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                            if (mappedTx.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
+                                            if (mappedTx.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
+                                        } else if (mappedTx.accId === currentAcc.id && mappedTx.type !== 'afterpay') {
+                                            if (mappedTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
+                                            if (mappedTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
                                         }
                                     }
                                 } else {
-                                    // ACTUALIZAR TRANSACCIÓN (Si el socio editó el valor)
                                     const ex = state.tx[idx];
                                     if (ex.amount !== mappedTx.amount || ex.note !== mappedTx.note || ex.cat !== mappedTx.cat || ex.date !== mappedTx.date || ex.type !== mappedTx.type) {
                                         
-                                        if (localAcc.syncedOnce) {
-                                            // Deshacer el viejo
+                                        if (currentAcc.syncedOnce) {
                                             if (ex.type === 'transfer') {
-                                                if (ex.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= ex.amount; else localAcc.balance += ex.amount; }
-                                                if (ex.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += ex.amount; else localAcc.balance -= ex.amount; }
-                                            } else if (ex.accId === localAcc.id && ex.type !== 'afterpay') {
-                                                if (ex.type === 'income') { if(localAcc.type === 'credit') localAcc.balance += ex.amount; else localAcc.balance -= ex.amount; }
-                                                if (ex.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance -= ex.amount; else localAcc.balance += ex.amount; }
+                                                if (ex.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= ex.amount; else currentAcc.balance += ex.amount; }
+                                                if (ex.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += ex.amount; else currentAcc.balance -= ex.amount; }
+                                            } else if (ex.accId === currentAcc.id && ex.type !== 'afterpay') {
+                                                if (ex.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance += ex.amount; else currentAcc.balance -= ex.amount; }
+                                                if (ex.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance -= ex.amount; else currentAcc.balance += ex.amount; }
                                             }
-                                            // Aplicar el nuevo
                                             if (mappedTx.type === 'transfer') {
-                                                if (mappedTx.accId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
-                                                if (mappedTx.toAccId === localAcc.id) { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
-                                            } else if (mappedTx.accId === localAcc.id && mappedTx.type !== 'afterpay') {
-                                                if (mappedTx.type === 'income') { if(localAcc.type === 'credit') localAcc.balance -= mappedTx.amount; else localAcc.balance += mappedTx.amount; }
-                                                if (mappedTx.type === 'expense') { if(localAcc.type === 'credit') localAcc.balance += mappedTx.amount; else localAcc.balance -= mappedTx.amount; }
+                                                if (mappedTx.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
+                                                if (mappedTx.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
+                                            } else if (mappedTx.accId === currentAcc.id && mappedTx.type !== 'afterpay') {
+                                                if (mappedTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
+                                                if (mappedTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
                                             }
                                         }
                                         state.tx[idx] = mappedTx;
@@ -2320,14 +2317,17 @@
                             });
                         }
 
-                        // Candado de seguridad: Ya sincronizamos el historial de base, ahora podemos subir cambios sin riesgo de WIPE
-                        localAcc.syncedOnce = true;
+                        if (!currentAcc.syncedOnce) {
+                            currentAcc.syncedOnce = true;
+                            hasSharedChanges = true;
+                        }
 
                         if (hasSharedChanges) {
-                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); // Dedup final protector
-                            if(currentUser) NexusIDB.saveState(currentUser, state);
+                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); 
                             
-                            // APEX OPTIMIZATION: Batching (Debounce) de Renders para Fricción Cero en UI/CPU
+                            // APEX FIX: Usar saveState() para que el SSoT Personal herede la información P2P permanentemente
+                            saveState();
+                            
                             if (sessionUnlocked) { 
                                 clearTimeout(p2pRenderTimeout);
                                 p2pRenderTimeout = setTimeout(() => {
@@ -2360,12 +2360,18 @@
             if (sharedTaskVaults.length === 0) return;
 
             import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
-                sharedTaskVaults.forEach(vault => {
-                    if (window.sharedTaskUnsubscribers[vault.remoteId]) return;
-                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
+                sharedTaskVaults.forEach(vaultRef => {
+                    const rId = vaultRef.remoteId;
+                    if (window.sharedTaskUnsubscribers[rId]) return;
+                    
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', rId);
 
-                    window.sharedTaskUnsubscribers[vault.remoteId] = onSnapshot(docRef, (docSnap) => {
+                    window.sharedTaskUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
                         if (!docSnap.exists()) return;
+                        
+                        const currentVault = state.taskVaults.find(v => v.remoteId === rId);
+                        if (!currentVault) return;
+
                         const data = docSnap.data();
                         let hasChanges = false;
 
@@ -2381,7 +2387,6 @@
                             });
                         }
 
-                        // APEX FIX: Soporte Bidireccional para Tareas Compartidas
                         let incomingTasks = [];
                         if (data.tasks && Array.isArray(data.tasks)) incomingTasks = incomingTasks.concat(data.tasks);
                         if (data.tasksMap) incomingTasks = incomingTasks.concat(Object.values(data.tasksMap));
@@ -2389,7 +2394,7 @@
                         if (incomingTasks.length > 0) {
                             incomingTasks.forEach(netTask => {
                                 if (state.deletedSharedTasks && state.deletedSharedTasks.includes(netTask.id)) return;
-                                const mappedTask = { ...netTask, vaultId: vault.remoteId }; 
+                                const mappedTask = { ...netTask, vaultId: rId }; 
                                 const idx = state.tasks.findIndex(t => t.id === mappedTask.id);
 
                                 if (idx === -1) {
@@ -2404,18 +2409,24 @@
                                 }
                             });
                         }
-                            if (hasChanges) {
-                                state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
-                                if(currentUser) NexusIDB.saveState(currentUser, state);
-                                if (sessionUnlocked) {
-                                    if(state.activeTab === 'tasks') renderTasksTab();
-                                    updateDashboard();
-                                }
+                        
+                        if (!currentVault.syncedOnce) {
+                            currentVault.syncedOnce = true;
+                            hasChanges = true;
+                        }
+
+                        if (hasChanges) {
+                            state.tasks = state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id));
+                            saveState(); // APEX FIX
+                            if (sessionUnlocked) {
+                                if(state.activeTab === 'tasks') renderTasksTab();
+                                updateDashboard();
                             }
-                        });
+                        }
                     });
                 });
-            }
+            });
+        }
 
         async function initCloud() {
             if (window.db) {
@@ -10173,7 +10184,7 @@
             if(!name) return alert("Ingresa un nombre para la bóveda de tareas.");
             if(!state.taskVaults) state.taskVaults = [];
             const remoteId = 'tkv_' + Date.now();
-            state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser });
+            state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
             saveState();
             $id('new-task-vault-name').value = '';
             renderTaskVaultsList();
@@ -10189,7 +10200,7 @@
                 const data = JSON.parse(atob(token.substring(4)));
                 if(!state.taskVaults) state.taskVaults = [];
                 if(state.taskVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
-                state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner });
+                state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('task-vault-token').value = '';
                 renderTaskVaultsList();
