@@ -185,24 +185,9 @@
                 <button onclick="showScoreModal()" type="button" class="theme-card border shadow-sm transition-colors px-3 py-1.5 md:px-4 md:py-2 rounded-full text-[9px] md:text-[10px] font-black uppercase italic tracking-widest flex items-center gap-1 active:scale-95">Score: <span id="nexus-score" class="text-emerald-500">--</span> <i class="fa-solid fa-circle-info text-[8px] ml-1 opacity-50"></i></button>
             </div>
 
-            <!-- APEX FIX: Carrusel Multidivisa en Cuadros Negros Angostos -->
-            <div id="net-worth-container" class="flex gap-3 md:gap-4 overflow-x-auto snap-x snap-mandatory hide-scrollbar pb-4 -mx-4 px-4 sm:mx-0 sm:px-0">
-                <!-- Se inyectan las wealth-cards negras aquí -->
-            </div>
-
-            <!-- APEX FIX: Flujo del Periodo (Tarjeta blanca/tema separada) -->
-            <div class="theme-card p-5 md:p-8 rounded-[2rem] border shadow-sm relative overflow-hidden mb-6">
-                <i class="fa-solid fa-money-bill-transfer absolute right-[-10px] bottom-[-10px] opacity-[0.03] text-7xl md:text-9xl pointer-events-none"></i>
-                <div class="relative z-10">
-                    <div class="flex justify-between items-center mb-4 md:mb-6">
-                        <p class="text-[9px] font-black theme-text opacity-50 uppercase tracking-widest">Flujo del Periodo</p>
-                        <select id="dash-alt-currency" onchange="updateDashboard()" class="text-[9px] md:text-[10px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg outline-none cursor-pointer border border-slate-200 shadow-sm"><option value="USD">USD</option><option value="COP">COP</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4 md:gap-8">
-                        <div><p class="text-[9px] md:text-[10px] font-black text-slate-400 uppercase mb-1 border-l-2 border-emerald-500 pl-2">Ingresos Vista</p><p id="total-inc" class="text-xl md:text-3xl font-black theme-val-inc truncate">+$0</p><p id="total-inc-alt" class="text-xs md:text-sm font-bold text-slate-400 mt-1 truncate">+$0</p></div>
-                        <div><p class="text-[9px] md:text-[10px] font-black text-slate-400 uppercase mb-1 border-l-2 border-red-500 pl-2">Gastos Vista</p><p id="total-exp" class="text-xl md:text-3xl font-black theme-val-exp truncate">-$0</p><p id="total-exp-alt" class="text-xs md:text-sm font-bold text-slate-400 mt-1 truncate">-$0</p></div>
-                    </div>
-                </div>
+            <!-- APEX FIX: Tarjetas Verticales Multidivisa (Patrimonio + Flujo Integrado) -->
+            <div id="net-worth-container" class="flex flex-col items-center gap-4 w-full mb-6">
+                <!-- Se inyectan las wealth-cards negras aquí dinámicamente -->
             </div>
 
             <div id="view-day" class="space-y-8">
@@ -3848,9 +3833,12 @@
             if(nwCont) {
                 let html = '';
                 const sortedCur = Object.keys(nwByCurrency).sort((a,b) => b.localeCompare(a));
+                const ctxLabel = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
+                const origActiveCurr = state.activeCurrency;
+
                 if(sortedCur.length === 0) {
                      html = `
-                     <div class="wealth-card shrink-0 w-[82vw] sm:w-[320px] snap-center p-6 flex flex-col justify-center min-h-[140px] shadow-xl border border-white/10">
+                     <div class="wealth-card w-full max-w-[320px] p-6 flex flex-col justify-center min-h-[140px] shadow-xl border border-white/10 mx-auto rounded-[2rem]">
                         <p class="text-[10px] font-black text-white/50 uppercase tracking-widest mb-2">Bóveda Vacía</p>
                         <h2 class="text-4xl font-black tabular-nums tracking-tighter text-white">$0</h2>
                      </div>`;
@@ -3858,21 +3846,40 @@
                      sortedCur.forEach((c) => {
                          const v = nwByCurrency[c];
                          const cCls = v >= 0 ? 'text-white' : 'text-red-400';
+                         
+                         // APEX FIX: Calcular flujo de ingresos/gastos específico para esta divisa
+                         state.activeCurrency = c;
+                         const aTxCur = getEnrichedTx();
+                         const cTxCur = getContextTx(aTxCur);
+                         const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                         const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
+
                          html += `
-                         <div class="wealth-card shrink-0 w-[82vw] sm:w-[320px] snap-center p-6 flex flex-col justify-between min-h-[140px] shadow-xl relative overflow-hidden group border border-white/10">
+                         <div class="wealth-card w-full max-w-[320px] p-5 md:p-6 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 mx-auto rounded-[2rem]">
                             <div class="relative z-10">
                                 <div class="flex items-center justify-between mb-2">
-                                    <p class="text-[9px] font-black text-white/50 uppercase tracking-widest">Fondo Total</p>
+                                    <p class="text-[9px] font-black text-white/50 uppercase tracking-widest">Patrimonio Global</p>
                                     <span class="bg-white/10 px-2 py-0.5 rounded text-[10px] font-black text-white shadow-sm">${c}</span>
                                 </div>
-                                <div class="mt-2 w-full truncate">
+                                <div class="mt-1 w-full truncate mb-4">
                                     <h2 class="text-3xl sm:text-4xl font-black tabular-nums tracking-tighter ${cCls}">${fmt(v, c)}</h2>
                                 </div>
+                                <div class="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+                                    <div>
+                                        <p class="text-[7px] font-black text-white/40 uppercase mb-0.5 tracking-widest">Ingresos (${ctxLabel})</p>
+                                        <p class="text-[11px] font-black text-emerald-400 tabular-nums truncate">+${fmt(curInc, c)}</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-[7px] font-black text-white/40 uppercase mb-0.5 tracking-widest">Gastos (${ctxLabel})</p>
+                                        <p class="text-[11px] font-black text-red-400 tabular-nums truncate">-${fmt(curExp, c)}</p>
+                                    </div>
+                                </div>
                             </div>
-                            <i class="fa-solid fa-coins absolute right-[-15px] bottom-[-15px] opacity-[0.07] text-7xl group-hover:scale-110 transition-transform pointer-events-none"></i>
+                            <i class="fa-solid fa-money-bill-transfer absolute right-[-15px] bottom-[-15px] opacity-[0.05] text-7xl group-hover:scale-110 transition-transform pointer-events-none"></i>
                          </div>`;
                      });
                 }
+                state.activeCurrency = origActiveCurr; // Restaurar divisa global
                 nwCont.innerHTML = html;
             }
 
@@ -3900,32 +3907,7 @@
             
             const aTx = getEnrichedTx(); const cTx = getContextTx(aTx);
             
-            const totIncEl = $id('total-inc'); const totExpEl = $id('total-exp');
-            const totIncAltEl = $id('total-inc-alt'); const totExpAltEl = $id('total-exp-alt');
-            
-            const dashAltCurr = $id('dash-alt-currency') ? $id('dash-alt-currency').value : 'USD';
-            const dashMainCurr = state.activeCurrency === 'GLOBAL' ? bC : state.activeCurrency;
-
-            const originalActiveCurr = state.activeCurrency;
-            
-            // Filtratge estricte divisa principal
-            state.activeCurrency = dashMainCurr;
-            const aTxMain = getEnrichedTx(); const cTxMain = getContextTx(aTxMain);
-            const cI = cTxMain.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-            const cE = cTxMain.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
-
-            // Filtratge estricte divisa alternativa
-            state.activeCurrency = dashAltCurr;
-            const aTxAlt = getEnrichedTx(); const cTxAlt = getContextTx(aTxAlt);
-            const cI_alt = cTxAlt.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-            const cE_alt = cTxAlt.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
-            
-            state.activeCurrency = originalActiveCurr;
-
-            if(totIncEl) totIncEl.innerText = "+" + fmt(cI, dashMainCurr); 
-            if(totExpEl) totExpEl.innerText = "-" + fmt(cE, dashMainCurr);
-            if(totIncAltEl) totIncAltEl.innerText = "+" + fmt(cI_alt, dashAltCurr);
-            if(totExpAltEl) totExpAltEl.innerText = "-" + fmt(cE_alt, dashAltCurr);
+            // APEX FIX: Lógica redundante purgada debido a la integración del Flujo del Periodo dentro de la tarjeta de Divisa
 
             if(state.context === 'day') { renderAccounts(); render7DaysChart(aTx); renderDashTasks(); } else { renderPeriodChart(cTx); renderPeriodList(cTx); }
         }
