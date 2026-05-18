@@ -653,6 +653,26 @@
                         </div>
                         <label class="text-[10px] font-black text-slate-400 ml-2 block mt-2">Día Pago Afterpay</label><select id="set-ap-day" class="form-input text-center mt-1" onchange="updateSettings()"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option></select>
                     </div>
+
+                    <!-- APEX FIX: MÓDULO DE INTELIGENCIA ARTIFICIAL -->
+                    <div class="pt-4 border-t border-slate-100 mt-2">
+                        <h4 class="text-[10px] font-black uppercase text-indigo-500 mb-3"><i class="fa-solid fa-microchip mr-1"></i> Motor IA (Google Gemini)</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">API Key Propia (Opcional)</label>
+                                <input type="password" id="set-gemini-key" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900" placeholder="AIzaSy..." onchange="updateSettings()">
+                            </div>
+                            <div>
+                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Modelo Predictivo</label>
+                                <select id="set-gemini-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="updateSettings()">
+                                    <option value="gemini-2.5-flash-preview-09-2025">Gemini 2.5 Flash (Rápido)</option>
+                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (Razonamiento Avanzado)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-[8px] text-slate-500 mt-2 font-bold leading-tight ml-2">Si el auditor falla, puedes ingresar tu propia clave gratuita generada en <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-indigo-500 underline active:opacity-50">Google AI Studio</a>.</p>
+                    </div>
+
                     <div class="pt-4 border-t border-slate-100">
                         <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Auto-Backup Local</h4><p class="text-[8px] text-slate-400">Exportar JSON programado</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
                         <div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-[8px] font-black text-slate-400 ml-2">Hora (HH:MM)</label><input type="time" id="set-backup-time" class="form-input text-xs mt-1" onchange="updateSettings()"></div><div><label class="text-[8px] font-black text-slate-400 ml-2">Sufijo Archivo</label><input type="text" id="set-backup-folder" placeholder="Ej: iCloud" class="form-input text-xs mt-1" onchange="updateSettings()"></div></div>
@@ -9315,7 +9335,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
             const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
             
-            // APEX FIX: Inicializar switches de seguridad
+            // APEX FIX: Inicializar módulos de IA y Seguridad
+            const gkEl = $id('set-gemini-key'); if(gkEl) gkEl.value = state.settings.geminiApiKey || '';
+            const gmEl = $id('set-gemini-model'); if(gmEl) gmEl.value = state.settings.geminiModel || 'gemini-2.5-flash-preview-09-2025';
+
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
             const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
 
@@ -9748,6 +9771,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hdEl = $id('set-hide-decimals'); if(hdEl) state.settings.hideDecimals = hdEl.checked;
             const wvEl = $id('set-wealth-view'); if(wvEl) state.settings.wealthView = wvEl.value;
             
+            // APEX FIX: Guardado de preferencias de Inteligencia Artificial
+            const gkEl = $id('set-gemini-key'); if(gkEl) state.settings.geminiApiKey = gkEl.value.trim();
+            const gmEl = $id('set-gemini-model'); if(gmEl) state.settings.geminiModel = gmEl.value;
+
             const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked;
             const btEl = $id('set-backup-time'); if(btEl) state.settings.backupTime = btEl.value;
             const bfEl = $id('set-backup-folder'); if(bfEl) state.settings.backupFolder = bfEl.value;
@@ -9788,84 +9815,39 @@ ${JSON.stringify(dataToAnalyze)}`;
                 }
             }
 
-            // 2. Extraer de la Nube (Directorio Global)
+            // 2. Cargar de red (SSoT)
             if (window.db) {
                 try {
                     const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'));
                     snap.forEach(doc => {
                         const data = doc.data();
-                        if(usersMap.has(data.email)) {
-                            const existing = usersMap.get(data.email);
-                            existing.isCloud = true;
-                            existing.name = data.name; // Refrescar nombre
-                            existing.pin = data.pin; // Sincronizar PIN
-                            if (data.avatar) existing.avatar = data.avatar; // Sincronizar Avatar
-                        } else {
+                        if (!usersMap.has(data.email) || !usersMap.get(data.email).isCloud) {
                             data.isCloud = true;
                             usersMap.set(data.email, data);
                         }
                     });
-                } catch(e) { console.warn("[APEX] Fallo buscando usuarios en nube", e); }
+                } catch(e) {
+                    console.warn("[APEX] Error sincronizando usuarios SSoT", e);
+                }
             }
 
-            let netHtml = '';
-
-            Array.from(usersMap.values()).forEach(p => {
-                const isCurrent = p.email === currentUser;
-                const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1" title="En Nube"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1" title="Solo Local"></i>';
-                const avatarHtml = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[14px]"></i>`;
-                
-                netHtml += `<div class="flex justify-between items-center p-4 rounded-[1.5rem] border ${isCurrent ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 bg-white'} mb-2 shadow-sm transition-all hover:shadow-md">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-full ${isCurrent && !p.avatar ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'} flex items-center justify-center shrink-0 overflow-hidden border border-slate-200">${avatarHtml}</div>
-                        <div>
-                            <p class="text-xs font-black uppercase text-slate-800">${p.name} ${cloudBadge}</p>
-                            <p class="text-[9px] font-bold text-slate-400 mt-1">ID: ${p.email}</p>
-                        </div>
-                    </div>
-                    <div class="flex flex-col gap-2 items-end">
-                        ${isCurrent ? 
-                        `<div class="flex items-center gap-2">
-                            <span class="text-[8px] font-black bg-blue-100 text-blue-600 px-2 py-1.5 rounded shadow-sm">TU CUENTA</span>
-                            <button onclick="openUserEdit('${p.email}')" class="w-7 h-7 bg-white border border-blue-200 text-blue-600 rounded-full flex items-center justify-center shadow-sm hover:bg-blue-100 transition-colors"><i class="fa-solid fa-pen text-[8px]"></i></button>
-                        </div>` 
-                        : 
-                        `<div class="flex items-center gap-2">
-                            <button onclick="document.getElementById('edit-user-original-email').value='${p.email}'; controlUserVault();" class="text-[9px] font-black bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 px-3 py-1.5 rounded-xl transition-colors active:scale-95 border border-slate-200 shadow-sm"><i class="fa-solid fa-key mr-1"></i> Acceder</button>
-                            <button onclick="openDeleteUserModal('${p.email}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm"><i class="fa-solid fa-trash text-[8px]"></i></button>
-                        </div>`}
-                    </div>
-                </div>`;
-
-                // Cachear en local
-                localStorage.setItem(`nexus_profile_${p.email}`, JSON.stringify(p));
-            });
-            
-            if(netList) netList.innerHTML = netHtml || '<p class="text-[10px] text-center text-slate-400 font-bold">No hay cuentas en la red.</p>';
-        }
-
-        // APEX FIX: Función para buscar cuentas P2P directamente en la vista de cuentas
-        async function scanP2PRadarDirect() {
-            const radarList = $id('direct-p2p-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando en Firebase...</p>';
-            try {
-                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
+            if(netList) {
                 let html = '';
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-wallet text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
+                const sorted = Array.from(usersMap.values()).sort((a,b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+                sorted.forEach(p => {
+                    const cb = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
+                    html += `<div class="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 mb-2 shadow-sm hover:border-indigo-200 transition-all">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 overflow-hidden shrink-0">${p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : '<i class="fa-solid fa-user"></i>'}</div>
+                            <div>
+                                <p class="text-[10px] font-black uppercase text-slate-700">${p.name} ${cb}</p>
+                                <p class="text-[8px] font-bold text-slate-400 mt-0.5">${p.email}</p>
+                            </div>
+                        </div>
+                    </div>`;
                 });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas nuevas en la red.</p>';
-                radarList.innerHTML = html;
-            } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
+                netList.innerHTML = html || '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay bóvedas registradas.</p>';
             }
         }
 
