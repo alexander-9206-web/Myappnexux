@@ -617,7 +617,18 @@
                 <!-- ========================================== -->
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-rose-500 mb-4">Personalización Visual</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <div>
+                            <label class="text-[10px] font-black text-slate-400 ml-2">Vista Dashboard</label>
+                            <select id="set-wealth-view" class="form-input text-xs mt-1 w-full bg-slate-50 font-bold text-slate-700" onchange="updateSettings()">
+                                <option value="all">Multidivisa (Todas)</option>
+                                <option value="unified">Unificado (Global)</option>
+                                <option value="COP">Solo COP</option>
+                                <option value="USD">Solo USD</option>
+                                <option value="EUR">Solo EUR</option>
+                                <option value="AUD">Solo AUD</option>
+                            </select>
+                        </div>
                         <div>
                             <label class="text-[10px] font-black text-slate-400 ml-2">Tema Base</label>
                             <select id="set-theme-preset" class="form-input text-xs mt-1 w-full bg-slate-50 font-bold text-slate-700" onchange="updateSettings()">
@@ -3858,52 +3869,96 @@
                 const ctxLabel = state.context === 'day' ? 'Hoy' : (state.context === 'month' ? 'Este Mes' : 'Este Año');
                 const origActiveCurr = state.activeCurrency;
 
-                if(sortedCur.length === 0) {
-                     html = `
-                     <div class="wealth-card w-full p-5 flex items-center justify-between shadow-xl border border-white/10 rounded-[1.5rem]">
-                        <div>
-                            <p class="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Bóveda Vacía</p>
-                            <h2 class="text-2xl font-black tabular-nums tracking-tighter text-white">$0</h2>
-                        </div>
-                     </div>`;
-                } else {
-                     sortedCur.forEach((c) => {
-                         const v = nwByCurrency[c];
-                         const cCls = v >= 0 ? 'text-white' : 'text-red-400';
-                         
-                         // APEX FIX: Calcular flujo de ingresos/gastos específico para esta divisa
-                         state.activeCurrency = c;
-                         const aTxCur = getEnrichedTx();
-                         const cTxCur = getContextTx(aTxCur);
-                         const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-                         const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
+                // APEX FIX: Leer preferencia de vista de Dashboard
+                const wealthView = (state.settings && state.settings.wealthView) ? state.settings.wealthView : 'all';
 
-                         html += `
-                         <div class="wealth-card w-full p-4 md:p-5 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 rounded-[1.5rem]">
-                            <div class="relative z-10 flex justify-between items-center gap-2">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <span class="bg-white/10 px-2 py-0.5 rounded text-[9px] font-black text-white shadow-sm">${c}</span>
-                                        <p class="text-[8px] font-black text-white/50 uppercase tracking-widest truncate">Patrimonio</p>
-                                    </div>
-                                    <div class="w-full truncate">
-                                        <h2 class="text-2xl sm:text-3xl font-black tabular-nums tracking-tighter ${cCls}">${fmt(v, c)}</h2>
-                                    </div>
+                if (wealthView === 'unified') {
+                     const v = uNW;
+                     const c = bC;
+                     const cCls = v >= 0 ? 'text-white' : 'text-red-400';
+                     
+                     // Calcular flujos globales en moneda base
+                     const aTxCur = getEnrichedTx();
+                     const cTxCur = getContextTx(aTxCur);
+                     const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
+                     const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
+
+                     html = `
+                     <div class="wealth-card w-full p-4 md:p-5 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 rounded-[1.5rem]">
+                        <div class="relative z-10 flex justify-between items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="bg-indigo-500/20 border border-indigo-500/50 px-2 py-0.5 rounded text-[9px] font-black text-indigo-200 shadow-sm">GLOBAL</span>
+                                    <p class="text-[8px] font-black text-white/50 uppercase tracking-widest truncate">Suma Unificada</p>
                                 </div>
-                                <div class="flex flex-col items-end gap-1.5 shrink-0 border-l border-white/10 pl-3">
-                                    <div class="text-right">
-                                        <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Ing. (${ctxLabel})</p>
-                                        <p class="text-[10px] font-black text-emerald-400 tabular-nums">+${fmt(curInc, c)}</p>
-                                    </div>
-                                    <div class="text-right">
-                                        <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Gas. (${ctxLabel})</p>
-                                        <p class="text-[10px] font-black text-red-400 tabular-nums">-${fmt(curExp, c)}</p>
-                                    </div>
+                                <div class="w-full truncate">
+                                    <h2 class="text-2xl sm:text-3xl font-black tabular-nums tracking-tighter ${cCls}">${fmt(v, c)}</h2>
                                 </div>
                             </div>
-                            <i class="fa-solid fa-money-bill-transfer absolute right-[-10px] bottom-[-10px] opacity-[0.05] text-6xl group-hover:scale-110 transition-transform pointer-events-none"></i>
-                         </div>`;
-                     });
+                            <div class="flex flex-col items-end gap-1.5 shrink-0 border-l border-white/10 pl-3">
+                                <div class="text-right">
+                                    <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Ing. (${ctxLabel})</p>
+                                    <p class="text-[10px] font-black text-emerald-400 tabular-nums">+${fmt(curInc, c)}</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Gas. (${ctxLabel})</p>
+                                    <p class="text-[10px] font-black text-red-400 tabular-nums">-${fmt(curExp, c)}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <i class="fa-solid fa-earth-americas absolute right-[-10px] bottom-[-10px] opacity-[0.05] text-6xl group-hover:scale-110 transition-transform pointer-events-none"></i>
+                     </div>`;
+                } else {
+                     let currenciesToRender = sortedCur;
+                     if (wealthView !== 'all') currenciesToRender = [wealthView];
+
+                     if(currenciesToRender.length === 0 || (currenciesToRender.length === 1 && nwByCurrency[currenciesToRender[0]] === undefined && wealthView !== 'all')) {
+                          const displayCur = wealthView !== 'all' ? wealthView : bC;
+                          html = `
+                          <div class="wealth-card w-full p-5 flex items-center justify-between shadow-xl border border-white/10 rounded-[1.5rem]">
+                             <div>
+                                 <p class="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Bóveda Vacía (${displayCur})</p>
+                                 <h2 class="text-2xl font-black tabular-nums tracking-tighter text-white">${fmt(0, displayCur)}</h2>
+                             </div>
+                          </div>`;
+                     } else {
+                          currenciesToRender.forEach((c) => {
+                              const v = nwByCurrency[c] || 0;
+                              const cCls = v >= 0 ? 'text-white' : 'text-red-400';
+                              
+                              state.activeCurrency = c;
+                              const aTxCur = getEnrichedTx();
+                              const cTxCur = getContextTx(aTxCur);
+                              const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                              const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
+
+                              html += `
+                              <div class="wealth-card w-full p-4 md:p-5 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 rounded-[1.5rem]">
+                                 <div class="relative z-10 flex justify-between items-center gap-2">
+                                     <div class="flex-1 min-w-0">
+                                         <div class="flex items-center gap-2 mb-1">
+                                             <span class="bg-white/10 px-2 py-0.5 rounded text-[9px] font-black text-white shadow-sm">${c}</span>
+                                             <p class="text-[8px] font-black text-white/50 uppercase tracking-widest truncate">Patrimonio</p>
+                                         </div>
+                                         <div class="w-full truncate">
+                                             <h2 class="text-2xl sm:text-3xl font-black tabular-nums tracking-tighter ${cCls}">${fmt(v, c)}</h2>
+                                         </div>
+                                     </div>
+                                     <div class="flex flex-col items-end gap-1.5 shrink-0 border-l border-white/10 pl-3">
+                                         <div class="text-right">
+                                             <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Ing. (${ctxLabel})</p>
+                                             <p class="text-[10px] font-black text-emerald-400 tabular-nums">+${fmt(curInc, c)}</p>
+                                         </div>
+                                         <div class="text-right">
+                                             <p class="text-[6px] font-black text-white/40 uppercase tracking-widest mb-0.5">Gas. (${ctxLabel})</p>
+                                             <p class="text-[10px] font-black text-red-400 tabular-nums">-${fmt(curExp, c)}</p>
+                                         </div>
+                                     </div>
+                                 </div>
+                                 <i class="fa-solid fa-money-bill-transfer absolute right-[-10px] bottom-[-10px] opacity-[0.05] text-6xl group-hover:scale-110 transition-transform pointer-events-none"></i>
+                              </div>`;
+                          });
+                     }
                 }
                 state.activeCurrency = origActiveCurr; // Restaurar divisa global
                 nwCont.innerHTML = html;
@@ -8945,6 +9000,7 @@
             const fsEl = $id('set-font-style'); if(fsEl) fsEl.value = state.settings.fontStyle || 'system';
             const tsEl = $id('set-text-size'); if(tsEl) tsEl.value = state.settings.textSize || '16px';
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
+            const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
             
             const abEl = $id('set-auto-backup'); if(abEl) abEl.checked = !!state.settings.autoBackup;
             const btEl = $id('set-backup-time'); if(btEl) btEl.value = state.settings.backupTime || '23:59';
@@ -9337,6 +9393,7 @@
             const fsEl = $id('set-font-style'); if(fsEl) state.settings.fontStyle = fsEl.value;
             const tsEl = $id('set-text-size'); if(tsEl) state.settings.textSize = tsEl.value;
             const hdEl = $id('set-hide-decimals'); if(hdEl) state.settings.hideDecimals = hdEl.checked;
+            const wvEl = $id('set-wealth-view'); if(wvEl) state.settings.wealthView = wvEl.value;
             
             const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked;
             const btEl = $id('set-backup-time'); if(btEl) state.settings.backupTime = btEl.value;
@@ -9998,16 +10055,57 @@
         }
 
         // --- BACKUP Y RESTAURACIÓN ---
-        function exportBackup() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
-            const dlNode = document.createElement('a');
+        async function exportBackup() {
             const d = new Date();
             const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
+            const fileName = `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+            const jsonStr = JSON.stringify(state, null, 2);
+            const blob = new Blob([jsonStr], { type: "application/json" });
+
+            // Intento 1: API Nativa de Guardar (Soporte moderno Desktop - Fricción Cero)
+            if (window.showSaveFilePicker) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: fileName,
+                        types: [{ description: 'JSON File', accept: {'application/json': ['.json']} }],
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                    alert("✅ Copia de seguridad guardada exitosamente.");
+                    return;
+                } catch (e) {
+                    if (e.name !== 'AbortError') console.warn("Error API de archivos:", e);
+                    else return; // El usuario canceló el diálogo
+                }
+            }
+
+            // Intento 2: Share Sheet Nativo (Soporte iOS/Android -> Permite "Guardar en Archivos")
+            const file = new File([blob], fileName, { type: "application/json" });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: fileName,
+                        text: 'Copia de Seguridad - NEXUS AR FINANCE'
+                    });
+                    console.log("JSON gestionado por la interfaz nativa (Share Sheet).");
+                    return;
+                } catch(e) {
+                    if (e.name !== 'AbortError') console.warn("Error Share Sheet:", e);
+                    else return;
+                }
+            }
+
+            // Fallback (Descarga Directa tradicional)
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
+            const dlNode = document.createElement('a');
             dlNode.setAttribute("href", dataStr);
-            dlNode.setAttribute("download", `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`);
+            dlNode.setAttribute("download", fileName);
             document.body.appendChild(dlNode);
             dlNode.click();
             dlNode.remove();
+            alert("✅ Archivo JSON descargado en su carpeta predeterminada.");
         }
 
         function importBackup(event) {
