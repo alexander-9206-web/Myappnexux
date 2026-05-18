@@ -1388,6 +1388,7 @@
 
                 <div class="flex flex-col gap-2 mt-4">
                     <button type="submit" class="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-sm shadow-lg active:scale-95 transition-transform">Guardar Cuenta</button>
+                    <button type="button" id="btn-reconcile-account" onclick="reconcileAccountToZero()" class="w-full bg-amber-50 text-amber-600 p-4 rounded-2xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform hidden"><i class="fa-solid fa-scale-balanced mr-1"></i> Conciliar a $0</button>
                     <button type="button" id="btn-delete-account" onclick="deleteAccount()" class="w-full bg-red-50 text-red-600 p-4 rounded-2xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform hidden">Eliminar Cuenta</button>
                 </div>
             </form>
@@ -1920,6 +1921,7 @@
                 else if(action === 'cc_purchase_overdraft') saveCCPurchase(null, true);
                 else if(action === 'delete_tx') deleteTx(null, payload, true);
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
+                else if(action === 'reconcile_zero') executeReconcileZero(payload);
             }, 300);
         }
 
@@ -4382,6 +4384,7 @@
             const vPlat = $id('fa-virtual-platform'); if(vPlat) vPlat.value = 'latitud'; 
             toggleCreditFields(); 
             const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.add('hidden'); 
+            const recBtn = $id('btn-reconcile-account'); if(recBtn) recBtn.classList.add('hidden');
         }
 
         function editAccount(id) { 
@@ -4425,6 +4428,74 @@
                 delBtn.innerText = acc.isShared ? "Desvincular Bóveda P2P" : "Eliminar Cuenta";
                 delBtn.classList.remove('hidden'); 
             } 
+            const recBtn = $id('btn-reconcile-account'); 
+            if(recBtn) {
+                recBtn.classList.remove('hidden');
+            }
+        }
+
+        function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+
+        function reconcileAccountToZero() {
+            const id = $id('fa-id').value;
+            if(!id) return;
+            const acc = state.accounts.find(a => a.id === id);
+            if(!acc) return;
+            
+            if(acc.balance === 0) {
+                alert("La cuenta ya se encuentra en $0.");
+                return;
+            }
+            
+            triggerUIConfirm(`¿Deseas conciliar la cuenta a $0? Se creará una transacción de ajuste automático por ${fmt(Math.abs(acc.balance), acc.currency)}.`, 'reconcile_zero', id);
+        }
+
+        function executeReconcileZero(id) {
+            const acc = state.accounts.find(a => a.id === id);
+            if(!acc || acc.balance === 0) return;
+
+            const amount = acc.balance;
+            let txType = '';
+            
+            if (acc.type === 'credit') {
+                txType = amount > 0 ? 'income' : 'expense';
+            } else {
+                txType = amount > 0 ? 'expense' : 'income';
+            }
+
+            const absAmount = Math.abs(amount);
+            const catName = '🔄 Ajuste Contable';
+
+            if(!state.categories.global) state.categories.global = [];
+            if(!state.categories.global.includes(catName)) {
+                state.categories.global.push(catName);
+            }
+            
+            const newTx = buildTransactionSchema({
+                type: txType,
+                amount: absAmount,
+                cat: catName,
+                accId: acc.id,
+                date: new Date().toISOString(),
+                note: '[Conciliación] Ajuste automático a $0',
+                currency: acc.currency,
+                costType: 'fixed'
+            });
+
+            if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+            
+            state.tx.push(newTx);
+            saveCloudTx(newTx);
+            
+            acc.balance = 0;
+            
+            saveState();
+            updateDashboard();
+            renderAccountsTab();
+            closeAccountModal();
+            if(state.activeTab === 'database') renderDatabase();
+            
+            alert("✅ Cuenta conciliada a $0 exitosamente mediante ajuste automático.");
         }
 
         function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
