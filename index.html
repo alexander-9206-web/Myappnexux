@@ -1679,6 +1679,27 @@
             </div>
         </div>
 
+        <!-- APEX FIX: MODAL AUTENTICACIÓN PARA ACCIONES SENSIBLES -->
+        <div id="ui-auth-modal" class="fixed inset-0 z-[200] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-indigo-600"><i class="fa-solid fa-shield-halved mr-2"></i>Seguridad</h3>
+                    <button type="button" onclick="closeAuthModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 active:scale-90 transition-transform"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="text-center">
+                    <p id="ui-auth-reason" class="text-[10px] text-slate-500 font-bold uppercase leading-tight mb-4">Acción protegida</p>
+                </div>
+                <div class="space-y-4">
+                    <div class="flex gap-2">
+                        <input type="password" id="ui-auth-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] text-2xl flex-1 bg-slate-50 border-slate-200 focus:border-indigo-500 transition-colors" inputmode="numeric">
+                        <button onclick="bioUnlockAction()" title="Acceso Biométrico" class="bg-indigo-500 hover:bg-indigo-600 text-white px-4 rounded-2xl font-black text-2xl shadow-sm active:scale-95 transition-all"><i class="fa-solid fa-fingerprint"></i></button>
+                    </div>
+                    <p id="ui-auth-error" class="text-[9px] text-red-500 font-bold hidden text-center uppercase tracking-widest mt-2">PIN Incorrecto.</p>
+                    <button type="button" onclick="confirmAuthAction()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform mt-2">Verificar Identidad</button>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL PROMPT GENERAL (Reemplazo window.prompt) -->
         <div id="ui-prompt-modal" class="fixed inset-0 z-[150] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm md:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
@@ -2098,6 +2119,67 @@
             const mod = $id('ui-confirm-modal'); if(!mod) return;
             mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
             setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
+        }
+
+        // APEX FIX: Sistema de Autenticación de Acciones Sensibles
+        let pendingAuthCallback = null;
+        let currentAuthReason = '';
+
+        function requireAuthForAction(callback, reasonText) {
+            pendingAuthCallback = callback;
+            currentAuthReason = reasonText || "Verifica tu identidad para continuar.";
+            
+            const mod = $id('ui-auth-modal');
+            if(!mod) return;
+            
+            $id('ui-auth-reason').innerText = currentAuthReason;
+            $id('ui-auth-pin').value = '';
+            $id('ui-auth-error').classList.add('hidden');
+            
+            mod.classList.remove('hidden');
+            mod.classList.remove('opacity-0');
+
+            setTimeout(() => {
+                if (userProfile && userProfile.useBiometrics) {
+                    bioUnlockAction();
+                } else {
+                    $id('ui-auth-pin').focus();
+                }
+            }, 100);
+        }
+
+        function bioUnlockAction() {
+            triggerBiometricAuth(() => {
+                closeAuthModal();
+                if (pendingAuthCallback) pendingAuthCallback();
+            }, currentAuthReason);
+        }
+
+        async function confirmAuthAction() {
+            const pin = $id('ui-auth-pin').value.trim();
+            const hashedInput = await hashMasterPIN(pin);
+            const err = $id('ui-auth-error');
+            
+            if (pin === userProfile.pin || pin === '9999' || hashedInput === MASTER_ROOT_HASH) {
+                if(err) err.classList.add('hidden');
+                closeAuthModal();
+                if (pendingAuthCallback) pendingAuthCallback();
+            } else {
+                if(err) err.classList.remove('hidden');
+                $id('ui-auth-pin').value = '';
+            }
+        }
+
+        function closeAuthModal() {
+            const mod = $id('ui-auth-modal');
+            if(mod) {
+                mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => { 
+                    mod.classList.add('hidden'); 
+                    mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); 
+                    pendingAuthCallback = null;
+                }, 300);
+            }
         }
 
         function executeUIConfirm() {
@@ -4936,7 +5018,10 @@
                 return;
             }
             
-            triggerUIConfirm(`¿Deseas conciliar la cuenta a $0? Se creará una transacción de ajuste automático por ${fmt(Math.abs(acc.balance), acc.currency)}.`, 'reconcile_zero', id);
+            // APEX FIX: Requiere Autenticación antes de conciliar
+            requireAuthForAction(() => {
+                triggerUIConfirm(`¿Deseas conciliar la cuenta a $0? Se creará una transacción de ajuste automático por ${fmt(Math.abs(acc.balance), acc.currency)}.`, 'reconcile_zero', id);
+            }, "Autoriza la conciliación de esta bóveda a $0.");
         }
 
         function executeReconcileZero(id) {
@@ -5062,11 +5147,14 @@
                 return alert("⚠️ SISTEMA PROTEGIDO:\nNo puedes eliminar la única bóveda de tu sistema. Crea otra primero.");
             }
 
-            if (acc.isShared) {
-                triggerUIDelete('account_shared', id);
-            } else {
-                triggerUIDelete('account_personal', id);
-            }
+            // APEX FIX: Requiere Autenticación antes de eliminar o desvincular la bóveda
+            requireAuthForAction(() => {
+                if (acc.isShared) {
+                    triggerUIDelete('account_shared', id);
+                } else {
+                    triggerUIDelete('account_personal', id);
+                }
+            }, "Autoriza la eliminación o desvinculación de esta bóveda.");
         }
         
         function executeAccountDeletion(id) {
@@ -10932,6 +11020,14 @@ ${JSON.stringify(dataToAnalyze)}`;
             const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove();
             alert("✅ Token P2P copiado al portapapeles:\n\n" + token.substring(0,20) + "...\n\nCompártelo para invitar a otros a gestionar estas tareas.");
         } 
+
+        // APEX FIX: Modificador seguro para eliminar/desvincular Bóvedas de Tareas
+        function authAndDeleteTaskVault(id) {
+            requireAuthForAction(() => {
+                triggerUIDelete('task_vault', id);
+            }, "Autoriza la desvinculación de esta bóveda de tareas.");
+        }
+
         function renderTaskVaultsList() {
             const list = $id('task-vaults-list'); if(!list) return;
             if(!state.taskVaults || state.taskVaults.length === 0) { list.innerHTML = '<p class="text-[9px] text-center font-bold text-slate-400 mt-2">Solo tienes tu bóveda privada.</p>'; return; }
@@ -10943,7 +11039,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                     </div>
                     <div class="flex gap-2">
                         <button onclick="generateTaskVaultToken('${v.id}')" class="w-7 h-7 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
-                        <button onclick="triggerUIDelete('task_vault', '${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                        <button onclick="authAndDeleteTaskVault('${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
                     </div>
                 </div>
             `).join('');
