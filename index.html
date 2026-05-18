@@ -1978,10 +1978,22 @@
                 </div>
                 <form onsubmit="savePSELink(event)" class="space-y-4">
                     <input type="hidden" id="f-pse-id">
-                    <div>
-                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre del Servicio</label>
-                        <input type="text" id="f-pse-name" required class="form-input text-sm" placeholder="Ej: Energía (Celsia)">
+                    
+                    <!-- APEX FIX: Selector de Tipo de Enlace Integrado -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="col-span-2 md:col-span-1">
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre del Servicio</label>
+                            <input type="text" id="f-pse-name" required class="form-input text-sm" placeholder="Ej: Energía (Celsia)">
+                        </div>
+                        <div class="col-span-2 md:col-span-1">
+                            <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo de Enlace</label>
+                            <select id="f-pse-type" class="form-input text-sm font-bold bg-white" onchange="togglePSENotifications()">
+                                <option value="service">Servicio / Recibo</option>
+                                <option value="debt">Banco / Deuda (Solo Link)</option>
+                            </select>
+                        </div>
                     </div>
+
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Etiqueta (Ej: Casa)</label>
@@ -2001,8 +2013,8 @@
                         <input type="text" id="f-pse-icon" class="form-input text-sm" placeholder="Ej: fa-bolt">
                     </div>
                     
-                    <!-- APEX FIX: Añadido selector de Hora para notificaciones de pago (Fricción Cero) -->
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-slate-100 pt-4 mt-2">
+                    <!-- APEX FIX: Contenedor de notificaciones con ID para ocultar/mostrar -->
+                    <div id="pse-notification-block" class="grid grid-cols-2 md:grid-cols-4 gap-3 border-t border-slate-100 pt-4 mt-2">
                         <div>
                             <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Frecuencia</label>
                             <select id="f-pse-freq" class="form-input text-sm font-bold bg-slate-50 text-indigo-700">
@@ -2023,6 +2035,11 @@
                             <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Hora Aviso</label>
                             <input type="time" id="f-pse-time" value="09:00" class="form-input text-sm font-bold bg-slate-50 text-indigo-700">
                         </div>
+                    </div>
+
+                    <!-- APEX FIX: Aviso de redirección de notificaciones para Deudas -->
+                    <div id="pse-debt-warning" class="hidden bg-amber-50 p-4 rounded-2xl border border-amber-100 mt-2">
+                        <p class="text-[9px] text-amber-700 font-bold leading-relaxed"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Para bancos y tarjetas, esto funcionará <b>exclusivamente como un acceso directo</b> al portal de pagos.<br><br>Los recordatorios automáticos y la gestión de saldos debes llevarlos en el módulo de <b>Deudas / Pasivos</b>.</p>
                     </div>
 
                     <button type="submit" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Enlace</button>
@@ -7603,582 +7620,21 @@ ${JSON.stringify(dataToAnalyze)}`;
             setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
         }
 
-        function savePSELink(e) {
-            e.preventDefault();
-            const id = $id('f-pse-id').value;
-            const name = $id('f-pse-name').value.trim();
-            const refName = $id('f-pse-ref-name').value.trim();
-            const reference = $id('f-pse-ref').value.trim();
-            const url = $id('f-pse-url').value.trim();
-            let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
-            if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; // Auto corrección simple
-
-            const freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
-            const cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
-            const payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
-
-            if (!name || !url) return alert("El nombre y la URL son obligatorios.");
-            if (!state.pseLinks) state.pseLinks = [];
-
-            let currentPseId = id;
-
-            if (id) {
-                const link = state.pseLinks.find(l => l.id === id);
-                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; }
+        // APEX FIX: Función para alternar la visibilidad de las notificaciones en el modal de PSE
+        function togglePSENotifications() {
+            const type = $id('f-pse-type') ? $id('f-pse-type').value : 'service';
+            const notifBlock = $id('pse-notification-block');
+            const warnBlock = $id('pse-debt-warning');
+            
+            if (type === 'debt') {
+                if(notifBlock) notifBlock.classList.add('hidden');
+                if(warnBlock) warnBlock.classList.remove('hidden');
             } else {
-                currentPseId = 'pse_' + Date.now();
-                state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday });
-            }
-
-            // APEX FIX: Generación/Actualización de Tarea Automática (Recordatorio PSE en Segundo Plano)
-            if (freq !== 'none' && (cutoff > 0 || payday > 0)) {
-                if(!state.tasks) state.tasks = [];
-                const taskId = 'task_pse_' + currentPseId;
-                
-                let now = new Date();
-                now.setHours(0,0,0,0);
-                let nextTarget = new Date(now);
-                
-                let targetDay = payday > 0 ? payday : cutoff;
-                
-                if (freq === 'monthly') {
-                    nextTarget = new Date(now.getFullYear(), now.getMonth(), targetDay);
-                    if (nextTarget <= now) nextTarget.setMonth(nextTarget.getMonth() + 1);
-                } else if (freq === 'weekly') {
-                    let currentDay = now.getDay() || 7; 
-                    let dist = targetDay - currentDay;
-                    if (dist <= 0) dist += 7;
-                    nextTarget.setDate(now.getDate() + dist);
-                }
-                
-                // Fecha de Visualización Oficial (Día Asignado para UI)
-                const paymentDateStr = nextTarget.getFullYear() + '-' + String(nextTarget.getMonth()+1).padStart(2,'0') + '-' + String(nextTarget.getDate()).padStart(2,'0');
-                
-                // Fecha de Notificación Background (-3 Días para Contenedor iOS)
-                let reminderDate = new Date(nextTarget);
-                reminderDate.setDate(reminderDate.getDate() - 3);
-                const reminderDateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
-
-                const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
-                const taskDesc = 'Aviso de pago inminente. Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
-
-                const existingTask = state.tasks.find(t => t.id === taskId);
-                if (existingTask) {
-                    existingTask.date = paymentDateStr; // En el calendario solo se visualiza el día límite de pago
-                    existingTask.reminderDate = reminderDateStr; // Hook interno
-                    existingTask.title = taskTitle;
-                    existingTask.description = taskDesc;
-                    existingTask.completed = false; // Reactivamos si la habían tachado
-                    existingTask.alarmTriggered = false;
-                    
-                    // Reprogramar notificación nativa (Swift iOS) 3 días antes
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
-                        }));
-                    }
-                } else {
-                    state.tasks.push({
-                        id: taskId,
-                        title: taskTitle,
-                        description: taskDesc,
-                        date: paymentDateStr, // Visibilidad en calendario en la fecha original 
-                        reminderDate: reminderDateStr, // Variable para contenedor iOS (-3 días)
-                        timeAlarm: '09:00',
-                        priority: 'high',
-                        completed: false,
-                        alarmTriggered: false,
-                        createdAt: new Date().toISOString(),
-                        vaultId: 'personal',
-                        createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
-                    });
-                    
-                    // Notificación inicial enviada a Swift (iOS)
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
-                        }));
-                    }
-                }
-            } else {
-                // Limpieza si el usuario apaga la automatización del servicio
-                if (state.tasks) {
-                    state.tasks = state.tasks.filter(t => t.id !== 'task_pse_' + currentPseId);
-                }
-            }
-
-            saveState(); renderPSELinks(); closeNewPSEForm();
-            if(typeof renderTasksTab === 'function') renderTasksTab();
-        }
-        // ---------------------------
-
-        function setTaskPriorityFilter(priority) {
-            taskPriorityFilter = priority;
-            $qAll('#tab-tasks .filter-chip').forEach(b => b.classList.remove('active'));
-            const btn = $id('f-task-' + priority); if(btn) btn.classList.add('active');
-            renderTasksTab();
-        }
-
-        function changeTaskCalMonth(val) { 
-            if(val === 0) taskCalMonthOffset = 0; 
-            else taskCalMonthOffset += val; 
-            renderTasksTab(); 
-        }
-
-        function setTaskCalDate(dateStr) {
-            if (taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
-            else taskCalSelectedDate = dateStr;
-            renderTasksTab();
-            if(taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
-            else taskCalSelectedDate = dateStr;
-            renderTasksTab();
-        }
-
-        function renderTasksTab() {
-            if(!state.tasks) state.tasks = [];
-            
-            const pendingList = $id('tasks-list-pending');
-            const completedList = $id('tasks-list-completed');
-            const completedContainer = $id('tasks-list-completed-container');
-            const taskGrid = $id('task-cal-grid');
-            const taskMonthEl = $id('task-cal-month');
-            const clearBtn = $id('task-cal-clear-btn');
-            const kpiContainer = $id('tasks-kpi-container');
-            const weeklyDiary = $id('tasks-weekly-diary'); // APEX FIX: Referencia al nuevo Diario Semanal
-
-            if(!pendingList || !completedList || !completedContainer) return;
-
-            // APEX FIX: Aislamiento visual por Bóveda
-            const activeVault = $id('active-task-vault') ? $id('active-task-vault').value : 'all';
-            const currentVaultTasks = activeVault === 'all' 
-                ? state.tasks 
-                : state.tasks.filter(t => (t.vaultId || 'personal') === activeVault);
-
-            // APEX FIX: Cálculo de Indicadores KPI
-            if (kpiContainer) {
-                const todayD = new Date(); todayD.setHours(0,0,0,0);
-                const todayStr = todayD.getFullYear() + '-' + String(todayD.getMonth()+1).padStart(2,'0') + '-' + String(todayD.getDate()).padStart(2,'0');
-                const endOfWeek = new Date(todayD); endOfWeek.setDate(todayD.getDate() + 7);
-                const eowStr = endOfWeek.getFullYear() + '-' + String(endOfWeek.getMonth()+1).padStart(2,'0') + '-' + String(endOfWeek.getDate()).padStart(2,'0');
-                
-                const tasksToday = currentVaultTasks.filter(t => t.date === todayStr && !t.completed).length;
-                const completedTotal = currentVaultTasks.filter(t => t.completed).length;
-                const totalTasks = currentVaultTasks.length;
-                const completionRate = totalTasks > 0 ? Math.round((completedTotal / totalTasks) * 100) : 0;
-                const overdueTasks = currentVaultTasks.filter(t => t.date && t.date < todayStr && !t.completed).length;
-
-                kpiContainer.innerHTML = `
-                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-indigo-50/30">
-                        <p class="text-[8px] font-black uppercase text-indigo-400 tracking-widest mb-1">Del Día</p>
-                        <h4 class="text-xl font-black text-indigo-600 tabular-nums leading-none">${tasksToday}</h4>
-                    </div>
-                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-emerald-50/30">
-                        <p class="text-[8px] font-black uppercase text-emerald-500 tracking-widest mb-1">Cumplimiento</p>
-                        <h4 class="text-xl font-black text-emerald-600 tabular-nums leading-none">${completionRate}%</h4>
-                    </div>
-                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center ${overdueTasks > 0 ? 'bg-red-50/30 border-red-100' : 'bg-slate-50/30'}">
-                        <p class="text-[8px] font-black uppercase ${overdueTasks > 0 ? 'text-red-500' : 'text-slate-400'} tracking-widest mb-1">Procrastinación</p>
-                        <h4 class="text-xl font-black ${overdueTasks > 0 ? 'text-red-600' : 'text-slate-500'} tabular-nums leading-none">${overdueTasks}</h4>
-                    </div>
-                `;
-            }
-
-            // APEX FIX: Renderizado del Calendario de Tareas
-            if (taskGrid && taskMonthEl) {
-                const now = new Date(); now.setHours(0,0,0,0);
-                const viewDate = new Date(now.getFullYear(), now.getMonth() + taskCalMonthOffset, 1);
-                taskMonthEl.innerText = viewDate.toLocaleDateString('es-CO', {month: 'long', year: 'numeric'});
-
-                if(clearBtn) {
-                    if(taskCalSelectedDate) clearBtn.classList.remove('hidden');
-                    else clearBtn.classList.add('hidden');
-                }
-
-                const fdom = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1); 
-                const ldom = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
-                let startDay = fdom.getDay() - 1; if(startDay < 0) startDay = 6;
-                
-                let gridHtml = ''; 
-                for(let i=0; i<startDay; i++) gridHtml += `<div class="cal-cell is-empty"></div>`;
-                
-                for(let i=1; i<=ldom.getDate(); i++) {
-                    const d = new Date(viewDate.getFullYear(), viewDate.getMonth(), i); 
-                    // Asegurar formato YYYY-MM-DD local
-                    const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                    const isToday = d.toDateString() === now.toDateString();
-                    const isSelected = taskCalSelectedDate === dateStr;
-                    
-                    const dayTasks = currentVaultTasks.filter(t => t.date === dateStr);
-                    const pendingDayTasks = dayTasks.filter(t => !t.completed);
-                    const hasEv = dayTasks.length > 0;
-                    const allCompleted = hasEv && pendingDayTasks.length === 0;
-                    
-                    // APEX FIX: Fondo Sólido y efecto Tachado (Forzando estilos inline contra colisiones CSS)
-                    let cellStyle = '';
-                    if (hasEv && !allCompleted) {
-                        if(pendingDayTasks.some(t => t.priority === 'high')) cellStyle = 'background-color: #ef4444 !important; color: white !important; border-color: #ef4444 !important;';
-                        else if(pendingDayTasks.some(t => t.priority === 'medium')) cellStyle = 'background-color: #f59e0b !important; color: white !important; border-color: #f59e0b !important;';
-                        else cellStyle = 'background-color: #6366f1 !important; color: white !important; border-color: #6366f1 !important;';
-                    } else if (allCompleted) {
-                        cellStyle = 'background-color: #10b981 !important; color: white !important; border-color: #10b981 !important; text-decoration: line-through; opacity: 0.8;';
-                    }
-
-                    let extraClasses = '';
-                    if (isSelected) extraClasses += ' ring-2 ring-indigo-500 ring-offset-2 font-black ';
-                    
-                    if (hasEv) {
-                        extraClasses += ` font-black shadow-md cursor-pointer active:scale-90 transition-transform `;
-                    } else {
-                        if (isToday) extraClasses += ' border-2 border-indigo-400 text-indigo-600 font-black cursor-pointer hover:bg-indigo-50 ';
-                        else extraClasses += ' bg-slate-50 text-slate-400 cursor-pointer hover:bg-slate-100 ';
-                    }
-
-                    // APEX FIX: Lógica diferencial al tocar el calendario (Día con Tareas vs Día Vacío)
-                    const clickAction = hasEv ? `setTaskCalDate('${dateStr}')` : `openTaskForm(null, '${dateStr}')`;
-
-                    gridHtml += `<div onclick="${clickAction}" class="cal-cell ${extraClasses}" style="min-height:32px; ${cellStyle}" ${hasEv ? `title="${dayTasks.map(t => t.createdBy ? t.title + ' (' + t.createdBy.split(' ')[0] + ')' : t.title).join(', ')}"` : ''}>${i}</div>`;
-                }
-                taskGrid.innerHTML = gridHtml;
-            }
-
-            // APEX FIX: Renderizado del Diario Semanal (Lunes a Domingo)
-            if (weeklyDiary) {
-                const today = new Date();
-                today.setHours(0,0,0,0);
-                const currentDay = today.getDay();
-                const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1; // 0 es Domingo
-                const monday = new Date(today);
-                monday.setDate(today.getDate() - distanceToMonday);
-
-                let diaryHtml = '';
-                const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-
-                for (let i = 0; i < 7; i++) {
-                    const d = new Date(monday);
-                    d.setDate(monday.getDate() + i);
-                    const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                    const isToday = d.getTime() === today.getTime();
-                    
-                    const dayTasks = currentVaultTasks.filter(t => t.date === dateStr && !t.completed);
-                    dayTasks.sort((a,b) => {
-                        const pMap = { 'high': 3, 'medium': 2, 'low': 1, 'none': 0 };
-                        return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
-                    });
-
-                    let tasksHtml = '';
-                    if (dayTasks.length > 0) {
-                        tasksHtml = dayTasks.map(t => {
-                            let color = 'bg-slate-100 text-slate-600 border-slate-200';
-                            if (t.priority === 'high') color = 'bg-red-50 text-red-600 border-red-100';
-                            if (t.priority === 'medium') color = 'bg-amber-50 text-amber-600 border-amber-100';
-                            if (t.priority === 'low') color = 'bg-emerald-50 text-emerald-600 border-emerald-100';
-                            const taskTooltip = t.createdBy ? t.title + ' (' + t.createdBy.split(' ')[0] + ')' : t.title;
-                            return `<div onclick="openTaskForm('${t.id}')" class="text-[9px] font-bold truncate p-1.5 border rounded-lg mb-1.5 cursor-pointer shadow-sm active:scale-95 transition-transform ${color}" title="${taskTooltip}">${t.timeAlarm ? t.timeAlarm + ' ' : ''}${t.title}</div>`;
-                        }).join('');
-                    } else {
-                        tasksHtml = `<div class="text-[9px] text-slate-400 font-bold italic text-center py-4">Libre</div>`;
-                    }
-
-                    diaryHtml += `
-                    <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm shrink-0 w-32 md:w-40 snap-center flex flex-col transition-all ${isToday ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50/10' : 'border-slate-100'}">
-                        <div class="flex justify-between items-center mb-2 border-b border-slate-100/50 pb-2">
-                            <span class="text-[10px] font-black uppercase ${isToday ? 'text-indigo-600' : 'theme-text'}">${dayNames[i]}</span>
-                            <span class="text-[9px] font-bold ${isToday ? 'bg-indigo-500 text-white px-1.5 py-0.5 rounded-md' : 'text-slate-400'}">${d.getDate()}</span>
-                        </div>
-                        <div class="flex-1 overflow-y-auto hide-scrollbar max-h-40">
-                            ${tasksHtml}
-                        </div>
-                        <button onclick="openTaskForm(null, '${dateStr}')" class="mt-2 w-full text-[9px] font-black uppercase bg-slate-50 text-slate-400 hover:text-indigo-500 py-1.5 rounded-lg active:scale-95 transition-colors shadow-sm border border-slate-100"><i class="fa-solid fa-plus"></i></button>
-                    </div>`;
-                }
-                weeklyDiary.innerHTML = diaryHtml;
-            }
-
-            let pendingHtml = '';
-            let completedHtml = '';
-
-            // Filtrar por fecha si hay una selección activa en el calendario
-            let filteredTasks = [...currentVaultTasks];
-            if (taskCalSelectedDate) {
-                filteredTasks = filteredTasks.filter(t => t.date === taskCalSelectedDate);
-            }
-            
-            // APEX FIX: Filtrar por Fichero de Prioridad
-            if (taskPriorityFilter !== 'all') {
-                filteredTasks = filteredTasks.filter(t => t.priority === taskPriorityFilter);
-            }
-
-            // APEX FIX: Orden Cronológico Estricto y por Prioridad
-            const sortedTasks = filteredTasks.sort((a,b) => {
-                const dateA = a.date ? new Date(`${a.date}T${a.timeAlarm || '00:00:00'}`) : new Date('2100-01-01T00:00:00');
-                const dateB = b.date ? new Date(`${b.date}T${b.timeAlarm || '00:00:00'}`) : new Date('2100-01-01T00:00:00');
-                
-                if (dateA.getTime() !== dateB.getTime()) {
-                    return dateA - dateB;
-                }
-                // Si la fecha y hora es la misma, ordenar por color/prioridad
-                const pMap = { 'high': 3, 'medium': 2, 'low': 1, 'none': 0 };
-                return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
-            });
-
-            sortedTasks.forEach(t => {
-                let pBg = '', pText = '';
-                let colorHex = '#cbd5e1'; // APEX FIX: Distinción de color por prioridad (slate-300 por defecto)
-                
-                if(t.priority === 'high') { pBg = 'bg-red-100'; pText = 'text-red-600 border-red-200'; colorHex = '#ef4444'; }
-                else if(t.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; colorHex = '#f59e0b'; }
-                else if(t.priority === 'low') { pBg = 'bg-slate-100'; pText = 'text-slate-600 border-slate-200'; colorHex = '#10b981'; }
-                else { pBg = 'bg-slate-50'; pText = 'text-slate-400 border-transparent'; }
-
-                const badge = t.priority !== 'none' ? `<span class="${pBg} ${pText} border px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm">${t.priority === 'high' ? 'Alta' : (t.priority === 'medium' ? 'Media' : 'Baja')}</span>` : '';
-                const pAssigned = t.assignedTo ? `<span class="text-[7px] font-black uppercase bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded shadow-sm border border-blue-200 ml-2 whitespace-nowrap shrink-0"><i class="fa-solid fa-thumbtack mr-0.5"></i>Asignado: ${t.assignedTo.split(' ')[0]}</span>` : '';
-                const pCreator = t.createdBy ? `<span class="text-[7px] font-black uppercase bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded shadow-sm border border-purple-200 ml-2 whitespace-nowrap shrink-0"><i class="fa-solid fa-user mr-0.5"></i>Crea: ${t.createdBy.split(' ')[0]}</span>` : '';
-                const dateStr = t.date ? `<span class="text-[9px] font-bold ${t.completed ? 'text-slate-400' : 'text-indigo-400'} uppercase mt-1 flex items-center flex-wrap gap-y-1"><i class="fa-regular fa-calendar mr-1"></i>${new Date(t.date + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'})}${t.timeAlarm ? ` <i class="fa-regular fa-clock ml-2 mr-1"></i>${t.timeAlarm}` : ''}${pAssigned}${pCreator}</span>` : '';
-                
-                // APEX FIX: Inyectar el border-left para el efecto visual "por color"
-                const card = `
-                <div class="theme-card p-4 rounded-[1.5rem] border shadow-sm flex gap-3 items-center transition-all ${t.completed ? 'opacity-60 bg-slate-50 border-slate-200' : 'hover:border-indigo-200'}" style="border-left: 6px solid ${colorHex};">
-                    <div class="flex items-center justify-center shrink-0">
-                        <input type="checkbox" value="${t.id}" onclick="event.stopPropagation(); handleTaskSelect()" class="task-select-cb w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shadow-sm">
-                    </div>
-                    <button type="button" onclick="toggleTaskStatus('${t.id}')" class="w-6 h-6 shrink-0 rounded-md border-2 flex items-center justify-center transition-colors active:scale-90 shadow-sm ${t.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent hover:border-indigo-400'}">
-                        <i class="fa-solid fa-check text-[10px]"></i>
-                    </button>
-                    <div class="flex-1 min-w-0 cursor-pointer" onclick="${t.completed ? '' : `openTaskForm('${t.id}')`}">
-                        <div class="flex items-start justify-between">
-                            <h4 class="text-xs font-black theme-text ${t.completed ? 'line-through text-slate-400' : ''}">${t.title}</h4>
-                            <div class="flex gap-1 flex-col sm:flex-row items-end sm:items-center">
-                                ${badge}
-                            </div>
-                        </div>
-                        ${t.description ? `<p class="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-tight">${t.description}</p>` : ''}
-                        ${dateStr}
-                    </div>
-                        <div class="flex flex-col gap-2 justify-center shrink-0">
-                        ${t.completed ? '' : `<button type="button" onclick="event.stopPropagation(); openTaskForm('${t.id}')" title="Editar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-blue-500 rounded-full flex items-center justify-center hover:bg-blue-50 transition-colors active:scale-90 border border-slate-100 shadow-sm"><i class="fa-solid fa-pen text-[10px]"></i></button>`}
-                        <button type="button" onclick="event.stopPropagation(); event.preventDefault(); triggerUIDelete('task', '${t.id}')" title="Borrar Tarea" class="w-8 h-8 shrink-0 bg-slate-50 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition-colors active:scale-90 border border-slate-100 shadow-sm">
-                            <i class="fa-solid fa-trash text-[10px]"></i>
-                        </button>
-                    </div>
-                </div>`;
-
-                if(t.completed) completedHtml += card;
-                else pendingHtml += card;
-            });
-
-            const emptyMessage = taskCalSelectedDate ? 'No hay recordatorios para la fecha seleccionada.' : 'Todo al día. No hay recordatorios pendientes.';
-            
-            let headerAction = '';
-            if (taskCalSelectedDate) {
-                const displayDate = new Date(taskCalSelectedDate + 'T12:00:00').toLocaleDateString('es-CO', {day:'numeric', month:'short'});
-                headerAction = `<button onclick="openTaskForm(null, '${taskCalSelectedDate}')" class="text-[9px] font-black uppercase bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg border border-indigo-100 active:scale-95 transition-transform"><i class="fa-solid fa-plus mr-1"></i>Añadir a ${displayDate}</button>`;
-            }
-
-            // APEX FIX: Botón enlazado al nuevo motor atómico de borrado con interceptor de eventos
-            const bulkBtnHtml = `<button id="btn-bulk-delete-tasks" onclick="event.stopPropagation(); event.preventDefault(); triggerUIDelete('bulk_task', null)" class="hidden text-[9px] font-black uppercase bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 active:scale-95 transition-transform ml-auto shadow-sm flex items-center"><i class="fa-solid fa-trash-can mr-1"></i>Eliminar Selección (<span id="bulk-delete-count">0</span>)</button>`;
-
-            pendingList.innerHTML = `<div class="flex justify-between items-center mb-3 w-full">${headerAction}${bulkBtnHtml}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`);
-            
-            completedList.innerHTML = completedHtml;
-            if (completedHtml) completedContainer.classList.remove('hidden');
-            else completedContainer.classList.add('hidden');
-        }
-
-        // APEX FIX: Motor de Selección Múltiple y Borrado en Masa
-        function handleTaskSelect() {
-            const checkboxes = document.querySelectorAll('.task-select-cb:checked');
-            const bulkBtn = $id('btn-bulk-delete-tasks');
-            const bulkCount = $id('bulk-delete-count');
-            if (bulkBtn && bulkCount) {
-                if (checkboxes.length > 0) {
-                    bulkBtn.classList.remove('hidden');
-                    bulkCount.innerText = checkboxes.length;
-                } else {
-                    bulkBtn.classList.add('hidden');
-                }
+                if(notifBlock) notifBlock.classList.remove('hidden');
+                if(warnBlock) warnBlock.classList.add('hidden');
             }
         }
 
-        // APEX FIX: Función global unificada, atómica y resistente a fallos de evento para borrado en masa
-        function performBulkTaskDeletion() {
-            const checkboxes = document.querySelectorAll('.task-select-cb:checked');
-            if (checkboxes.length === 0) return;
-            
-            const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
-            
-            idsToDelete.forEach(id => {
-                const t = state.tasks.find(x => x.id === id);
-                if (t && t.vaultId && t.vaultId !== 'personal') {
-                    if (!state.deletedSharedTasks) state.deletedSharedTasks = [];
-                    if (!state.deletedSharedTasks.includes(id)) state.deletedSharedTasks.push(id);
-                }
-            });
-
-            state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.id));
-            
-            // Destrucción atómica de alarmas (Individual y Multidía)
-            idsToDelete.forEach(id => {
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                    window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
-                    for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
-                }
-            });
-            
-            saveState();
-            renderTasksTab();
-            updateDashboard();
-            if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
-        }
-
-        function openTaskForm(id = null, prefillDate = null, projectId = null) {
-            const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); 
-            const mod = $id('task-modal'); if(!mod) return; mod.classList.remove('hidden');
-            if(!state.tasks) state.tasks = [];
-            if($id('ftk-project-id')) $id('ftk-project-id').value = projectId || '';
-            
-            const delBtn = $id('btn-delete-task');
-            
-            if(id) {
-                const t = state.tasks.find(x => x.id === id);
-                if(t) {
-                    $id('ftk-id').value = t.id;
-                    $id('ftk-title').value = t.title;
-                    $id('ftk-desc').value = t.description || '';
-                    $id('ftk-date').value = t.date || '';
-                    if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = t.timeAlarm || '';
-                    $id('ftk-priority').value = t.priority || 'medium';
-                    if($id('ftk-assigned-to')) $id('ftk-assigned-to').value = t.assignedTo || '';
-                    if($id('ftk-vault')) $id('ftk-vault').value = t.vaultId || 'personal';
-                    if(delBtn) delBtn.classList.remove('hidden'); 
-                }
-            } else {
-                $id('ftk-id').value = '';
-                $id('ftk-title').value = '';
-                $id('ftk-desc').value = '';
-                $id('ftk-date').value = prefillDate || '';
-                if($id('ftk-time-alarm')) $id('ftk-time-alarm').value = '';
-                $id('ftk-priority').value = 'medium';
-                if($id('ftk-assigned-to')) $id('ftk-assigned-to').value = '';
-                if($id('ftk-vault') && $id('active-task-vault')) {
-                    const aV = $id('active-task-vault').value;
-                    $id('ftk-vault').value = aV === 'all' ? 'personal' : aV;
-                }
-                else if($id('ftk-vault')) $id('ftk-vault').value = 'personal';
-                if(delBtn) delBtn.classList.add('hidden'); 
-            }
-        }
-
-        function closeTaskForm() {
-            const modal = $id('task-modal'); if(!modal) return; 
-            modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
-            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
-        }
-        
-        function deleteTaskFromEditor(e) {
-            if(e && typeof e.preventDefault === 'function') e.preventDefault();
-            const id = $id('ftk-id').value;
-            if(id) {
-                closeTaskForm();
-                setTimeout(() => { triggerUIDelete('task', id); }, 350);
-            }
-        }
-
-        function saveTask(e) {
-            e.preventDefault();
-            if(!state.tasks) state.tasks = [];
-            const id = $id('ftk-id').value;
-            const projectId = $id('ftk-project-id') ? $id('ftk-project-id').value : '';
-            const title = $id('ftk-title').value.trim();
-            const desc = $id('ftk-desc').value.trim();
-            const date = $id('ftk-date').value;
-            const timeAlarmRaw = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
-            const timeAlarm = timeAlarmRaw.length > 5 ? timeAlarmRaw.substring(0, 5) : timeAlarmRaw;
-            const priority = $id('ftk-priority').value;
-            const assignedTo = $id('ftk-assigned-to') ? $id('ftk-assigned-to').value.trim() : '';
-            const vaultId = $id('ftk-vault') && !$id('ftk-vault-container').classList.contains('hidden') ? $id('ftk-vault').value : 'personal';
-
-            if(!title) return alert("El título del recordatorio es obligatorio.");
-
-            let finalId = id;
-            if(id) {
-                const t = state.tasks.find(x => x.id === id);
-                if(t) {
-                    t.title = title; t.description = desc; t.date = date; t.timeAlarm = timeAlarm; t.priority = priority;
-                    t.lastAlarmDate = null; 
-                    if (projectId) t.projectId = projectId;
-                    t.vaultId = vaultId;
-                    t.assignedTo = assignedTo;
-                }
-            } else {
-                finalId = 'task_' + Date.now();
-                const creatorName = userProfile && userProfile.name ? userProfile.name : 'Usuario';
-                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, lastAlarmDate: null, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName, assignedTo: assignedTo });
-            }
-            saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
-            if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
-
-            if (date && timeAlarm && window.webkit && window.webkit.messageHandlers) {
-                const payload = {
-                    id: finalId,
-                    title: "Recordatorio: " + title,
-                    body: desc ? desc : "Tarea pendiente.",
-                    date: date,
-                    time: timeAlarm,
-                    priority: priority
-                };
-                if (window.webkit.messageHandlers.scheduleAlarmHandler) window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(payload));
-            } else if (!window.webkit && Notification.permission !== "granted") {
-                Notification.requestPermission(); 
-            }
-        }
-
-        function toggleTaskStatus(id) {
-            const t = state.tasks.find(x => x.id === id);
-            if(t) { 
-                t.completed = !t.completed; 
-                saveState(); renderTasksTab(); updateDashboard(); 
-                
-                // APEX FIX: Destrucción o reactivación en cadena de notificaciones
-                if (window.webkit && window.webkit.messageHandlers) {
-                    if (t.completed && window.webkit.messageHandlers.cancelAlarmHandler) {
-                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
-                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
-                    } else if (!t.completed && t.date && t.timeAlarm && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id, title: "NEXUS: " + t.title, body: t.description ? t.description : "Tarea pendiente programada.", date: t.date, time: t.timeAlarm.substring(0, 5) }));
-                        if (id.startsWith('task_pse_')) {
-                            for(let i=0; i<=3; i++) {
-                                let nD = new Date(t.date + 'T00:00:00'); nD.setDate(nD.getDate() - i);
-                                let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
-                                let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
-                                window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i, title: "Aviso: " + t.title, body: dMsg + " " + (t.description||''), date: nDStr, time: t.timeAlarm.substring(0, 5), priority: 'high' }));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        function executeTaskDeletion(e, id) {
-            if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
-            
-            const t = state.tasks.find(x => x.id === id);
-            if (t && t.vaultId && t.vaultId !== 'personal') {
-                if (!state.deletedSharedTasks) state.deletedSharedTasks = [];
-                if (!state.deletedSharedTasks.includes(id)) state.deletedSharedTasks.push(id);
-            }
-
-            state.tasks = state.tasks.filter(t => t.id !== id);
-            saveState(); renderTasksTab(); updateDashboard();
-            if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
-            
-            // Destrucción atómica
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id }));
-                for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: id + '_rem' + i }));
-            }
-        }
-        
-        // --- APEX FIX: ORGANIZACIÓN Y PROCRASTINACIÓN (DAILY BRIEFING RESTAURADO SIN POMODORO) ---
         function openNewPSEForm(id = null, prefillName = null) {
             const mod = $id('new-pse-modal'); if(!mod) return;
             const titleEl = $id('pse-form-title');
@@ -8188,6 +7644,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (link) {
                     $id('f-pse-id').value = link.id;
                     $id('f-pse-name').value = link.name;
+                    if($id('f-pse-type')) $id('f-pse-type').value = link.type || 'service';
                     $id('f-pse-ref-name').value = link.refName || '';
                     $id('f-pse-ref').value = link.reference || '';
                     $id('f-pse-url').value = link.url;
@@ -8200,6 +7657,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 }
             } else {
                 $id('f-pse-id').value = '';
+                if($id('f-pse-type')) $id('f-pse-type').value = 'service';
                 
                 if (prefillName) {
                     $id('f-pse-name').value = prefillName;
@@ -8225,29 +7683,32 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if($id('f-pse-time')) $id('f-pse-time').value = '09:00';
                 if(titleEl) titleEl.innerText = "Nuevo Enlace";
             }
+            if(typeof togglePSENotifications === 'function') togglePSENotifications();
             mod.classList.remove('hidden');
-        }
-
-        function closeNewPSEForm() {
-            const mod = $id('new-pse-modal'); if(!mod) return;
-            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
-            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
         }
 
         function savePSELink(e) {
             e.preventDefault();
             const id = $id('f-pse-id').value;
             const name = $id('f-pse-name').value.trim();
+            const type = $id('f-pse-type') ? $id('f-pse-type').value : 'service';
             const refName = $id('f-pse-ref-name').value.trim();
             const reference = $id('f-pse-ref').value.trim();
             const url = $id('f-pse-url').value.trim();
             let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
             if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; 
 
-            const freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
-            const cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
-            const payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
+            // APEX FIX: Forzar desactivación de notificaciones si es enlace bancario (Deuda)
+            let freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
+            let cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
+            let payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
             const timeAlarm = $id('f-pse-time') ? $id('f-pse-time').value : '09:00';
+
+            if (type === 'debt') {
+                freq = 'none';
+                cutoff = 0;
+                payday = 0;
+            }
 
             if (!name || !url) return alert("El nombre y la URL son obligatorios.");
             if (!state.pseLinks) state.pseLinks = [];
@@ -8256,10 +7717,10 @@ ${JSON.stringify(dataToAnalyze)}`;
 
             if (id) {
                 const link = state.pseLinks.find(l => l.id === id);
-                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; link.time = timeAlarm; }
+                if (link) { link.name = name; link.type = type; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; link.time = timeAlarm; }
             } else {
                 currentPseId = 'pse_' + Date.now();
-                state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
+                state.pseLinks.push({ id: currentPseId, name, type, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
             }
 
             // APEX FIX: Generación/Actualización de Tarea Automática Multidía (Soporta -3, -2, -1 y Día Cero)
@@ -9393,8 +8854,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                 else {
                     tC.innerHTML = displayFE.map(ev => {
                         const dT = Math.abs(ev.date - now); const dD = Math.round(dT / 86400000); const tT = dD === 0 ? 'Hoy' : dD === 1 ? 'Mañana' : `En ${dD} días`;
-                        const amtStrPrimary = fmt(ev.origAmount, ev.origCurrency);
-                        return `<div class="relative timeline-item pb-6"><div class="timeline-dot ${ev.bg}"></div><div class="flex justify-between items-start"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full ${ev.bg} ${ev.color} flex items-center justify-center shrink-0"><i class="fa-solid ${ev.icon} text-[10px]"></i></div><div><h4 class="text-xs font-black uppercase theme-text">${ev.title}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${ev.date.toLocaleDateString('es-CO', {weekday: 'short', day: 'numeric', month: 'short'})} • <span class="${ev.color}">${tT}</span></p></div></div><div class="text-right"><p class="text-sm font-black ${ev.color}">${amtStrPrimary}</p></div></div></div>`;
+                        
+                        // APEX FIX: Botón de pago rápido integrado al calendario para servicios PSE
+                        const amtStrPrimary = ev.isPSE ? `<button onclick="redirigirPagoDirecto('${ev.pseUrl}')" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 text-[9px] rounded-lg shadow-sm active:scale-95 transition-colors"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Pagar</button>` : fmt(ev.origAmount, ev.origCurrency);
+                        
+                        return `<div class="relative timeline-item pb-6"><div class="timeline-dot ${ev.bg}"></div><div class="flex justify-between items-center"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full ${ev.bg} ${ev.color} flex items-center justify-center shrink-0"><i class="fa-solid fa-${ev.icon} text-[12px]"></i></div><div><h4 class="text-xs font-black uppercase theme-text">${ev.title}</h4><p class="text-[9px] font-bold text-slate-400 uppercase mt-1">${ev.date.toLocaleDateString('es-CO', {weekday: 'short', day: 'numeric', month: 'short'})} • <span class="${ev.color}">${tT}</span></p></div></div><div class="text-right"><p class="text-sm font-black ${ev.color}">${amtStrPrimary}</p></div></div></div>`;
                     }).join('');
                 }
             }
@@ -9508,9 +8972,50 @@ ${JSON.stringify(dataToAnalyze)}`;
                     origCurrency: t.original_currency || t.currency, 
                     bg: evBg, 
                     color: evColor, 
-                    icon: isAmortized ? 'fa-check' : (isAp ? 'fa-layer-group' : 'fa-file-invoice-dollar') 
+                    icon: isAmortized ? 'check' : (isAp ? 'layer-group' : 'file-invoice-dollar') 
                 });
             });
+
+            // APEX FIX: Inyectar Pagos PSE Programados visualmente en el Calendario Financiero
+            if (state.pseLinks && state.pseLinks.length > 0) {
+                const now = new Date();
+                now.setHours(0,0,0,0);
+                
+                state.pseLinks.forEach(link => {
+                    if (link.freq === 'none') return;
+                    
+                    let targetDay = link.payday > 0 ? link.payday : (link.cutoff > 0 ? link.cutoff : 1);
+                    
+                    // Proyectamos 12 ciclos hacia el futuro (12 meses o 12 semanas)
+                    for (let i = 0; i < 12; i++) { 
+                        let d;
+                        if (link.freq === 'monthly') {
+                            d = new Date(now.getFullYear(), now.getMonth() + i, targetDay, 12, 0, 0);
+                        } else if (link.freq === 'weekly') {
+                            let currentDay = now.getDay() || 7;
+                            let dist = targetDay - currentDay;
+                            d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+                            d.setDate(d.getDate() + dist + (i * 7));
+                        }
+                        
+                        if (d && d >= now) {
+                            events.push({
+                                date: d,
+                                title: `PSE: ${link.name} ${link.refName ? `(${link.refName})` : ''}`,
+                                amount: 0,
+                                origAmount: 0,
+                                origCurrency: state.settings.baseCurrency || 'COP',
+                                bg: 'bg-emerald-100',
+                                color: 'text-emerald-600',
+                                icon: link.icon ? link.icon.replace('fa-', '') : 'bolt',
+                                isPSE: true,
+                                pseUrl: link.url
+                            });
+                        }
+                    }
+                });
+            }
+
             return events;
         }
 
