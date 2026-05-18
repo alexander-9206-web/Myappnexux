@@ -592,10 +592,41 @@
                     </div>
                 </div>
 
+                <!-- APEX FIX: MÓDULO DE SEGURIDAD Y ACCESO DEDICADO -->
+                <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2">
+                    <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-emerald-500 mb-4"><i class="fa-solid fa-shield-halved mr-1"></i>Seguridad y Accesos</h3>
+                    
+                    <div class="flex items-center justify-between pt-2">
+                        <div>
+                            <h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo Automático (PIN)</h4>
+                            <p class="text-[8px] text-slate-400">Pedir PIN al abrir app o por inactividad</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()">
+                            <div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                    
+                    <div class="flex items-center justify-between pt-4 border-t border-slate-100/50">
+                        <div>
+                            <h4 class="text-[10px] font-black uppercase text-slate-700">Biometría (FaceID/TouchID)</h4>
+                            <p class="text-[8px] text-slate-400">Desbloqueo ultrarrápido seguro</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="set-use-biometrics" class="sr-only peer" onchange="toggleUserBiometrics()">
+                            <div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                        </label>
+                    </div>
+
+                    <div class="pt-4 border-t border-slate-100/50">
+                        <button onclick="openUserEdit(currentUser)" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-600 p-3.5 rounded-xl font-black uppercase text-[10px] transition-colors shadow-sm active:scale-95 border border-slate-200 flex items-center justify-center gap-2"><i class="fa-solid fa-key"></i> Cambiar PIN de Acceso</button>
+                    </div>
+                </div>
+
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4">Engine Global</h3>
                     <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
-                    <div class="flex items-center justify-between pt-4 border-t border-slate-100"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Bloqueo PIN</h4><p class="text-[8px] text-slate-400">Pedir al abrir o inactividad</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-require-pin" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div></label></div>
+                    
                     <div class="pt-4 border-t border-slate-100">
                         <div class="grid grid-cols-2 gap-2 mt-1">
                             <div>
@@ -2132,14 +2163,6 @@
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, LIVE_RATES = EXCHANGE_RATES; 
         let isRootAdminUnlocked = false;
 
-        // APEX FIX: Caché global de disponibilidad biométrica para evitar pérdida de User Gesture y Crashes en iOS
-        let isBiometricsAvailableGlobal = false;
-        if (window.PublicKeyCredential && typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
-            window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(avail => {
-                isBiometricsAvailableGlobal = avail;
-            }).catch(err => console.warn(err));
-        }
-
         // APEX FIX: Motor Criptográfico SHA-256 para validación de SuperAdmin (Root)
         const MASTER_ROOT_HASH = '9a1a4bf004724b946f04c6436f56cb1144f8ab4f86d8eb3ecfa8959d57fb4284'; // Hash para el PIN "9999"
         async function hashMasterPIN(pin) {
@@ -2182,17 +2205,21 @@
             }
 
             // Fallback WebAuthn (PWA / Navegador Safari Desktop)
-            if (!window.PublicKeyCredential) return;
-            
-            // APEX FIX: Uso de la variable cacheada en lugar de await para evitar 
-            // romper la cadena del Gesto del Usuario y colapsar el WebKit.
-            if (!isBiometricsAvailableGlobal) {
-                console.warn("[APEX] FaceID / TouchID no disponible en este dispositivo. Fallback a PIN.");
-                return; 
+            if (!window.PublicKeyCredential) {
+                console.warn("[APEX] Biometría nativa no soportada por el navegador. Fallback a PIN.");
+                return; // Fricción Cero: Salimos silenciosamente para permitir el uso fluido del PIN
             }
             
             try {
-                // Configuración de Identidad Simulada (Para solicitar lectura de rostro sin registro backend)
+                // APEX FIX: Pre-chequeo estricto instantáneo. 
+                // Esto evita el modal en blanco nativo de iOS que muestra un contador de tiempo buscando llaves de seguridad USB/NFC.
+                const isBioAvailable = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+                if (!isBioAvailable) {
+                    console.warn("[APEX] FaceID / TouchID inactivo o no disponible. Haciendo fallback fluido a PIN.");
+                    return; 
+                }
+
+                // Configuración de Identidad Simulada (Para solicitar lectura de rostro/huella sin registro backend)
                 const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
                 const userId = new Uint8Array(16); window.crypto.getRandomValues(userId);
                 let rpId = window.location.hostname;
@@ -2210,15 +2237,21 @@
                         user: { id: userId, name: "root_admin", displayName: "NEXUS Root Admin" },
                         pubKeyCredParams: [ { type: "public-key", alg: -7 }, { type: "public-key", alg: -257 } ],
                         authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
-                        timeout: 15000 
+                        timeout: 15000 // APEX FIX: Reducido drásticamente de 60s a 15s para evitar pantallas congeladas
                     }
                 });
 
                 if (credential) {
-                    successCallback(); 
+                    successCallback(); // Éxito en la validación local PWA
                 }
             } catch (err) {
                 console.warn("[APEX Security] Biometría cancelada o denegada: ", err);
+                if (err.name === 'SecurityError') {
+                    alert("⚠️ El entorno web actual bloquea Face ID. Usa tu PIN.");
+                } else if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+                    // Si no fue una cancelación voluntaria, enviamos alerta sutil
+                    alert("⚠️ Autenticación biométrica interrumpida. Usa tu PIN.");
+                }
             }
         }
 
@@ -3124,21 +3157,18 @@
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
             
-            // APEX FIX: Micro-Retraso (100ms) para permitir que el DOM renderice la nueva pestaña
-            // ANTES de lanzar la biometría. Esto evita el Crash total de la PWA en iOS.
-            setTimeout(() => {
-                if (profile && (profile.useBiometrics || isBiometricsAvailableGlobal || (window.webkit && window.webkit.messageHandlers))) {
-                    triggerBiometricAuth(() => {
-                        if (!profile.useBiometrics) {
-                            profile.useBiometrics = true;
-                            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-                        }
-                        handleLoginExisting(true); 
-                    }, 'Autenticación automática de Nexus');
-                } else {
-                    pinInput.focus();
-                }
-            }, 100);
+            // APEX FIX: Auto-disparo de FaceID/TouchID si el dispositivo lo soporta o ya fue configurado
+            if (profile && (profile.useBiometrics || window.PublicKeyCredential || (window.webkit && window.webkit.messageHandlers))) {
+                triggerBiometricAuth(() => {
+                    if (!profile.useBiometrics) {
+                        profile.useBiometrics = true;
+                        localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
+                    }
+                    handleLoginExisting(true); 
+                }, 'Autenticación automática de Nexus');
+            } else {
+                pinInput.focus();
+            }
 
             pinInput.onkeypress = (e) => { if(e.key === 'Enter') handleLoginExisting(); };
         }
@@ -9110,6 +9140,10 @@
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
             const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
             
+            // APEX FIX: Inicializar switches de seguridad
+            const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
+            const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
+
             const abEl = $id('set-auto-backup'); if(abEl) abEl.checked = !!state.settings.autoBackup;
             const btEl = $id('set-backup-time'); if(btEl) btEl.value = state.settings.backupTime || '23:59';
             const bfEl = $id('set-backup-folder'); if(bfEl) bfEl.value = state.settings.backupFolder || '';
@@ -9164,6 +9198,42 @@
                 } else {
                     dz.classList.add('hidden');
                 }
+            }
+        }
+
+        // APEX FIX: Función de control explícito para Biometría
+        function toggleUserBiometrics() {
+            if (!userProfile) return;
+            const isActive = $id('set-use-biometrics').checked;
+            
+            if (isActive) {
+                // Al encender, solicitamos prueba biométrica para asegurar que su dispositivo la soporta y ellos son los dueños
+                triggerBiometricAuth(() => {
+                    userProfile.useBiometrics = true;
+                    localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile));
+                    
+                    // Aseguramos que también se obligue el PIN de respaldo
+                    if(!state.settings) state.settings = {};
+                    state.settings.requirePin = true;
+                    $id('set-require-pin').checked = true;
+                    saveState();
+
+                    alert("✅ Biometría (FaceID/TouchID) activada exitosamente para esta bóveda.");
+                }, 'Verifica tu identidad para activar el acceso biométrico.');
+                
+                // Si la biometría falla o el usuario cancela, el switch vuelve a apagarse (Safety Catch)
+                setTimeout(() => {
+                    const freshProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
+                    if (!freshProfile || !freshProfile.useBiometrics) {
+                        $id('set-use-biometrics').checked = false;
+                    }
+                }, 1500);
+
+            } else {
+                // Apagado instantáneo sin fricción
+                userProfile.useBiometrics = false;
+                localStorage.setItem(`nexus_profile_${currentUser}`, JSON.stringify(userProfile));
+                alert("✅ Desbloqueo biométrico desactivado. Ahora solo accederás mediante tu PIN manual.");
             }
         }
 
