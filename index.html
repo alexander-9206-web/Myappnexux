@@ -3157,18 +3157,18 @@
             
             const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
             
-            // APEX FIX: Auto-disparo de FaceID/TouchID si el dispositivo lo soporta o ya fue configurado
-            if (profile && (profile.useBiometrics || window.PublicKeyCredential || (window.webkit && window.webkit.messageHandlers))) {
-                triggerBiometricAuth(() => {
-                    if (!profile.useBiometrics) {
-                        profile.useBiometrics = true;
-                        localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(profile));
-                    }
-                    handleLoginExisting(true); 
-                }, 'Autenticación automática de Nexus');
-            } else {
-                pinInput.focus();
-            }
+            // APEX FIX: Respeto absoluto de la configuración de biometría del usuario.
+            // Evita Crashes en iOS al NO forzar el FaceID si el usuario lo tiene desactivado,
+            // permitiendo que el teclado numérico (PIN) aparezca de forma segura y fluida.
+            setTimeout(() => {
+                if (profile && profile.useBiometrics === true) {
+                    triggerBiometricAuth(() => {
+                        handleLoginExisting(true); 
+                    }, 'Autenticación automática de Nexus');
+                } else {
+                    pinInput.focus();
+                }
+            }, 100);
 
             pinInput.onkeypress = (e) => { if(e.key === 'Enter') handleLoginExisting(); };
         }
