@@ -403,15 +403,16 @@
                 </div>
             </div>
             <div class="flex justify-between items-center px-2 border-b border-slate-200 pb-2">
-                <div class="flex items-center gap-2">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Reg: <span id="db-count" class="theme-text">0</span></p>
-                    <button onclick="toggleDbDuplicates()" id="db-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
-                    <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
-                    <button onclick="exportDatabasePDF()" class="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-1" title="Exportar PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-                    <!-- APEX FIX: Botón de Interfaz de IA -->
-                    <button onclick="openAIAuditor()" class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[8px] font-black uppercase shadow-sm active:scale-95 border border-indigo-100 flex items-center gap-1" title="Auditor IA"><i class="fa-solid fa-wand-magic-sparkles"></i> IA</button>
+                <div class="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1 w-full md:w-auto">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 shrink-0">Reg: <span id="db-count" class="theme-text">0</span></p>
+                    <button onclick="toggleDbDuplicates()" id="db-dup-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg text-[8px] font-black uppercase shadow-sm active:scale-95 shrink-0" title="Filtrar Duplicados"><i class="fa-solid fa-clone"></i></button>
+                    <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg text-[8px] font-black uppercase shadow-sm active:scale-95 shrink-0"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
+                    
+                    <!-- APEX FIX: Botones PDF e IA reescalados masivamente para pantallas móviles -->
+                    <button onclick="exportDatabasePDF()" class="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-2 shrink-0 transition-all hover:bg-red-100" title="Exportar PDF"><i class="fa-solid fa-file-pdf text-sm"></i> PDF</button>
+                    <button onclick="openAIAuditor()" class="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-indigo-100 flex items-center gap-2 shrink-0 transition-all hover:bg-indigo-100" title="Auditor IA"><i class="fa-solid fa-wand-magic-sparkles text-sm"></i> Auditor IA</button>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 shrink-0 hidden md:flex">
                     <select id="db-currency" onchange="renderDatabase()" class="text-[8px] font-black uppercase bg-purple-100 text-purple-700 px-1 py-0.5 rounded outline-none cursor-pointer">
                         <option value="BASE">Base</option><option value="USD">USD</option><option value="COP">COP</option><option value="EUR">EUR</option><option value="AUD">AUD</option>
                     </select>
@@ -665,7 +666,8 @@
                             <div>
                                 <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Modelo Predictivo</label>
                                 <select id="set-gemini-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="updateSettings()">
-                                    <option value="gemini-2.5-flash-preview-09-2025">Gemini 2.5 Flash (Rápido)</option>
+                                    <option value="gemini-2.5-flash-preview-09-2025">Gemini 2.5 (Solo Entorno Original)</option>
+                                    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Para Vercel/Exterior)</option>
                                     <option value="gemini-1.5-pro">Gemini 1.5 Pro (Razonamiento Avanzado)</option>
                                 </select>
                             </div>
@@ -3643,6 +3645,24 @@
             }
         }
         
+        // APEX FIX: Puente Nativo para actualización de Widgets en iOS
+        function actualizarWidgetiOS(patrimonio, pagosPendientes, estadoAlerta) {
+            // Verificamos que estamos corriendo dentro del contenedor nativo de iOS
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.updateWidget) {
+                
+                // Disparamos el payload JSON hacia Swift
+                window.webkit.messageHandlers.updateWidget.postMessage({
+                    patrimonio: patrimonio,          // Ej: "$12,450.00"
+                    pagos_pendientes: pagosPendientes, // Ej: "3 facturas"
+                    alerta: estadoAlerta             // Ej: "ACTIVO", "ALERTA", "CRÍTICO"
+                });
+                
+                console.log("[APEX] Señal de actualización enviada al Widget de iOS.");
+            } else {
+                // Silenciado en web estándar para evitar spam en consola
+            }
+        }
+        
         function saveState() { 
             if(currentUser && sessionUnlocked && state) {
                 NexusIDB.saveState(currentUser, state).then(() => {
@@ -4174,6 +4194,21 @@
                 scoreModalVal.className = `text-4xl font-black tabular-nums tracking-tighter transition-colors duration-500 ${dynamicScore >= 700 ? 'text-emerald-600' : (dynamicScore >= 500 ? 'text-amber-500' : 'text-red-600')}`;
                 scoreModalVal.parentElement.className = `w-32 h-32 mx-auto rounded-full border-8 flex items-center justify-center shadow-inner transition-colors duration-500 ${dynamicScore >= 700 ? 'border-emerald-400 bg-emerald-50' : (dynamicScore >= 500 ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50')}`;
             }
+
+            // APEX FIX: Auto-Cálculo y Sincronización con el Widget Nativo de iOS
+            let pendingWidgetCount = 0;
+            const nowWidgetStr = new Date().toISOString().split('T')[0];
+            // Sumar deudas activas, compras afterpay vigentes y tareas del día
+            (state.loans || []).forEach(l => { if ((l.paidQuotas || 0) < l.term) pendingWidgetCount++; });
+            state.tx.filter(t => t.type === 'afterpay').forEach(t => { if ((t.apPaid || 0) < (t.apQuotas || 4)) pendingWidgetCount++; });
+            pendingWidgetCount += (state.tasks || []).filter(t => !t.completed && t.date === nowWidgetStr).length;
+            
+            // Semántica de Alerta basada en el Score de Salud
+            let widgetAlerta = "ACTIVO";
+            if (dynamicScore < 500) widgetAlerta = "CRÍTICO";
+            else if (dynamicScore < 700) widgetAlerta = "ALERTA";
+            
+            actualizarWidgetiOS(fmt(uNW, bC), `${pendingWidgetCount} pendiente${pendingWidgetCount !== 1 ? 's' : ''}`, widgetAlerta);
 
             // APEX FIX: Restaurar estado visual del acordeón de Patrimonio Global
             if (state.ui && state.ui['global_wealth_view'] === false) {
@@ -6544,15 +6579,24 @@
             setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
         }
 
+        // APEX FIX: Fallar rápido sin reintentos ciegos de 30s si hay errores de Auth o 400s
         async function fetchWithRetry(url, options, maxRetries = 5) {
             const delays = [1000, 2000, 4000, 8000, 16000];
             for (let i = 0; i <= maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    if (!response.ok) {
+                        const errData = await response.json().catch(()=>({}));
+                        const errMsg = errData?.error?.message || `HTTP error! status: ${response.status}`;
+                        // Fallar rápido y NO reintentar si el error es de credenciales / mala petición
+                        if (response.status >= 400 && response.status <= 404) {
+                            throw new Error("API_KEY_ERROR: " + errMsg);
+                        }
+                        throw new Error(errMsg);
+                    }
                     return await response.json();
                 } catch (e) {
-                    if (i === maxRetries) throw e;
+                    if (e.message.includes('API_KEY_ERROR') || i === maxRetries) throw e;
                     await new Promise(res => setTimeout(res, delays[i]));
                 }
             }
@@ -6561,6 +6605,9 @@
         async function executeAIAudit() {
             const userQuestion = $id('ai-user-query').value.trim();
             if(!userQuestion) return alert("Por favor, escribe una pregunta para la IA.");
+
+            const activeKey = (state.settings && state.settings.geminiApiKey) ? state.settings.geminiApiKey : apiKey;
+            const activeModel = (state.settings && state.settings.geminiModel) ? state.settings.geminiModel : 'gemini-2.5-flash-preview-09-2025';
 
             const btn = $id('btn-ask-ai');
             const origBtnText = btn.innerHTML;
@@ -6594,12 +6641,23 @@ ${JSON.stringify(dataToAnalyze)}`;
             };
 
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                // APEX FIX: Inyección del modelo y llave dinámica para bypass de errores locales
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${activeKey}`;
+                
+                // Defensa contra fallo silencioso en Vercel
+                if (!activeKey && activeModel !== 'gemini-2.5-flash-preview-09-2025') {
+                     throw new Error("API_KEY_ERROR: API Key no detectada para entorno externo.");
+                }
+
                 const result = await fetchWithRetry(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+
+                if (result.error) {
+                    throw new Error(result.error.message || "Error del servidor IA");
+                }
 
                 const textResponse = result.candidates?.[0]?.content?.parts?.[0]?.text || "El modelo no pudo generar una respuesta.";
                 
@@ -6615,7 +6673,19 @@ ${JSON.stringify(dataToAnalyze)}`;
 
             } catch (error) {
                 console.error("[APEX IA Error]", error);
-                $id('ai-response-text').innerHTML = '<p class="text-[10px] text-red-500 font-bold text-center py-4 uppercase tracking-widest"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Error de conexión con el motor de IA.</p>';
+                
+                let errorMsg = "Error de conexión con el motor de IA.";
+                let subMsg = "Comprueba tu conexión a internet o los servidores de Google.";
+                
+                if (!activeKey || activeKey === "") {
+                    errorMsg = "API KEY NO DETECTADA (ENTORNO EXTERNO)";
+                    subMsg = "Como estás corriendo la app fuera de mi entorno, debes ir a Configuración -> Motor IA y pegar tu API Key gratuita de Google AI Studio, y cambiar el modelo a Gemini 1.5 Flash.";
+                } else if (error.message && error.message.includes('API_KEY_ERROR')) {
+                    errorMsg = "LLAVE O MODELO INVÁLIDO";
+                    subMsg = "La llave ingresada no es válida o tu cuenta no tiene permisos para usar este modelo. Ve a Configuración y cambia a 'Gemini 1.5 Flash'.";
+                }
+
+                $id('ai-response-text').innerHTML = `<div class="bg-red-50/50 p-4 border border-red-100 rounded-xl"><p class="text-[10px] text-red-600 font-black text-center uppercase tracking-widest"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${errorMsg}</p><p class="text-[8px] text-red-500 font-bold text-center mt-2">${subMsg}</p><p class="text-[7px] text-red-400 font-mono text-center mt-2 break-all opacity-50">${error.message}</p></div>`;
             } finally {
                 btn.innerHTML = origBtnText;
                 btn.disabled = false;
