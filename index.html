@@ -5208,8 +5208,6 @@
             
             alert("✅ Cuenta conciliada a $0 exitosamente mediante ajuste automático.");
         }
-
-        function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
         
         // --- INICIO REORDENAR CUENTAS ---
         function openReorderModal() {
@@ -5637,77 +5635,6 @@
             saveState(); updateDashboard(); switchTab('loans'); alert(`✅ Cuota pagada correctamente.`);
         }
 
-        function openLinkSharedModal() { const m = $id('shared-account-modal'); if(m) m.classList.remove('hidden'); }
-        function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
-
-        function processSharedToken() {
-            const tokenInput = $id('shared-token-input');
-            if(!tokenInput) return;
-            const token = tokenInput.value.trim();
-            if(!token.startsWith('nx_')) return alert("Token inválido o mal formado.");
-            try {
-                // Pequeña validación anti-XSS antes de parsear
-                if(token.includes('<') || token.includes('>')) throw new Error("Posible inyección XSS");
-                
-                const b64 = token.substring(3);
-                const shareData = JSON.parse(atob(b64));
-                if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
-                
-                // Evitar duplicar cuentas vinculadas
-                if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
-                    return alert("Esta bóveda ya está vinculada a tu cuenta.");
-                }
-
-                const newAcc = { 
-                    id: 'acc_' + Date.now(), 
-                    name: '👥 ' + shareData.name, 
-                    currency: shareData.currency, 
-                    balance: 0, 
-                    type: 'liquid', 
-                    isShared: true, 
-                    remoteId: shareData.vaultId,
-                    syncedOnce: false // APEX FIX: Bloqueo anti-wipe para el que se une, hasta que descargue.
-                };
-                state.accounts.push(newAcc);
-                
-                // Guardado estrictamente local sin disparar triggerCloudSync() 
-                if(currentUser) NexusIDB.saveState(currentUser, state);
-                
-                // Llamamos a la función de escucha P2P de inmediato
-                if (typeof attachP2PListener === 'function') attachP2PListener();
-                
-                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
-                closeLinkSharedModal();
-                updateDashboard();
-                if (state.activeTab === 'accounts') renderAccountsTab();
-                
-            } catch(e) {
-                console.error("[APEX P2P] Error decodificando token:", e);
-                alert("El token está corrupto o mal formado.");
-            }
-        }
-
-        function generateShareTokenForAccount(accId) {
-            const acc = state.accounts.find(a => a.id === accId);
-            if(!acc) return;
-            
-            // APEX FIX: Obtener el ID remoto correcto para que ambos celulares apunten al mismo archivo en Firebase
-            const targetRemoteId = acc.remoteId || acc.id; 
-            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency };
-            const token = 'nx_' + btoa(JSON.stringify(payload));
-            
-            // Hack para copiar al portapapeles en iOS/Web
-            const temp = document.createElement("textarea");
-            temp.value = token;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            document.body.removeChild(temp);
-            
-            alert("✅ Token copiado al portapapeles:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio. Tu socio debe presionar el botón morado (P2P) para vincular la cuenta.");
-        }
-        // --- FIN MOTOR P2P ---
-
         function saveCCPurchase(e, forceOverdraft = false) { 
             if(e && typeof e.preventDefault === 'function') e.preventDefault(); const cardId = $id('cc-p-cardid').value; const desc = $id('cc-p-desc').value.trim(); const amount = parseFloat($id('cc-p-amount').dataset.raw) || 0; const term = parseInt($id('cc-p-term').dataset.raw) || 0; const date = $id('cc-p-date').value; 
             if(!amount || amount <= 0 || term <= 0) return alert("Monto y plazo mayor a cero.");
@@ -5850,48 +5777,6 @@
             handleSubCategoryChange();
         }
 
-        // APEX FIX: Lógica Robusta de Auto-Ajuste de Cuenta e Interfaz
-        function checkTxAccount() { 
-            const accId = $id('f-account').value; 
-            const acc = state.accounts.find(a => a.id === accId); 
-            
-            // APEX FIX: Auto-ajuste de divisa según la bóveda seleccionada (Fricción Cero)
-            const curS = $id('f-currency');
-            const lbl = $id('f-currency-label');
-            if (acc) {
-                const c = acc.currency || state.settings.baseCurrency || 'COP';
-                if(curS) curS.value = c;
-                if(lbl) lbl.innerText = c;
-            }
-
-            const type = $id('f-type').value; 
-            const ccCont = $id('cc-term-container'); 
-            if(acc && acc.type === 'credit' && type === 'expense') { 
-                if(ccCont) ccCont.classList.remove('hidden'); 
-            } else { 
-                if(ccCont) ccCont.classList.add('hidden'); 
-            } 
-
-            // APEX FIX: Filtrar cuentas destino para Transferencias a la misma divisa de origen
-            const aSDest = $id('f-account-dest');
-            if (type === 'transfer' && aSDest && acc) {
-                const prevVal = aSDest.value;
-                aSDest.innerHTML = '';
-                const currentAccCurr = acc.currency || state.settings.baseCurrency || 'COP';
-                const sameCurAccs = state.accounts.filter(a => (a.currency || state.settings.baseCurrency || 'COP') === currentAccCurr);
-
-                sameCurAccs.forEach(a => { aSDest.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
-
-                // Retener selección previa si aún es válida, o asignar una distinta
-                if (sameCurAccs.some(a => a.id === prevVal)) {
-                    aSDest.value = prevVal;
-                } else if (sameCurAccs.length > 1) {
-                    const diff = sameCurAccs.find(a => a.id !== acc.id);
-                    if (diff) aSDest.value = diff.id;
-                }
-            }
-        }
-        
         function handleCatChange() {
             const cS = $id('f-cat');
             if (cS && cS.value === 'ADD_NEW_CAT') {
@@ -7661,82 +7546,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
         }
 
-        function copyPSECard(text) {
-            const temp = document.createElement("textarea");
-            temp.value = text;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            document.body.removeChild(temp);
-            alert("✅ NIC copiado al portapapeles:\n\n" + text);
-        }
-
-        function copyAndPayPSE(reference, url) {
-            // 1. Copiar al portapapeles silenciosamente
-            const temp = document.createElement("textarea");
-            temp.value = reference;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            document.body.removeChild(temp);
-            
-            // 2. Feedback visual
-            alert("✅ NIC Copiado.\nAbriendo portal de pagos...");
-            
-            // 3. Abrir pestaña de pago
-            setTimeout(() => {
-                redirigirPagoDirecto(url);
-            }, 800);
-        }
-
-        function openNewPSEForm(id = null, prefillName = null) {
-            const mod = $id('new-pse-modal'); if(!mod) return;
-            const titleEl = $id('pse-form-title');
-            
-            if (id) {
-                const link = state.pseLinks.find(l => l.id === id);
-                if (link) {
-                    $id('f-pse-id').value = link.id;
-                    $id('f-pse-name').value = link.name;
-                    $id('f-pse-ref-name').value = link.refName || '';
-                    $id('f-pse-ref').value = link.reference || '';
-                    $id('f-pse-url').value = link.url;
-                    $id('f-pse-icon').value = link.icon.replace('fa-', ''); // Para mostrarlo sin prefijo en el input
-                    if($id('f-pse-freq')) $id('f-pse-freq').value = link.freq || 'none';
-                    if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
-                    if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
-                    if(titleEl) titleEl.innerText = "Editar Enlace";
-                }
-            } else {
-                $id('f-pse-id').value = '';
-                
-                // Si viene prefillName, buscamos el primer link que coincida para heredar sus datos (URL e icono)
-                if (prefillName) {
-                    $id('f-pse-name').value = prefillName;
-                    const existingLink = state.pseLinks.find(l => l.name === prefillName);
-                    if (existingLink) {
-                        $id('f-pse-url').value = existingLink.url;
-                        $id('f-pse-icon').value = existingLink.icon.replace('fa-', '');
-                    } else {
-                        $id('f-pse-url').value = '';
-                        $id('f-pse-icon').value = '';
-                    }
-                } else {
-                    $id('f-pse-name').value = '';
-                    $id('f-pse-url').value = '';
-                    $id('f-pse-icon').value = '';
-                }
-                
-                $id('f-pse-ref-name').value = '';
-                $id('f-pse-ref').value = '';
-                if($id('f-pse-freq')) $id('f-pse-freq').value = 'none';
-                if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = '';
-                if($id('f-pse-payday')) $id('f-pse-payday').value = '';
-                if(titleEl) titleEl.innerText = "Nuevo Enlace";
-            }
-            mod.classList.remove('hidden');
-        }
-
         function closeNewPSEForm() {
             const mod = $id('new-pse-modal'); if(!mod) return;
             mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
@@ -7846,7 +7655,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 state.pseLinks.push({ id: currentPseId, name, type, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
             }
 
-            // APEX FIX: Generación/Actualización de Tarea Automática (Recordatorio PSE en Segundo Plano)
+            // APEX FIX: Generación/Actualización de Tarea Automática Multidía (Soporta -3, -2, -1 y Día Cero)
             if (freq !== 'none' && (cutoff > 0 || payday > 0)) {
                 if(!state.tasks) state.tasks = [];
                 const taskId = 'task_pse_' + currentPseId;
@@ -7867,59 +7676,71 @@ ${JSON.stringify(dataToAnalyze)}`;
                     nextTarget.setDate(now.getDate() + dist);
                 }
                 
-                // Fecha de Visualización Oficial (Día Asignado para UI)
                 const paymentDateStr = nextTarget.getFullYear() + '-' + String(nextTarget.getMonth()+1).padStart(2,'0') + '-' + String(nextTarget.getDate()).padStart(2,'0');
                 
-                // Fecha de Notificación Background (-3 Días para Contenedor iOS)
                 let reminderDate = new Date(nextTarget);
                 reminderDate.setDate(reminderDate.getDate() - 3);
                 const reminderDateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
 
                 const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
-                const taskDesc = 'Aviso de pago inminente. Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
+                const taskDesc = 'Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
 
                 const existingTask = state.tasks.find(t => t.id === taskId);
                 if (existingTask) {
-                    existingTask.date = paymentDateStr; // En el calendario solo se visualiza el día límite de pago
-                    existingTask.reminderDate = reminderDateStr; // Hook interno
+                    existingTask.date = paymentDateStr; 
+                    existingTask.reminderDate = reminderDateStr; 
                     existingTask.title = taskTitle;
                     existingTask.description = taskDesc;
-                    existingTask.completed = false; // Reactivamos si la habían tachado
-                    existingTask.alarmTriggered = false;
+                    existingTask.timeAlarm = timeAlarm;
+                    existingTask.completed = false; 
+                    existingTask.lastAlarmDate = null; 
                     
-                    // Reprogramar notificación nativa (Swift iOS) 3 días antes
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
-                        }));
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId }));
+                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i }));
+                    }
+
+                    for (let i = 3; i >= 0; i--) {
+                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
+                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
+                        }
                     }
                 } else {
                     state.tasks.push({
                         id: taskId,
                         title: taskTitle,
                         description: taskDesc,
-                        date: paymentDateStr, // Visibilidad en calendario en la fecha original 
-                        reminderDate: reminderDateStr, // Variable para contenedor iOS (-3 días)
-                        timeAlarm: '09:00',
+                        date: paymentDateStr, 
+                        reminderDate: reminderDateStr, 
+                        timeAlarm: timeAlarm,
                         priority: 'high',
                         completed: false,
-                        alarmTriggered: false,
+                        lastAlarmDate: null,
                         createdAt: new Date().toISOString(),
                         vaultId: 'personal',
                         createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
                     });
                     
-                    // Notificación inicial enviada a Swift (iOS)
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                        window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                            id: taskId, title: "Aviso de Pago: " + taskTitle, body: "Se vence en 3 días. " + taskDesc, date: reminderDateStr, time: '09:00', priority: 'high' 
-                        }));
+                    for (let i = 3; i >= 0; i--) {
+                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
+                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
+                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
+                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
+                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
+                        }
                     }
                 }
             } else {
-                // Limpieza si el usuario apaga la automatización del servicio
                 if (state.tasks) {
-                    state.tasks = state.tasks.filter(t => t.id !== 'task_pse_' + currentPseId);
+                    const taskIdToClear = 'task_pse_' + currentPseId;
+                    state.tasks = state.tasks.filter(t => t.id !== taskIdToClear);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
+                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear }));
+                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear + '_rem' + i }));
+                    }
                 }
             }
 
@@ -7943,9 +7764,6 @@ ${JSON.stringify(dataToAnalyze)}`;
 
         function setTaskCalDate(dateStr) {
             if (taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
-            else taskCalSelectedDate = dateStr;
-            renderTasksTab();
-            if(taskCalSelectedDate === dateStr) taskCalSelectedDate = null;
             else taskCalSelectedDate = dateStr;
             renderTasksTab();
         }
@@ -8394,183 +8212,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
         }
         
-        // --- APEX FIX: ORGANIZACIÓN Y PROCRASTINACIÓN (DAILY BRIEFING RESTAURADO SIN POMODORO) ---
-        function openNewPSEForm(id = null, prefillName = null) {
-            const mod = $id('new-pse-modal'); if(!mod) return;
-            const titleEl = $id('pse-form-title');
-            
-            if (id) {
-                const link = state.pseLinks.find(l => l.id === id);
-                if (link) {
-                    $id('f-pse-id').value = link.id;
-                    $id('f-pse-name').value = link.name;
-                    $id('f-pse-ref-name').value = link.refName || '';
-                    $id('f-pse-ref').value = link.reference || '';
-                    $id('f-pse-url').value = link.url;
-                    $id('f-pse-icon').value = link.icon.replace('fa-', ''); 
-                    if($id('f-pse-freq')) $id('f-pse-freq').value = link.freq || 'none';
-                    if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
-                    if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
-                    if($id('f-pse-time')) $id('f-pse-time').value = link.time || '09:00';
-                    if(titleEl) titleEl.innerText = "Editar Enlace";
-                }
-            } else {
-                $id('f-pse-id').value = '';
-                
-                if (prefillName) {
-                    $id('f-pse-name').value = prefillName;
-                    const existingLink = state.pseLinks.find(l => l.name === prefillName);
-                    if (existingLink) {
-                        $id('f-pse-url').value = existingLink.url;
-                        $id('f-pse-icon').value = existingLink.icon.replace('fa-', '');
-                    } else {
-                        $id('f-pse-url').value = '';
-                        $id('f-pse-icon').value = '';
-                    }
-                } else {
-                    $id('f-pse-name').value = '';
-                    $id('f-pse-url').value = '';
-                    $id('f-pse-icon').value = '';
-                }
-                
-                $id('f-pse-ref-name').value = '';
-                $id('f-pse-ref').value = '';
-                if($id('f-pse-freq')) $id('f-pse-freq').value = 'none';
-                if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = '';
-                if($id('f-pse-payday')) $id('f-pse-payday').value = '';
-                if($id('f-pse-time')) $id('f-pse-time').value = '09:00';
-                if(titleEl) titleEl.innerText = "Nuevo Enlace";
-            }
-            mod.classList.remove('hidden');
-        }
-
-        function closeNewPSEForm() {
-            const mod = $id('new-pse-modal'); if(!mod) return;
-            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); 
-            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
-        }
-
-        function savePSELink(e) {
-            e.preventDefault();
-            const id = $id('f-pse-id').value;
-            const name = $id('f-pse-name').value.trim();
-            const refName = $id('f-pse-ref-name').value.trim();
-            const reference = $id('f-pse-ref').value.trim();
-            const url = $id('f-pse-url').value.trim();
-            let icon = $id('f-pse-icon').value.trim() || 'fa-building-columns';
-            if(icon && !icon.includes('fa-')) icon = 'fa-' + icon; 
-
-            const freq = $id('f-pse-freq') ? $id('f-pse-freq').value : 'none';
-            const cutoff = $id('f-pse-cutoff') ? parseInt($id('f-pse-cutoff').value) || 0 : 0;
-            const payday = $id('f-pse-payday') ? parseInt($id('f-pse-payday').value) || 0 : 0;
-            const timeAlarm = $id('f-pse-time') ? $id('f-pse-time').value : '09:00';
-
-            if (!name || !url) return alert("El nombre y la URL son obligatorios.");
-            if (!state.pseLinks) state.pseLinks = [];
-
-            let currentPseId = id;
-
-            if (id) {
-                const link = state.pseLinks.find(l => l.id === id);
-                if (link) { link.name = name; link.refName = refName; link.reference = reference; link.url = url; link.icon = icon; link.freq = freq; link.cutoff = cutoff; link.payday = payday; link.time = timeAlarm; }
-            } else {
-                currentPseId = 'pse_' + Date.now();
-                state.pseLinks.push({ id: currentPseId, name, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
-            }
-
-            // APEX FIX: Generación/Actualización de Tarea Automática Multidía (Soporta -3, -2, -1 y Día Cero)
-            if (freq !== 'none' && (cutoff > 0 || payday > 0)) {
-                if(!state.tasks) state.tasks = [];
-                const taskId = 'task_pse_' + currentPseId;
-                
-                let now = new Date();
-                now.setHours(0,0,0,0);
-                let nextTarget = new Date(now);
-                
-                let targetDay = payday > 0 ? payday : cutoff;
-                
-                if (freq === 'monthly') {
-                    nextTarget = new Date(now.getFullYear(), now.getMonth(), targetDay);
-                    if (nextTarget <= now) nextTarget.setMonth(nextTarget.getMonth() + 1);
-                } else if (freq === 'weekly') {
-                    let currentDay = now.getDay() || 7; 
-                    let dist = targetDay - currentDay;
-                    if (dist <= 0) dist += 7;
-                    nextTarget.setDate(now.getDate() + dist);
-                }
-                
-                const paymentDateStr = nextTarget.getFullYear() + '-' + String(nextTarget.getMonth()+1).padStart(2,'0') + '-' + String(nextTarget.getDate()).padStart(2,'0');
-                
-                let reminderDate = new Date(nextTarget);
-                reminderDate.setDate(reminderDate.getDate() - 3);
-                const reminderDateStr = reminderDate.getFullYear() + '-' + String(reminderDate.getMonth()+1).padStart(2,'0') + '-' + String(reminderDate.getDate()).padStart(2,'0');
-
-                const taskTitle = 'Pagar: ' + name + (refName ? ' (' + refName + ')' : '');
-                const taskDesc = 'Día asignado de pago límite: ' + targetDay + ' (' + nextTarget.toLocaleDateString('es-CO') + ')';
-
-                const existingTask = state.tasks.find(t => t.id === taskId);
-                if (existingTask) {
-                    existingTask.date = paymentDateStr; 
-                    existingTask.reminderDate = reminderDateStr; 
-                    existingTask.title = taskTitle;
-                    existingTask.description = taskDesc;
-                    existingTask.timeAlarm = timeAlarm;
-                    existingTask.completed = false; 
-                    existingTask.lastAlarmDate = null; 
-                    
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId }));
-                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i }));
-                    }
-
-                    for (let i = 3; i >= 0; i--) {
-                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
-                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
-                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
-                        }
-                    }
-                } else {
-                    state.tasks.push({
-                        id: taskId,
-                        title: taskTitle,
-                        description: taskDesc,
-                        date: paymentDateStr, 
-                        reminderDate: reminderDateStr, 
-                        timeAlarm: timeAlarm,
-                        priority: 'high',
-                        completed: false,
-                        lastAlarmDate: null,
-                        createdAt: new Date().toISOString(),
-                        vaultId: 'personal',
-                        createdBy: userProfile && userProfile.name ? userProfile.name : 'Auto-Bot'
-                    });
-                    
-                    for (let i = 3; i >= 0; i--) {
-                        let nD = new Date(nextTarget); nD.setDate(nD.getDate() - i);
-                        let nDStr = nD.getFullYear() + '-' + String(nD.getMonth()+1).padStart(2,'0') + '-' + String(nD.getDate()).padStart(2,'0');
-                        let dMsg = i===0 ? "HOY es el último día de pago." : (i===1 ? "Vence MAÑANA." : `Vence en ${i} días.`);
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i, title: "Aviso de Pago: " + taskTitle, body: dMsg + " " + taskDesc, date: nDStr, time: timeAlarm, priority: 'high' }));
-                        }
-                    }
-                }
-            } else {
-                if (state.tasks) {
-                    const taskIdToClear = 'task_pse_' + currentPseId;
-                    state.tasks = state.tasks.filter(t => t.id !== taskIdToClear);
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear }));
-                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear + '_rem' + i }));
-                    }
-                }
-            }
-
-            saveState(); renderPSELinks(); closeNewPSEForm();
-            if(typeof renderTasksTab === 'function') renderTasksTab();
-        }
-
         function showDailyBriefing() {
             const modal = $id('daily-briefing-modal'); if(!modal) return;
             const now = new Date();
