@@ -867,7 +867,7 @@
                                 <button onclick="scanP2PRadarDirect()" class="text-[8px] bg-purple-100 text-purple-600 px-3 py-1.5 rounded-lg font-black uppercase active:scale-95 shadow-sm hover:bg-purple-200 transition-colors"><i class="fa-solid fa-search mr-1"></i> Escanear</button>
                             </div>
                             <div id="direct-p2p-radar-list" class="space-y-2">
-                                <p class="text-[10px] text-purple-400 font-bold text-center py-2">Presiona escanear para buscar bóvedas</p>
+                                <p class="text-[10px] text-purple-400 font-bold text-center py-2">Radar desactivado — usa token nx_ en modal P2P</p>
                             </div>
                         </div>
 
@@ -878,7 +878,7 @@
                                 <button onclick="scanTaskP2PRadarDirect()" class="text-[8px] bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-lg font-black uppercase active:scale-95 shadow-sm hover:bg-indigo-200 transition-colors"><i class="fa-solid fa-search mr-1"></i> Escanear</button>
                             </div>
                             <div id="direct-task-radar-list" class="space-y-2">
-                                <p class="text-[10px] text-indigo-400 font-bold text-center py-2">Presiona escanear para buscar tareas</p>
+                                <p class="text-[10px] text-indigo-400 font-bold text-center py-2">Radar desactivado — usa token nxt_ en tareas</p>
                             </div>
                         </div>
                         
@@ -1455,12 +1455,12 @@
             <div class="space-y-4">
                 <div class="bg-purple-50 p-4 rounded-2xl border border-purple-100">
                     <div class="flex items-center gap-3 mb-2"><i class="fa-solid fa-satellite-dish text-xl text-purple-500"></i><p class="text-[10px] font-black uppercase text-purple-800 tracking-widest">Radar de Bóvedas</p></div>
-                    <p class="text-[8px] text-purple-600 leading-tight">Las cuentas configuradas como "Compartidas" por otros usuarios en la red aparecerán aquí automáticamente.</p>
+                    <p class="text-[8px] text-purple-600 leading-tight">Por seguridad, las bóvedas no son públicas. Solo puedes unirte con un token nx_... del dueño.</p>
                 </div>
                 
                 <!-- APEX FIX: Explorador Automático P2P -->
                 <div id="p2p-radar-list" class="max-h-48 overflow-y-auto hide-scrollbar bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                    <p class="text-[10px] text-center text-slate-400 font-bold py-2"><i class="fa-solid fa-radar fa-spin mr-1"></i> Escaneando red...</p>
+                    <p class="text-[10px] text-center text-slate-400 font-bold py-2"><i class="fa-solid fa-shield-halved mr-1"></i> Pega tu token abajo</p>
                 </div>
 
                 <div class="relative flex items-center py-2">
@@ -2628,6 +2628,71 @@
         let p2pRenderTimeout = null; // APEX FIX: Timer para debounce de UI
         let lastCloudSyncHash = {}; // APEX FIX: Caché de firmas para Optimización Extrema de Escrituras en Firebase
 
+        // ============================================================================
+        // --- FIREBASE ACL P2P (members + memberUids, alineado con firestore.rules) ---
+        // ============================================================================
+        async function ensureAuthIdentityLinked() {
+            if (!fbUser || !currentUser || !window.db) return;
+            try {
+                const { doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser);
+                const snap = await getDoc(ref);
+                const patch = { linkedUid: fbUser.uid, lastSeen: Date.now() };
+                if (fbUser.email) patch.email = fbUser.email;
+                const base = snap.exists() ? snap.data() : {};
+                await setDoc(ref, { ...base, ...patch }, { merge: true });
+            } catch (e) {
+                console.warn("[APEX] No se pudo vincular linkedUid:", e);
+            }
+        }
+
+        async function claimSharedDocAccess(collectionName, vaultId) {
+            if (!fbUser || !currentUser || !window.db || !vaultId) return false;
+            try {
+                const { doc, getDoc, updateDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', collectionName, vaultId);
+                const snap = await getDoc(ref);
+                const memberEmail = currentUser;
+                const memberUid = fbUser.uid;
+                if (!snap.exists()) {
+                    await setDoc(ref, {
+                        owner: currentUser,
+                        ownerUid: memberUid,
+                        members: [memberEmail],
+                        memberUids: [memberUid],
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true });
+                    return true;
+                }
+                const data = snap.data() || {};
+                const alreadyIn = (data.members && data.members.includes(memberEmail)) || (data.memberUids && data.memberUids.includes(memberUid));
+                if (alreadyIn) return true;
+                await updateDoc(ref, {
+                    members: arrayUnion(memberEmail),
+                    memberUids: arrayUnion(memberUid),
+                    updatedAt: new Date().toISOString()
+                });
+                return true;
+            } catch (e) {
+                console.error("[APEX P2P] claimSharedDocAccess falló:", e);
+                return false;
+            }
+        }
+
+        function buildSharedAclFields() {
+            const memberEmail = currentUser || '';
+            const memberUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+            return {
+                owner: currentUser,
+                ownerUid: memberUid,
+                members: memberEmail ? [memberEmail] : [],
+                memberUids: memberUid ? [memberUid] : []
+            };
+        }
+
+
+
         // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
         function attachP2PListener() {
             if (!window.db) return;
@@ -3141,7 +3206,7 @@
 
                         const sharedPayload = { 
                             name: sharedAcc.name.replace('👥 ', ''),
-                            owner: currentUser,
+                            ...buildSharedAclFields(),
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txsMap: txsMap,
@@ -3172,7 +3237,7 @@
 
                         const sharedPayload = {
                             name: vault.name,
-                            owner: currentUser,
+                            ...buildSharedAclFields(),
                             tasksMap: tasksMap,
                             updatedAt: new Date().toISOString()
                         };
@@ -3273,8 +3338,9 @@
                 await bootApp(); 
                 
                 // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
-                initCloud().then(() => {
-                    fetchCloudState();
+                initCloud().then(async () => {
+                    await fetchCloudState();
+                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 });
             }
         };
@@ -3499,6 +3565,7 @@
                         await bootApp(); 
                         await initCloud(); 
                         await fetchCloudState(); 
+                        if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                         resolve();
                     }, 300); 
                 } else {
@@ -9099,44 +9166,15 @@ ${JSON.stringify(dataToAnalyze)}`;
         // APEX FIX: Radar P2P Integrado (Búsqueda Automática de Cuentas Compartidas)
         async function openLinkSharedModal() { 
             const m = $id('shared-account-modal'); if(m) m.classList.remove('hidden'); 
-            
             const radarList = $id('p2p-radar-list');
-            if(radarList && window.db) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-400 font-bold py-4"><i class="fa-solid fa-satellite-dish fa-fade mr-2"></i>Escaneando red de bóvedas...</p>';
-                try {
-                    const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
-                    let html = '';
-                    snap.forEach(doc => {
-                        const data = doc.data();
-                        const alreadyLinked = state.accounts.some(a => a.remoteId === doc.id);
-                        // Mostrar solo si es de otro usuario y no está vinculada en este dispositivo
-                        if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                            html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-purple-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-satellite-dish text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-purple-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">De: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkRadarAccount('${doc.id}', '${data.name}', '${data.currency}')" class="bg-purple-100 text-purple-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-purple-200 transition-colors active:scale-95">Vincular</button></div>`;
-                        }
-                    });
-                    if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-4">No hay bóvedas compartidas disponibles.</p>';
-                    radarList.innerHTML = html;
-                } catch(e) {
-                    radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-4">Error conectando al radar P2P.</p>';
-                }
+            if(radarList) {
+                radarList.innerHTML = '<p class="text-[10px] text-center text-purple-600 font-bold py-4 leading-relaxed"><i class="fa-solid fa-shield-halved mr-1"></i> Las bóvedas compartidas ya no son públicas.<br><br>Pide el token <b>nx_...</b> al dueño y pégalo abajo para unirte de forma segura.</p>';
             }
-        }
-
-        function linkRadarAccount(remoteId, name, currency) {
-            const newAcc = { id: 'acc_' + Date.now(), name: '👥 ' + name, currency: currency || 'COP', balance: 0, type: 'liquid', isShared: true, remoteId: remoteId, syncedOnce: false };
-            state.accounts.push(newAcc);
-            if(currentUser) NexusIDB.saveState(currentUser, state);
-            if (typeof attachP2PListener === 'function') attachP2PListener();
-            alert("✅ Bóveda P2P Vinculada desde el Radar.\n\nDescargando historial de transacciones. Estará lista en un par de segundos.");
-            closeLinkSharedModal();
-            updateDashboard();
-            if (state.activeTab === 'accounts') renderAccountsTab();
         }
 
         function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
 
-        function processSharedToken() {
+        async function processSharedToken() {
             const tokenInput = $id('shared-token-input');
             if(!tokenInput) return;
             const token = tokenInput.value.trim();
@@ -9150,6 +9188,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
                     return alert("Esta bóveda ya está vinculada a tu cuenta.");
                 }
+
+                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                const joined = await claimSharedDocAccess('nexus_shared_vaults', shareData.vaultId);
+                if (!joined) return alert("No se pudo autorizar el acceso a la bóveda. Verifica tu conexión y que el token sea válido.");
 
                 const newAcc = { 
                     id: 'acc_' + Date.now(), 
@@ -9909,47 +9951,14 @@ ${JSON.stringify(dataToAnalyze)}`;
         // APEX FIX: Función para buscar Tareas P2P directamente en la vista de configuración
         async function scanTaskP2PRadarDirect() {
             const radarList = $id('direct-task-radar-list');
-            if(!radarList || !window.db) return;
-            
-            radarList.innerHTML = '<p class="text-[10px] text-center text-indigo-400 font-bold py-2"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Buscando en Firebase...</p>';
-            try {
-                const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const snap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks'));
-                let html = '';
-                if (!state.taskVaults) state.taskVaults = [];
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    const alreadyLinked = state.taskVaults.some(v => v.remoteId === doc.id);
-                    if(data.owner && data.owner !== currentUser && !alreadyLinked && data.name) {
-                        html += `<div class="flex justify-between items-center p-3 bg-white rounded-xl border border-indigo-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-list-check text-[10px]"></i></div><div><p class="text-[10px] font-black uppercase text-indigo-700">${data.name}</p><p class="text-[8px] font-bold text-slate-400 mt-0.5">Propiedad de: ${data.owner.split('@')[0]}</p></div></div><button onclick="linkTaskRadarVault('${doc.id}', '${data.name}', '${data.owner}')" class="bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[9px] font-black uppercase shadow-sm hover:bg-indigo-600 transition-colors active:scale-95">Vincular</button></div>`;
-                    }
-                });
-                if(!html) html = '<p class="text-[10px] text-center text-slate-400 font-bold py-2">No hay bóvedas de tareas nuevas en la red.</p>';
-                radarList.innerHTML = html;
-            } catch(e) {
-                radarList.innerHTML = '<p class="text-[10px] text-center text-red-400 font-bold py-2">Error de conexión P2P.</p>';
-            }
+            if(!radarList) return;
+            radarList.innerHTML = '<p class="text-[10px] text-center text-indigo-600 font-bold py-2 leading-relaxed"><i class="fa-solid fa-shield-halved mr-1"></i> El radar está desactivado por seguridad.<br>Usa un token <b>nxt_...</b> en la bóveda de tareas.</p>';
         }
 
-        function linkTaskRadarVault(remoteId, name, owner) {
-            if(!state.taskVaults) state.taskVaults = [];
-            if(state.taskVaults.some(v => v.remoteId === remoteId)) return alert("Ya estás vinculado a esta bóveda.");
-            
-            let cleanName = name;
-            if(!cleanName.startsWith('👥 ')) cleanName = '👥 ' + cleanName;
-
-            state.taskVaults.push({ id: remoteId, name: cleanName, isShared: true, remoteId: remoteId, owner: owner });
-            if(currentUser) NexusIDB.saveState(currentUser, state);
-            
-            if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
-            
-            alert("✅ Bóveda de tareas P2P vinculada desde el Radar.");
-            
-            populateTaskVaultSelects();
-            if ($id('task-vault-modal') && !$id('task-vault-modal').classList.contains('hidden')) renderTaskVaultsList();
-            
-            scanTaskP2PRadarDirect();
-            updateDashboard();
+        function scanP2PRadarDirect() {
+            const radarList = $id('direct-p2p-radar-list');
+            if(!radarList) return;
+            radarList.innerHTML = '<p class="text-[10px] text-center text-purple-600 font-bold py-2 leading-relaxed"><i class="fa-solid fa-shield-halved mr-1"></i> El radar está desactivado por seguridad.<br>Pega un token <b>nx_...</b> en el modal P2P de cuentas.</p>';
         }
 
         let currentEditAvatar = null;
@@ -10754,10 +10763,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                         }
 
                         // 2. Eliminar todas las bóvedas compartidas P2P globales
-                        const sharedSnap = await getDocs(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults'));
-                        for (const sharedDoc of sharedSnap.docs) {
-                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedDoc.id));
-                            opsCount++;
+                        const sharedIds = new Set([
+                            ...(state.accounts || []).filter(a => a.isShared && a.remoteId).map(a => a.remoteId),
+                            ...(state.taskVaults || []).filter(v => v.isShared && v.remoteId).map(v => v.remoteId)
+                        ]);
+                        for (const sid of sharedIds) {
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sid));
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', sid));
+                            opsCount += 2;
                             if (opsCount > 400) {
                                 await batch.commit();
                                 batch = writeBatch(window.db);
@@ -10860,13 +10873,16 @@ ${JSON.stringify(dataToAnalyze)}`;
             alert("✅ Bóveda de tareas creada exitosamente.");
         }
 
-        function linkTaskVault() {
+        async function linkTaskVault() {
             const token = $id('task-vault-token').value.trim();
             if(!token.startsWith('nxt_')) return alert("Token inválido.");
             try {
                 const data = JSON.parse(atob(token.substring(4)));
                 if(!state.taskVaults) state.taskVaults = [];
                 if(state.taskVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
+                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                const joined = await claimSharedDocAccess('nexus_shared_tasks', data.vaultId);
+                if (!joined) return alert("No se pudo autorizar el acceso a la bóveda de tareas.");
                 state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('task-vault-token').value = '';
@@ -10881,8 +10897,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             const v = state.taskVaults.find(x => x.id === id); if(!v) return;
             const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner };
             const token = 'nxt_' + btoa(JSON.stringify(payload));
-            
-            secureCopy(token, "✅ Token P2P Seguro copiado:\n\n" + token.substring(0, 20) + "...\n\nCompártelo para invitar a otros a gestionar estas tareas.");
+            const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove();
+            alert("✅ Token P2P copiado al portapapeles:\n\n" + token.substring(0,20) + "...\n\nCompártelo para invitar a otros a gestionar estas tareas.");
         } 
 
         // APEX FIX: Modificador seguro para eliminar/desvincular Bóvedas de Tareas
@@ -10908,6 +10924,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 </div>
             `).join('');
         }
+
 
         </script>
 </body>
