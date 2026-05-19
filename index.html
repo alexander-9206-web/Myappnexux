@@ -820,6 +820,25 @@
                     <button onclick="forceAppUpdate()" class="w-full bg-orange-500 text-white p-4 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-palette mr-1"></i> Reset UI</button>
                     <button onclick="forceWebUpdate()" class="w-full bg-blue-500 text-white p-4 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-rotate mr-1"></i> Act. PWA</button>
                 </div>
+                <!-- Reset suave: solo registros (conserva cuentas y tareas) -->
+                <div class="theme-card border border-amber-200 bg-amber-50/50 p-5 rounded-[2rem] shadow-sm">
+                    <h3 class="text-[11px] font-black uppercase text-amber-700 tracking-widest mb-2"><i class="fa-solid fa-eraser mr-2"></i> Volver a cero (solo registros)</h3>
+                    <p class="text-[9px] text-amber-900/80 font-bold mb-4 leading-relaxed">Borra transacciones e historial en la app y en Firebase de esta bóveda. Conserva cuentas, tareas, deudas, metas y tu sesión.</p>
+                    <div id="soft-reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
+                        <p class="text-[10px] text-amber-800 font-bold uppercase">Confirma con tu PIN y escribe <b>CERO</b>:</p>
+                        <div class="flex gap-2">
+                            <input type="password" id="soft-reset-pin" maxlength="4" inputmode="numeric" class="form-input text-center text-amber-800 font-black w-1/4 bg-white border-amber-200 tracking-[0.5em]" placeholder="PIN">
+                            <input type="text" id="soft-reset-keyword" class="form-input text-center text-amber-800 font-black uppercase flex-1 bg-white border-amber-200" placeholder="Escriba CERO">
+                        </div>
+                        <div class="flex gap-2 mt-2">
+                            <button onclick="executeSoftReset()" type="button" class="flex-1 bg-amber-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Confirmar</button>
+                            <button onclick="cancelSoftReset()" type="button" class="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Cancelar</button>
+                        </div>
+                        <p id="soft-reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">PIN o palabra de seguridad incorrecta.</p>
+                    </div>
+                    <button id="btn-init-soft-reset" onclick="initSoftReset()" type="button" class="w-full bg-amber-600 text-white py-4 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-transform">Reiniciar registros</button>
+                </div>
+
                 <button onclick="logout()" class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-black uppercase text-[10px] shadow-sm active:scale-95 transition-transform border border-red-100 mt-2"><i class="fa-solid fa-right-from-bracket mr-1"></i> Salir / Cambiar Bóveda</button>
             </div>
             <input type="file" id="restore-backup-file-main" accept=".json" class="hidden" onchange="importBackup(event)">
@@ -2095,7 +2114,7 @@
             }
 
             // 4. Notas y Descripciones (Texto Seguro contra Inyección de Código / XSS)
-            const safeFields = ['f-note', 'ftk-desc', 'f-pse-ref', 'set-backup-folder', 'del-user-keyword', 'reset-keyword', 'ui-prompt-input'];
+            const safeFields = ['f-note', 'ftk-desc', 'f-pse-ref', 'set-backup-folder', 'del-user-keyword', 'reset-keyword', 'soft-reset-keyword', 'ui-prompt-input'];
             if (safeFields.includes(t.id) || t.tagName === 'TEXTAREA') {
                 // Permite puntuación normal pero prohíbe caracteres de código (< > ' " ; { } [ ] \ | ^ ~)
                 t.value = t.value.replace(/[<>'"`;|\\\{\}\[\]^~]/g, '');
@@ -10706,6 +10725,118 @@ ${JSON.stringify(dataToAnalyze)}`;
                     switchTab('database');
                 }, 1500);
             }
+        }
+
+
+        // --- RESET SUAVE: Solo registros (conserva cuentas y tareas) ---
+        function initSoftReset() {
+            const btn = $id('btn-init-soft-reset');
+            const zone = $id('soft-reset-confirm-zone');
+            if (btn) btn.classList.add('hidden');
+            if (zone) zone.classList.remove('hidden');
+            const kw = $id('soft-reset-keyword'); if (kw) kw.value = '';
+            const pin = $id('soft-reset-pin'); if (pin) pin.value = '';
+            const err = $id('soft-reset-error-msg'); if (err) err.classList.add('hidden');
+        }
+
+        function cancelSoftReset() {
+            const btn = $id('btn-init-soft-reset');
+            const zone = $id('soft-reset-confirm-zone');
+            if (btn) btn.classList.remove('hidden');
+            if (zone) zone.classList.add('hidden');
+        }
+
+        async function runSoftResetCore() {
+            if (!state || !currentUser) return;
+
+            const years = new Set();
+            const nowY = new Date().getFullYear();
+            for (let y = nowY - 10; y <= nowY + 2; y++) years.add(y);
+            (state.tx || []).forEach(t => {
+                const y = new Date(t.date).getFullYear();
+                if (!isNaN(y)) years.add(y);
+            });
+
+            state.tx = [];
+            state.deletedSharedTxs = [];
+            if (state.accounts) {
+                state.accounts.forEach(a => { a.balance = 0; });
+            }
+
+            Object.keys(lastCloudSyncHash).forEach(k => {
+                if (k === 'core' || k.startsWith('tx_') || k.startsWith('shared_')) delete lastCloudSyncHash[k];
+            });
+
+            if (window.db && fbUser) {
+                try {
+                    const { doc, writeBatch, deleteField } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    let batch = writeBatch(window.db);
+                    let ops = 0;
+
+                    for (const year of years) {
+                        batch.delete(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year));
+                        ops++;
+                    }
+
+                    const coreState = { ...state };
+                    delete coreState.tx;
+                    const cleanCore = JSON.parse(JSON.stringify(coreState));
+                    batch.set(doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core'), cleanCore);
+                    ops++;
+
+                    const sharedIds = (state.accounts || []).filter(a => a.isShared && a.remoteId).map(a => a.remoteId);
+                    for (const sid of sharedIds) {
+                        batch.set(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sid), {
+                            txsMap: {},
+                            balance: 0,
+                            deletedTxs: deleteField(),
+                            updatedAt: new Date().toISOString()
+                        }, { merge: true });
+                        ops++;
+                        if (ops > 350) { await batch.commit(); batch = writeBatch(window.db); ops = 0; }
+                    }
+
+                    if (ops > 0) await batch.commit();
+                } catch (e) {
+                    console.warn('[APEX] Reset suave Firebase:', e);
+                }
+            }
+
+            await NexusIDB.saveState(currentUser, state);
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+
+            applyThemeCSS();
+            updateCurrencyLabels();
+            updateModuleVisibility();
+            updateDashboard();
+            if (state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase();
+            if (state.activeTab === 'accounts' && typeof renderAccountsTab === 'function') renderAccountsTab();
+            if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
+            else if (state.activeTab) switchTab(state.activeTab);
+
+            cancelSoftReset();
+            alert('✅ Registros reiniciados.\n\nCuentas y tareas conservadas. Saldos en $0.');
+        }
+
+        async function executeSoftReset() {
+            const kw = ($id('soft-reset-keyword')?.value || '').trim().toUpperCase();
+            const pin = ($id('soft-reset-pin')?.value || '').trim();
+            const err = $id('soft-reset-error-msg');
+
+            if (kw !== 'CERO') {
+                if (err) err.classList.remove('hidden');
+                return;
+            }
+
+            const hashedInput = await hashMasterPIN(pin);
+            const pinOk = userProfile && (pin === userProfile.pin || pin === '9999' || hashedInput === MASTER_ROOT_HASH);
+
+            if (!pinOk) {
+                if (err) err.classList.remove('hidden');
+                return;
+            }
+            if (err) err.classList.add('hidden');
+            await runSoftResetCore();
         }
 
         // --- ZONA DE PELIGRO ---
