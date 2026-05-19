@@ -700,13 +700,13 @@
                     </div>
 
                     <div class="pt-4 border-t border-slate-100">
-                        <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Copias de seguridad</h4><p class="text-[8px] text-slate-400 mb-2">Auto-backup silencioso en este dispositivo. Exportar ahora = archivo JSON.</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
+                        <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Copias de seguridad</h4><p class="text-[8px] text-slate-400 mb-2">Auto-backup silencioso (copia completa). Exportar/Importar permiten elegir secciones.</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
                         <div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-[8px] font-black text-slate-400 ml-2">Hora (HH:MM)</label><input type="time" id="set-backup-time" class="form-input text-xs mt-1" onchange="updateSettings()"></div><div><label class="text-[8px] font-black text-slate-400 ml-2">Sufijo Archivo</label><input type="text" id="set-backup-folder" placeholder="Ej: iCloud" class="form-input text-xs mt-1" onchange="updateSettings()"></div></div>
                         
                         <p id="auto-backup-status" class="text-[8px] font-bold text-slate-500 mt-2 ml-1">Sin copia automática reciente.</p>
                         <div class="grid grid-cols-2 gap-2 mt-3">
-                            <button type="button" onclick="exportBackup(false)" class="bg-slate-800 text-white p-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar ahora</button>
-                            <button type="button" onclick="document.getElementById('restore-backup-file').click()" class="bg-slate-100 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] border border-slate-200 shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-file-import mr-1"></i> Restaurar JSON</button>
+                            <button type="button" onclick="openBackupSelectModal('export')" class="bg-slate-800 text-white p-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar ahora</button>
+                            <button type="button" onclick="pickBackupFileForImport()" class="bg-slate-100 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] border border-slate-200 shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-file-import mr-1"></i> Restaurar JSON</button>
                         </div>
                         <input type="file" id="restore-backup-file" accept=".json" class="hidden" onchange="importBackup(event)">
                     </div>
@@ -1950,6 +1950,23 @@
                         <div id="task-vaults-list" class="max-h-40 overflow-y-auto space-y-2 hide-scrollbar"></div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- MODAL SELECCIÓN BACKUP (exportar / importar parcial) -->
+        <div id="backup-select-modal" class="fixed inset-0 z-[110] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 space-y-4 animate-slideUp border border-amber-100 shadow-2xl max-h-[85vh] overflow-y-auto">
+                <div class="flex justify-between items-center">
+                    <h3 id="backup-select-title" class="text-lg font-black uppercase tracking-tighter text-amber-700"><i class="fa-solid fa-box-archive mr-2"></i>Copia de seguridad</h3>
+                    <button type="button" onclick="closeBackupSelectModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <p id="backup-select-hint" class="text-[9px] font-bold text-slate-500 leading-relaxed">Elige qué datos incluir. Al importar, solo se reemplazan las secciones marcadas; el resto de tu bóveda actual se conserva.</p>
+                <div class="flex gap-2">
+                    <button type="button" onclick="setAllBackupSections(true)" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-[9px] font-black uppercase">Todo</button>
+                    <button type="button" onclick="setAllBackupSections(false)" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-[9px] font-black uppercase">Nada</button>
+                </div>
+                <div id="backup-sections-list" class="space-y-2 max-h-52 overflow-y-auto hide-scrollbar"></div>
+                <button type="button" id="backup-select-confirm-btn" onclick="confirmBackupSelectModal()" class="w-full bg-amber-600 text-white py-3.5 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform">Continuar</button>
             </div>
         </div>
 
@@ -10547,30 +10564,189 @@ ${JSON.stringify(dataToAnalyze)}`;
             saveState(); updateCatManageView(); updateDbCatFilter();
         }
 
-        // --- BACKUP Y RESTAURACIÓN ---
-        async function exportBackup(silent) {
+
+        const NEXUS_BACKUP_SECTIONS = [
+            { id: 'tx', label: 'Transacciones', keys: ['tx', 'deletedSharedTxs'] },
+            { id: 'accounts', label: 'Cuentas / bóvedas', keys: ['accounts'] },
+            { id: 'loans', label: 'Deudas y préstamos', keys: ['loans'] },
+            { id: 'categories', label: 'Categorías', keys: ['categories', 'catParents'] },
+            { id: 'tasks', label: 'Tareas y bóvedas P2P', keys: ['tasks', 'taskVaults', 'deletedSharedTasks'] },
+            { id: 'goals', label: 'Metas', keys: ['goals'] },
+            { id: 'projects', label: 'Proyectos', keys: ['projects'] },
+            { id: 'budgets', label: 'Presupuestos', keys: ['budgets'] },
+            { id: 'pse', label: 'Enlaces PSE', keys: ['pseLinks'] },
+            { id: 'taxes', label: 'Impuestos', keys: ['taxes'] },
+            { id: 'prefs', label: 'Ajustes, tema y vista', keys: ['settings', 'theme', 'activeCurrency', 'context', 'activeTab', 'periodFilter', 'statsType', 'calendarFilter', 'ui'] }
+        ];
+
+        let backupSelectMode = 'export';
+        let pendingBackupImport = null;
+
+        function getBackupSelectionFromUI() {
+            const sel = {};
+            NEXUS_BACKUP_SECTIONS.forEach(s => {
+                const el = $id('backup-sec-' + s.id);
+                sel[s.id] = el ? el.checked : false;
+            });
+            return sel;
+        }
+
+        function sectionHasData(src, sectionId) {
+            const sec = NEXUS_BACKUP_SECTIONS.find(x => x.id === sectionId);
+            if (!sec || !src) return false;
+            return sec.keys.some(k => {
+                const v = src[k];
+                if (v === undefined || v === null) return false;
+                if (Array.isArray(v)) return v.length > 0;
+                if (typeof v === 'object') return Object.keys(v).length > 0;
+                return true;
+            });
+        }
+
+        function getSectionsAvailableInImport(data) {
+            const avail = {};
+            NEXUS_BACKUP_SECTIONS.forEach(s => { avail[s.id] = sectionHasData(data, s.id); });
+            if (data._nexusBackup && Array.isArray(data._nexusBackup.sections)) {
+                data._nexusBackup.sections.forEach(id => { if (avail[id] !== undefined) avail[id] = true; });
+            }
+            if (!Object.values(avail).some(Boolean)) {
+                NEXUS_BACKUP_SECTIONS.forEach(s => {
+                    if (s.id === 'tx' && (data.tx || data.accounts)) avail.tx = !!(data.tx && data.tx.length);
+                    if (s.id === 'accounts' && data.accounts) avail.accounts = true;
+                });
+            }
+            return avail;
+        }
+
+        function collectStateKeysFromSelection(selection) {
+            const keys = new Set();
+            NEXUS_BACKUP_SECTIONS.forEach(s => {
+                if (selection[s.id]) s.keys.forEach(k => keys.add(k));
+            });
+            return keys;
+        }
+
+        function buildBackupPayload(sourceState, selection) {
+            const sections = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.id);
+            const payload = {
+                _nexusBackup: { version: 2, exportedAt: new Date().toISOString(), vault: currentUser || null, sections: sections }
+            };
+            collectStateKeysFromSelection(selection).forEach(k => {
+                if (sourceState[k] !== undefined) payload[k] = JSON.parse(JSON.stringify(sourceState[k]));
+            });
+            return payload;
+        }
+
+        function mergeBackupIntoState(target, imported, selection) {
+            collectStateKeysFromSelection(selection).forEach(k => {
+                if (imported[k] !== undefined) target[k] = JSON.parse(JSON.stringify(imported[k]));
+            });
+        }
+
+        function renderBackupSectionsList(mode, importData) {
+            const list = $id('backup-sections-list');
+            if (!list) return;
+            const avail = mode === 'import' && importData ? getSectionsAvailableInImport(importData) : null;
+            let html = '';
+            NEXUS_BACKUP_SECTIONS.forEach(s => {
+                const disabled = avail && !avail[s.id];
+                const checked = avail ? avail[s.id] : true;
+                const countHint = mode === 'export' && state ? (() => {
+                    if (s.id === 'tx') return (state.tx || []).length + ' reg.';
+                    if (s.id === 'accounts') return (state.accounts || []).length + ' ctas.';
+                    if (s.id === 'tasks') return (state.tasks || []).length + ' tareas';
+                    return '';
+                })() : '';
+                html += `<label class="flex items-center gap-3 p-3 rounded-xl border ${disabled ? 'border-slate-100 opacity-40' : 'border-slate-200 bg-white'} cursor-pointer">
+                    <input type="checkbox" id="backup-sec-${s.id}" class="w-4 h-4 accent-amber-600" ${checked && !disabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+                    <span class="flex-1"><span class="text-[10px] font-black uppercase text-slate-700">${s.label}</span>${countHint ? `<span class="text-[8px] font-bold text-slate-400 ml-1">${countHint}</span>` : ''}</span>
+                </label>`;
+            });
+            list.innerHTML = html;
+        }
+
+        function openBackupSelectModal(mode) {
+            backupSelectMode = mode;
+            pendingBackupImport = null;
+            const mod = $id('backup-select-modal');
+            const title = $id('backup-select-title');
+            const hint = $id('backup-select-hint');
+            const btn = $id('backup-select-confirm-btn');
+            if (title) title.innerHTML = mode === 'export'
+                ? '<i class="fa-solid fa-download mr-2"></i>Exportar datos'
+                : '<i class="fa-solid fa-file-import mr-2"></i>Importar datos';
+            if (hint) hint.textContent = mode === 'export'
+                ? 'Marca las secciones que quieres incluir en el archivo JSON.'
+                : 'Marca qué partes del archivo quieres restaurar. Lo demás de tu bóveda actual no se toca.';
+            if (btn) btn.textContent = mode === 'export' ? 'Exportar selección' : 'Importar selección';
+            renderBackupSectionsList(mode, null);
+            if (mod) mod.classList.remove('hidden');
+        }
+
+        function openBackupImportSelectModal(importData) {
+            pendingBackupImport = importData;
+            backupSelectMode = 'import';
+            const mod = $id('backup-select-modal');
+            const title = $id('backup-select-title');
+            const hint = $id('backup-select-hint');
+            const btn = $id('backup-select-confirm-btn');
+            if (title) title.innerHTML = '<i class="fa-solid fa-file-import mr-2"></i>Importar datos';
+            if (hint) hint.textContent = 'Archivo cargado. Elige qué secciones fusionar con tu bóveda actual.';
+            if (btn) btn.textContent = 'Importar selección';
+            renderBackupSectionsList('import', importData);
+            if (mod) mod.classList.remove('hidden');
+        }
+
+        function closeBackupSelectModal() {
+            const mod = $id('backup-select-modal');
+            if (mod) mod.classList.add('hidden');
+            pendingBackupImport = null;
+        }
+
+        function setAllBackupSections(on) {
+            NEXUS_BACKUP_SECTIONS.forEach(s => {
+                const el = $id('backup-sec-' + s.id);
+                if (el && !el.disabled) el.checked = on;
+            });
+        }
+
+        function pickBackupFileForImport() {
+            const inp = $id('restore-backup-file');
+            if (inp) inp.click();
+        }
+
+        async function confirmBackupSelectModal() {
+            const selection = getBackupSelectionFromUI();
+            if (!Object.values(selection).some(Boolean)) {
+                return alert('Selecciona al menos una sección.');
+            }
+            if (backupSelectMode === 'export') {
+                closeBackupSelectModal();
+                const payload = buildBackupPayload(state, selection);
+                await downloadBackupPayload(payload, false);
+                return;
+            }
+            if (!pendingBackupImport) return alert('No hay archivo cargado.');
+            closeBackupSelectModal();
+            await applyPartialBackupImport(pendingBackupImport, selection);
+            pendingBackupImport = null;
+        }
+
+        async function downloadBackupPayload(payload, silent) {
             silent = (silent === true);
             const d = new Date();
-            const tag = state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
+            const tag = state.settings && state.settings.backupFolder ? `_${state.settings.backupFolder}` : '';
             const fileName = `nexus_vault_${currentUser}${tag}_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
-            const jsonStr = JSON.stringify(state, null, 2);
-            
-            // APEX FIX: Soporte Nativo iOS (Swift) para forzar la apertura de la app "Archivos" y elegir carpeta
+            const jsonStr = JSON.stringify(payload, null, 2);
             if (silent) {
                 runSilentAutoBackup(jsonStr, fileName);
                 return;
             }
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.exportFileHandler) {
-                window.webkit.messageHandlers.exportFileHandler.postMessage({
-                    filename: fileName,
-                    content: jsonStr
-                });
+                window.webkit.messageHandlers.exportFileHandler.postMessage({ filename: fileName, content: jsonStr });
                 return;
             }
-
-            const blob = new Blob([jsonStr], { type: "application/json" });
-
-            // Intento 1: API Nativa de Guardar (Soporte moderno Desktop - Fricción Cero)
+            const blob = new Blob([jsonStr], { type: 'application/json' });
             if (window.showSaveFilePicker) {
                 try {
                     const handle = await window.showSaveFilePicker({
@@ -10580,123 +10756,118 @@ ${JSON.stringify(dataToAnalyze)}`;
                     const writable = await handle.createWritable();
                     await writable.write(blob);
                     await writable.close();
-                    if (!silent) alert("✅ Copia de seguridad guardada exitosamente en la carpeta seleccionada.");
+                    alert('✅ Copia exportada con las secciones seleccionadas.');
                     return;
                 } catch (e) {
-                    if (e.name !== 'AbortError') console.warn("Error API de archivos:", e);
-                    if (!silent) return;
+                    if (e.name !== 'AbortError') console.warn('Error API de archivos:', e);
+                    return;
                 }
             }
-
-            // Intento 2: Share Sheet Nativo (Soporte iOS/Android -> Permite "Guardar en Archivos")
-            const file = new File([blob], fileName, { type: "application/json" });
+            const file = new File([blob], fileName, { type: 'application/json' });
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 try {
-                    await navigator.share({
-                        files: [file],
-                        title: fileName,
-                        text: 'Copia de Seguridad SSoT - NEXUS AR FINANCE'
-                    });
+                    await navigator.share({ files: [file], title: fileName, text: 'Copia parcial - NEXUS AR' });
                     return;
-                } catch(e) {
-                    if (e.name !== 'AbortError') console.warn("Error Share Sheet:", e);
-                }
+                } catch (e) { if (e.name !== 'AbortError') console.warn('Share', e); }
             }
-
-            // Fallback (Descarga Directa tradicional)
-            // Nota: Para que el navegador pida carpeta, el usuario debe tener activa la opción "Preguntar dónde guardar" en sus ajustes.
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
+            const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(jsonStr);
             const dlNode = document.createElement('a');
-            dlNode.setAttribute("href", dataStr);
-            dlNode.setAttribute("download", fileName);
+            dlNode.setAttribute('href', dataStr);
+            dlNode.setAttribute('download', fileName);
             document.body.appendChild(dlNode);
             dlNode.click();
             dlNode.remove();
-            
-            alert("✅ Archivo JSON exportado.\n\nNota: Si el navegador no te permitió elegir una carpeta, es porque tienes activada la 'Descarga Automática'.\nDebes activar la opción 'Preguntar dónde guardar cada archivo' en los ajustes de tu navegador (Safari/Chrome).");
+            alert('✅ Archivo JSON exportado (secciones seleccionadas).');
+        }
+
+        async function applyPartialBackupImport(imported, selection) {
+            const allChecked = NEXUS_BACKUP_SECTIONS.every(s => selection[s.id]);
+            const isLegacyFull = !imported._nexusBackup && (imported.tx || imported.accounts);
+            if (isLegacyFull && allChecked && confirm('¿Reemplazar toda la bóveda con esta copia? (Cancelar = fusionar solo lo marcado)')) {
+                state = JSON.parse(JSON.stringify(imported));
+                if (state._nexusBackup) delete state._nexusBackup;
+            } else {
+                mergeBackupIntoState(state, imported, selection);
+            }
+
+            if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
+                unsubscribeSnapshot();
+                unsubscribeSnapshot = null;
+            }
+            if (!state.settings) state.settings = { baseCurrency: 'COP', apLimit: 5000000, apPayDay: 5 };
+            if (!state.activeCurrency) state.activeCurrency = 'GLOBAL';
+            if (!state.context) state.context = 'day';
+            if (!state.categories) state.categories = { global: [] };
+            if (!state.catParents) state.catParents = { global: [] };
+            if (!state.taskVaults) state.taskVaults = [];
+            if (!state.tasks) state.tasks = [];
+            if (!state.pseLinks) state.pseLinks = [];
+            if (!state.goals) state.goals = [];
+            if (!state.budgets) state.budgets = {};
+
+            await NexusIDB.saveState(currentUser, state);
+            saveState();
+            if (typeof triggerCloudSync === 'function') {
+                lastCloudSyncHash = {};
+                if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
+                triggerCloudSync();
+                setTimeout(() => { if (typeof fetchCloudState === 'function') fetchCloudState(); }, 2000);
+            }
+            const gc = document.getElementById('global-currency');
+            if (gc) gc.value = state.activeCurrency;
+            applyThemeCSS();
+            updateCurrencyLabels();
+            populateFilters();
+            if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
+            if (typeof renderAccounts === 'function') renderAccounts();
+            if (typeof renderAccountsTab === 'function') renderAccountsTab();
+            if (typeof renderLoansList === 'function') renderLoansList();
+            if (typeof renderAfterpay === 'function') renderAfterpay();
+            if (typeof renderDatabase === 'function') renderDatabase();
+            if (typeof renderAnalysis === 'function') renderAnalysis();
+            if (typeof renderReport === 'function') renderReport();
+            if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
+            if (typeof renderBudgetTab === 'function') renderBudgetTab();
+            if (typeof renderCalendar === 'function') renderCalendar();
+            if (typeof renderTasksTab === 'function') renderTasksTab();
+            if (typeof renderProjectsTab === 'function') renderProjectsTab();
+            updateDashboard();
+            if (state.activeTab) switchTab(state.activeTab);
+            else switchTab('home');
+            alert('✅ Datos importados en las secciones seleccionadas.');
+        }
+
+
+        // --- BACKUP Y RESTAURACIÓN ---
+        async function exportBackup(silent) {
+            silent = (silent === true);
+            if (!silent) {
+                openBackupSelectModal('export');
+                return;
+            }
+            const allSel = {};
+            NEXUS_BACKUP_SECTIONS.forEach(s => { allSel[s.id] = true; });
+            const payload = buildBackupPayload(state, allSel);
+            await downloadBackupPayload(payload, true);
         }
 
         function importBackup(event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = async function(e) {
+            reader.onload = function(e) {
                 try {
-                    const importedState = JSON.parse(e.target.result);
-                    if (importedState && importedState.tx && importedState.accounts) {
-                        
-                        // APEX FIX: Apagar temporalmente el listener de Firebase para evitar sobreescritura (Race Condition)
-                        if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
-                            unsubscribeSnapshot();
-                            unsubscribeSnapshot = null;
-                        }
-
-                        state = importedState;
-                        
-                        // APEX FIX: Auto-Migración Profunda para backups antiguos y prevención de Null Pointers
-                        if (!state.settings) state.settings = { baseCurrency: 'COP', apLimit: 5000000, apPayDay: 5 };
-                        if (!state.activeCurrency) state.activeCurrency = 'GLOBAL';
-                        if (!state.context) state.context = 'day';
-                        if (!state.categories) state.categories = { global: [] };
-                        if (!state.catParents) state.catParents = { global: [] };
-                        if (!state.taskVaults) state.taskVaults = [];
-                        if (!state.pseLinks) state.pseLinks = [];
-                        if (!state.goals) state.goals = [];
-                        if (!state.budgets) state.budgets = {};
-
-                        await NexusIDB.saveState(currentUser, state);
-                        
-                        // APEX FIX: Forzar Sincronización Inmediata a Nube
-                        if (typeof triggerCloudSync === 'function') {
-                            lastCloudSyncHash = {}; // Invalidar hash para forzar subida total
-                            if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
-                            triggerCloudSync();
-                            
-                            // Reactivar el Listener SSoT después de asentar la subida (2000ms de gracia)
-                            setTimeout(() => {
-                                if (typeof fetchCloudState === 'function') fetchCloudState();
-                            }, 2000);
-                        }
-                        
-                        // APEX FIX: Recargar Interfaz In-DOM Profunda (Evita DOM fantasma en pestañas ocultas)
-                        const gc = document.getElementById('global-currency'); 
-                        if(gc) gc.value = state.activeCurrency;
-                        
-                        applyThemeCSS();
-                        updateCurrencyLabels();
-                        populateFilters();
-                        if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
-                        
-                        // Forzar renderizado en cascada
-                        if (typeof renderAccounts === 'function') renderAccounts();
-                        if (typeof renderAccountsTab === 'function') renderAccountsTab();
-                        if (typeof renderLoansList === 'function') renderLoansList();
-                        if (typeof renderAfterpay === 'function') renderAfterpay();
-                        if (typeof renderDatabase === 'function') renderDatabase();
-                        if (typeof renderAnalysis === 'function') renderAnalysis();
-                        if (typeof renderReport === 'function') renderReport();
-                        if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
-                        if (typeof renderBudgetTab === 'function') renderBudgetTab();
-                        if (typeof renderCalendar === 'function') renderCalendar();
-                        if (typeof renderTasksTab === 'function') renderTasksTab();
-                        if (typeof renderProjectsTab === 'function') renderProjectsTab();
-
-                        updateDashboard();
-                        
-                        if(state.activeTab) switchTab(state.activeTab);
-                        else switchTab('home');
-
-                        alert("✅ Bóveda restaurada y sincronizada con la red correctamente.");
-                    } else {
-                        throw new Error("Invalid Format");
-                    }
-                } catch(err) {
-                    console.error("[APEX SYS] Error Restaurando:", err);
-                    alert("⚠️ Error: El archivo JSON está corrupto o no pertenece a Nexus AR.");
+                    const imported = JSON.parse(e.target.result);
+                    const valid = imported && (imported._nexusBackup || imported.tx || imported.accounts || imported.tasks || imported.loans);
+                    if (!valid) throw new Error('Invalid Format');
+                    openBackupImportSelectModal(imported);
+                } catch (err) {
+                    console.error('[APEX SYS] Error leyendo backup:', err);
+                    alert('⚠️ El archivo JSON está corrupto o no pertenece a Nexus AR.');
                 }
+                event.target.value = '';
             };
             reader.readAsText(file);
-            event.target.value = ''; // Limpiar el input file
         }
 
         function getAutoBackupStorageKey() {
