@@ -615,7 +615,7 @@
                         </div>
                         <input type="hidden" id="edit-user-original-email">
                         <input type="text" id="edit-user-name" class="form-input text-xs bg-white mb-2" placeholder="Nombre">
-                        <input type="text" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-center tracking-[0.5em] mb-2 font-bold text-blue-600" placeholder="PIN">
+                        <input type="password" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-center tracking-[0.5em] mb-2 font-bold text-blue-600" placeholder="PIN">
                         <div class="flex gap-2">
                             <button onclick="saveUserEdit()" class="flex-1 bg-blue-600 text-white py-2 rounded-xl text-[10px] font-black">Guardar</button>
                             <button onclick="openDeleteUserModal()" class="flex-1 bg-red-50 text-red-600 border border-red-100 py-2 rounded-xl text-[10px] font-black">Borrar</button>
@@ -657,7 +657,7 @@
                 </div>
 
 
-                <div id="ios-notif-settings-block" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2 border-indigo-100 bg-indigo-50/20">
+                <div id="ios-notif-settings-block" data-native-only="true" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2 border-indigo-100 bg-indigo-50/20">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-indigo-600 mb-2"><i class="fa-brands fa-apple mr-1"></i> Alertas iOS</h3>
                     <p class="text-[8px] text-slate-500 text-center font-bold leading-relaxed px-2">Sonido, banner y prioridad de recordatorios nativos. El modo persistente también se ajusta en Ajustes del iPhone.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -901,6 +901,16 @@
                     </div>
                     <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
                 </div>
+            </div>
+            <div id="admin-root-pin-block" class="hidden md:max-w-2xl md:mx-auto mt-4 theme-card p-5 rounded-2xl border border-red-100 bg-white">
+                <h4 class="text-[10px] font-black uppercase text-red-600 mb-3"><i class="fa-solid fa-key mr-1"></i> PIN Root (Firebase)</h4>
+                <p class="text-[8px] text-slate-500 font-bold mb-3">Se guarda solo el hash en <code>nexus_security/config</code>. Nunca en el código.</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="password" id="admin-new-root-pin" maxlength="4" inputmode="numeric" placeholder="Nuevo PIN" class="form-input text-center tracking-[0.5em] text-sm">
+                    <input type="password" id="admin-confirm-root-pin" maxlength="4" inputmode="numeric" placeholder="Confirmar" class="form-input text-center tracking-[0.5em] text-sm">
+                </div>
+                <button type="button" onclick="saveAdminRootPin()" class="w-full mt-3 bg-red-600 text-white py-3 rounded-xl font-black uppercase text-[9px] active:scale-95">Guardar PIN root en Firebase</button>
+                <p id="admin-root-pin-status" class="text-[8px] font-bold text-red-500 text-center mt-2"></p>
             </div>
 
             <!-- BLOQUE ADMINISTRADOR GLOBAL (ROOT) -->
@@ -2368,15 +2378,13 @@
 
         async function confirmAuthAction() {
             const pin = $id('ui-auth-pin').value.trim();
-            const hashedInput = await hashMasterPIN(pin);
             const err = $id('ui-auth-error');
-            
-            if (pin === userProfile.pin || pin === '9999' || hashedInput === MASTER_ROOT_HASH) {
-                if(err) err.classList.add('hidden');
+            if (await verifyPrivilegedPin(pin)) {
+                if (err) err.classList.add('hidden');
                 closeAuthModal();
                 if (pendingAuthCallback) pendingAuthCallback();
             } else {
-                if(err) err.classList.remove('hidden');
+                if (err) err.classList.remove('hidden');
                 $id('ui-auth-pin').value = '';
             }
         }
@@ -2432,7 +2440,7 @@
             
             let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
             if (!profile) {
-                profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: null, lastSeen: Date.now() }; 
+                profile = { name: userName, email: userEmail, isGoogle: true, avatar: null, lastSeen: Date.now() }; 
             } else {
                 profile.lastSeen = Date.now();
                 profile.isGoogle = true;
@@ -2781,13 +2789,108 @@
             </div>`;
         }
 
-        // APEX FIX: Motor Criptográfico SHA-256 para validación de SuperAdmin (Root)
-        const MASTER_ROOT_HASH = '9a1a4bf004724b946f04c6436f56cb1144f8ab4f86d8eb3ecfa8959d57fb4284'; // Hash para el PIN "9999"
-        async function hashMasterPIN(pin) {
-            const msgUint8 = new TextEncoder().encode(pin);
+        // PIN: solo hash en Firebase/local — nunca contraseñas en código
+        let cachedRootPinHash = null;
+
+        async function hashVaultPIN(pin) {
+            const msgUint8 = new TextEncoder().encode(String(pin));
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function hashMasterPIN(pin) { return hashVaultPIN(pin); }
+
+        async function ensureProfilePinHash(profile) {
+            if (!profile) return profile;
+            if (profile.pinHash && String(profile.pinHash).length === 64) {
+                delete profile.pin;
+                return profile;
+            }
+            if (profile.pin && String(profile.pin).length === 4) {
+                profile.pinHash = await hashVaultPIN(profile.pin);
+                delete profile.pin;
+            }
+            return profile;
+        }
+
+        function sanitizeProfileForStorage(profile) {
+            const copy = { ...(profile || {}) };
+            delete copy.pin;
+            return copy;
+        }
+
+        async function verifyUserPin(pin, profile) {
+            if (!profile || !pin || String(pin).length !== 4) return false;
+            const p = await ensureProfilePinHash({ ...profile });
+            if (!p.pinHash) return false;
+            return (await hashVaultPIN(pin)) === p.pinHash;
+        }
+
+        async function loadRootPinHashFromCloud() {
+            if (!window.db) return cachedRootPinHash;
+            try {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const snap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_security', 'config'));
+                cachedRootPinHash = snap.exists() ? (snap.data().rootPinHash || null) : null;
+            } catch (e) { console.warn('[NEXUS] loadRootPinHash', e); }
+            return cachedRootPinHash;
+        }
+
+        async function verifyRootPin(pin) {
+            if (!pin || String(pin).length !== 4) return false;
+            if (!cachedRootPinHash) await loadRootPinHashFromCloud();
+            if (!cachedRootPinHash) return false;
+            return (await hashVaultPIN(pin)) === cachedRootPinHash;
+        }
+
+        async function saveRootPinToCloud(newPin) {
+            if (!window.db || !newPin || String(newPin).length !== 4) return { ok: false, error: 'PIN inválido' };
+            const rootPinHash = await hashVaultPIN(newPin);
+            try {
+                const { doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_security', 'config');
+                const snap = await getDoc(ref);
+                if (snap.exists() && !isRootAdminUnlocked) {
+                    return { ok: false, error: 'Sin sesión root' };
+                }
+                await setDoc(ref, { rootPinHash, updatedAt: Date.now() }, { merge: true });
+                cachedRootPinHash = rootPinHash;
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, error: e.message || 'Firebase' };
+            }
+        }
+
+        async function verifyPrivilegedPin(pin) {
+            if (await verifyRootPin(pin)) return true;
+            if (userProfile && await verifyUserPin(pin, userProfile)) return true;
+            return false;
+        }
+
+        async function getProfileForVault(email) {
+            let p = null;
+            try { p = JSON.parse(localStorage.getItem('nexus_profile_' + email)); } catch (e) {}
+            if (p) return ensureProfilePinHash(p);
+            if (window.db) {
+                try {
+                    const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const snap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                    if (snap.exists()) {
+                        p = await ensureProfilePinHash({ email, ...snap.data() });
+                        localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(p)));
+                    }
+                } catch (e) {}
+            }
+            return p;
+        }
+
+        async function syncProfileToCloud(profile) {
+            if (!window.db || !profile || !profile.email) return;
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...profile }));
+                await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', profile.email), safe, { merge: true });
+            } catch (e) { console.warn('[NEXUS] syncProfile', e); }
         }
 
         // APEX FIX: Motor de Biometría Híbrido (iOS Nativo + WebAuthn)
@@ -2865,34 +2968,35 @@
 
         // --- Puentes de Inyección Automática Biométrica ---
         function bioUnlockAdmin() {
-            triggerBiometricAuth(() => {
-                $id('admin-master-pin').value = '9999';
-                verifyAdminRoot();
+            triggerBiometricAuth(async () => {
+                isRootAdminUnlocked = true;
+                await activateRootMaintainerSession();
+                const box = $id('admin-auth-box'); if (box) box.classList.add('hidden');
+                const btn = $id('admin-unlock-container')?.querySelector('button');
+                if (btn) btn.classList.add('hidden');
+                renderSettingsTab();
             }, 'Verifica tu identidad para habilitar los controles de administrador.');
         }
 
         function bioUnlockTakeover() {
             triggerBiometricAuth(() => {
-                $id('takeover-user-pin').value = '9999';
-                confirmTakeoverUserVault();
+                sessionStorage.setItem('nexus_admin_bypass', 'true');
+                confirmTakeoverUserVault(true);
             }, 'Verifica tu identidad para tomar el control de esta bóveda.');
         }
 
         function bioUnlockDelete() {
             triggerBiometricAuth(() => {
-                $id('del-user-pin').value = '9999';
-                // Trigger manual del input checklist y palabra de seguridad (Wipeout Automático)
                 $id('del-user-keyword').value = 'RESET';
                 $id('del-user-check').checked = true;
-                confirmDeleteUserVault();
+                confirmDeleteUserVault(true);
             }, 'Verifica tu identidad para DESTRUIR esta bóveda permanentemente.');
         }
 
         function bioUnlockReset() {
             triggerBiometricAuth(() => {
-                $id('reset-pin').value = '9999';
                 $id('reset-keyword').value = 'RESET';
-                executeFactoryReset();
+                executeFactoryReset(true);
             }, 'Verifica tu identidad para realizar un FORMATEO DE FÁBRICA a toda la base de datos.');
         }
 
@@ -3624,6 +3728,8 @@
 
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
+            if (typeof syncIosNotificationUIVisibility === 'function') syncIosNotificationUIVisibility();
+
             window.addEventListener('scroll', () => {
                 if (state.activeTab === 'database') {
                     if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 100) {
@@ -3770,10 +3876,10 @@
                         const key = rec.docId;
                         if(usersMap.has(key)) {
                             const existing = usersMap.get(key);
-                            if(!existing.isCloud || existing.name !== rec.name || existing.pin !== rec.pin) {
+                            if(!existing.isCloud || existing.name !== rec.name || existing.pinHash !== rec.pinHash) {
                                 existing.isCloud = true;
                                 existing.name = rec.name;
-                                if (rec.pin) existing.pin = rec.pin;
+                                if (rec.pinHash) existing.pinHash = rec.pinHash;
                                 existing.email = rec.email;
                                 hasChanges = true;
                             }
@@ -3927,24 +4033,16 @@
             const pin = $id('login-existing-pin').value.trim();
             if(!loginSelectedEmail || (!bypassPin && pin.length !== 4)) return alert("Ingresa un PIN de 4 dígitos.");
             
-            const profile = JSON.parse(localStorage.getItem(`nexus_profile_${loginSelectedEmail}`));
-            // APEX FIX: Acceso de Usuario validado estrictamente sin backdoor en texto plano
-            if(profile && (bypassPin || profile.pin === pin)) {
-                userProfile = profile;
+            let profile = await getProfileForVault(loginSelectedEmail);
+            if (profile && (bypassPin || await verifyUserPin(pin, profile))) {
+                userProfile = await ensureProfilePinHash(profile);
                 userProfile.lastSeen = Date.now();
-                localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(userProfile));
-                
-                if (window.db) {
-                    try {
-                        const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', loginSelectedEmail), userProfile, { merge: true });
-                    } catch(e) {}
-                }
-                
+                localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
+                await syncProfileToCloud(userProfile);
                 await processLoginSuccess(loginSelectedEmail);
             } else {
-                alert("PIN Incorrecto.");
-                $id('login-existing-pin').value = '';
+                alert('PIN incorrecto.');
+                if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
             }
         }
 
@@ -3958,17 +4056,10 @@
             let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
             if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
             
-            userProfile = { name, email, pin, lastSeen: Date.now() }; 
-            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(userProfile));
-            
-            await initCloud(); // APEX FIX: Forzar enlace de red para subir nuevo perfil
-            
-            if (window.db) {
-                try {
-                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), userProfile, { merge: true });
-                } catch(e) {}
-            }
+            userProfile = { name, email, lastSeen: Date.now(), pinHash: await hashVaultPIN(pin) };
+            localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
+            await initCloud();
+            await syncProfileToCloud(userProfile);
             
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
@@ -4010,7 +4101,7 @@
                     
                     let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
                     if (!profile) {
-                        profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now() }; 
+                        profile = { name: userName, email: userEmail, isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now() }; 
                     } else {
                         profile.lastSeen = Date.now();
                         profile.isGoogle = true;
@@ -4066,14 +4157,16 @@
                 
                 let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
                 if (!profile) {
-                    profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now() }; 
+                    profile = { name: userName, email: userEmail, isGoogle: true, avatar: fbUser.photoURL, lastSeen: Date.now(), needsPinSetup: true };
                 } else {
                     profile.lastSeen = Date.now();
                     profile.isGoogle = true;
                     if (!profile.avatar && fbUser.photoURL) profile.avatar = fbUser.photoURL;
+                    profile = await ensureProfilePinHash(profile);
                 }
-                localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(profile));
+                localStorage.setItem(`nexus_profile_${userEmail}`, JSON.stringify(sanitizeProfileForStorage(profile)));
                 userProfile = profile;
+                await syncProfileToCloud(profile);
                 
                 // APEX FIX: Purga de triggerCloudSync() para evitar WIPEs en dispositivos limpios
                 await processLoginSuccess(userEmail);
@@ -4087,7 +4180,7 @@
                     const userName = name || 'Usuario Nativo';
                     let profile = JSON.parse(localStorage.getItem(`nexus_profile_${userEmail}`));
                     if (!profile) {
-                        profile = { name: userName, email: userEmail, pin: "0000", isGoogle: true, avatar: photoUrl, lastSeen: Date.now() }; 
+                        profile = { name: userName, email: userEmail, isGoogle: true, avatar: photoUrl, lastSeen: Date.now() }; 
                     } else {
                         profile.lastSeen = Date.now();
                         profile.isGoogle = true;
@@ -4109,12 +4202,24 @@
         };
 
         async function unlockSession(bypassPin = false) {
-            const input = $id('session-pin-input').value;
-            // APEX FIX: Desbloqueo estricto erradicando PIN backdoor
-            if(bypassPin || input === userProfile.pin) {
-                sessionUnlocked = true; const lockScreen = $id('session-lock-screen');
-                if(lockScreen) { lockScreen.classList.add('opacity-0', 'pointer-events-none'); setTimeout(async () => { lockScreen.classList.add('hidden'); lockScreen.classList.remove('opacity-0', 'pointer-events-none'); $id('session-pin-input').value = ''; await bootApp(); }, 300); } else await bootApp();
-            } else { alert("PIN Incorrecto."); $id('session-pin-input').value = ''; }
+            const input = ($id('session-pin-input')?.value || '').trim();
+            const ok = bypassPin || await verifyUserPin(input, userProfile);
+            if (ok) {
+                sessionUnlocked = true;
+                const lockScreen = $id('session-lock-screen');
+                if (lockScreen) {
+                    lockScreen.classList.add('opacity-0', 'pointer-events-none');
+                    setTimeout(async () => {
+                        lockScreen.classList.add('hidden');
+                        lockScreen.classList.remove('opacity-0', 'pointer-events-none');
+                        if ($id('session-pin-input')) $id('session-pin-input').value = '';
+                        await bootApp();
+                    }, 300);
+                } else await bootApp();
+            } else {
+                alert('PIN incorrecto.');
+                if ($id('session-pin-input')) $id('session-pin-input').value = '';
+            }
         }
 
         function setupInactivityLock() {
@@ -4144,6 +4249,8 @@
 
         async function bootApp() {
             userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
+            if (userProfile) userProfile = await ensureProfilePinHash(userProfile);
+            if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
             
             // APEX FIX: Migración Transparente a IndexedDB
             let savedState = await NexusIDB.getState(currentUser);
@@ -4208,6 +4315,14 @@
                 state.activeTab = 'home';
                 state.activeCurrency = 'GLOBAL';
                 sessionStorage.setItem('nexus_session_active', 'true');
+            }
+
+            if (!userProfile.pinHash) {
+                setTimeout(() => {
+                    alert('Define tu PIN de 4 dígitos en Configuración → Cambiar PIN de acceso.');
+                    if (typeof switchTab === 'function') switchTab('settings');
+                    if (typeof openUserEdit === 'function') openUserEdit(currentUser);
+                }, 600);
             }
 
             setupInactivityLock(); 
@@ -4554,14 +4669,16 @@
             if (task.lastAlarmDate === dStr) return;
             task.lastAlarmDate = dStr;
             saveState();
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.immediateAlarmHandler) {
-                window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({
+            if (isNativeIosApp()) {
+                const remPayload = {
                     id: 'rem_' + task.id + '_' + dStr,
                     title: 'Recordatorio: ' + task.title,
                     body: task.description || 'Tienes una tarea pendiente.',
-                    priority: task.priority || 'medium',
-                    notification: typeof getIosNotificationPayload === 'function' ? getIosNotificationPayload(task.priority) : undefined
-                }));
+                    priority: task.priority || 'medium'
+                };
+                const remNotif = getIosNotificationPayload(task.priority);
+                if (remNotif) remPayload.notification = remNotif;
+                window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify(remPayload));
             } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
                 new Notification('Recordatorio: ' + task.title, { body: task.description || 'Tienes una tarea pendiente.' });
             }
@@ -4596,7 +4713,7 @@
         }
 
         function cancelNativeTaskAlarm(taskId) {
-            if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.cancelAlarmHandler) return;
+            if (!isNativeIosApp()) return;
             window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId }));
             for (let i = 0; i <= 3; i++) {
                 window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i }));
@@ -4604,11 +4721,25 @@
         }
 
 
+        /** true solo en el contenedor iOS (WKWebView con puente nativo completo). */
         function isNativeIosApp() {
-            return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface);
+            const h = window.webkit && window.webkit.messageHandlers;
+            return !!(h && h.appInterface && h.scheduleAlarmHandler && h.immediateAlarmHandler && h.cancelAlarmHandler);
+        }
+
+        function syncIosNotificationUIVisibility() {
+            const native = isNativeIosApp();
+            const block = $id('ios-notif-settings-block');
+            if (!block) return;
+            block.classList.toggle('hidden', !native);
+            block.setAttribute('aria-hidden', native ? 'false' : 'true');
+            block.querySelectorAll('select, input[type="checkbox"], button').forEach(function(el) {
+                el.disabled = !native;
+            });
         }
 
         window.onNativeNotificationSettings = function(prefs) {
+            if (!isNativeIosApp()) return;
             if (!state.settings) state.settings = {};
             state.settings.iosNotifications = prefs;
             applyIosNotificationSettingsToUI(prefs);
@@ -4617,7 +4748,7 @@
         };
 
         function applyIosNotificationSettingsToUI(prefs) {
-            if (!prefs) return;
+            if (!isNativeIosApp() || !prefs) return;
             const s = $id('set-ios-notif-sound'); if (s && prefs.sound) s.value = prefs.sound;
             const a = $id('set-ios-notif-style'); if (a && prefs.alertStyle) a.value = prefs.alertStyle;
             const i = $id('set-ios-notif-interruption'); if (i && prefs.interruption) i.value = prefs.interruption;
@@ -4626,6 +4757,7 @@
         }
 
         function readIosNotificationSettingsFromUI() {
+            if (!isNativeIosApp()) return null;
             return {
                 sound: ($id('set-ios-notif-sound') || {}).value || 'default',
                 alertStyle: ($id('set-ios-notif-style') || {}).value || 'banner',
@@ -4636,15 +4768,16 @@
         }
 
         function getIosNotificationPayload(priority) {
+            if (!isNativeIosApp()) return null;
             const n = (state.settings && state.settings.iosNotifications) ? { ...state.settings.iosNotifications } : readIosNotificationSettingsFromUI();
+            if (!n) return null;
             const payload = { sound: n.sound, alertStyle: n.alertStyle, interruption: n.interruption };
             if (priority === 'high' && n.boostHighPriority) payload.interruption = 'timeSensitive';
             return payload;
         }
 
         function loadNativeNotificationSettings() {
-            const block = $id('ios-notif-settings-block');
-            if (block) block.classList.toggle('hidden', !isNativeIosApp());
+            syncIosNotificationUIVisibility();
             if (!isNativeIosApp()) return;
             if (state.settings && state.settings.iosNotifications) applyIosNotificationSettingsToUI(state.settings.iosNotifications);
             window.webkit.messageHandlers.appInterface.postMessage({ action: 'getNotificationSettings' });
@@ -4653,6 +4786,7 @@
         function updateIosNotificationSettings() {
             if (!isNativeIosApp()) return;
             const prefs = readIosNotificationSettingsFromUI();
+            if (!prefs) return;
             if (!state.settings) state.settings = {};
             state.settings.iosNotifications = prefs;
             saveState();
@@ -4664,6 +4798,7 @@
         function previewIosNotification() {
             if (!isNativeIosApp()) return;
             const prefs = readIosNotificationSettingsFromUI();
+            if (!prefs) return;
             window.webkit.messageHandlers.appInterface.postMessage({
                 action: 'previewNotification',
                 title: 'NEXUS AR',
@@ -4677,11 +4812,10 @@
             window.webkit.messageHandlers.appInterface.postMessage({ action: 'openSystemNotificationSettings' });
         }
 
-
-                function postNativeScheduledAlarm({ id, title, body, date, time, priority, fireAt }) {
-            if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scheduleAlarmHandler) return;
+        function postNativeScheduledAlarm({ id, title, body, date, time, priority, fireAt }) {
+            if (!isNativeIosApp()) return;
             const timeNorm = normalizeTaskTimeAlarm(time);
-            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({
+            const alarmPayload = {
                 id,
                 title,
                 body,
@@ -4689,9 +4823,11 @@
                 time: timeNorm,
                 priority: priority || 'medium',
                 fireAtMs: fireAt.getTime(),
-                fireAtISO: fireAt.toISOString(),
-                notification: typeof getIosNotificationPayload === 'function' ? getIosNotificationPayload(priority) : undefined
-            }));
+                fireAtISO: fireAt.toISOString()
+            };
+            const alarmNotif = getIosNotificationPayload(priority);
+            if (alarmNotif) alarmPayload.notification = alarmNotif;
+            window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify(alarmPayload));
         }
 
         function syncNativeTaskAlarm(task) {
@@ -4700,7 +4836,7 @@
                 if (task.id) cancelNativeTaskAlarm(task.id);
                 return;
             }
-            if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scheduleAlarmHandler) return;
+            if (!isNativeIosApp()) return;
 
             cancelNativeTaskAlarm(task.id);
             const timeNorm = normalizeTaskTimeAlarm(task.timeAlarm);
@@ -6223,15 +6359,16 @@
                 });
                 
                 // Disparo de la notificación Push en el contenedor iOS
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scheduleAlarmHandler) {
-                    window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({ 
-                        id: taskId, 
-                        title: "Recordatorio: " + taskTitle, 
-                        body: taskDesc, 
-                        date: date, 
-                        time: '09:00', 
-                        priority: priority 
-                    }));
+                if (isNativeIosApp()) {
+                    postNativeScheduledAlarm({
+                        id: taskId,
+                        title: "Recordatorio: " + taskTitle,
+                        body: taskDesc,
+                        date: date,
+                        time: '09:00',
+                        priority: priority,
+                        fireAt: buildTaskFireDate(date, '09:00') || new Date()
+                    });
                 }
             } 
             saveState(); updateDashboard(); closePendingForm(); 
@@ -8281,10 +8418,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (state.tasks) {
                     const taskIdToClear = 'task_pse_' + currentPseId;
                     state.tasks = state.tasks.filter(t => t.id !== taskIdToClear);
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cancelAlarmHandler) {
-                        window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear }));
-                        for(let i=0; i<=3; i++) window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskIdToClear + '_rem' + i }));
-                    }
+                    if (isNativeIosApp()) cancelNativeTaskAlarm(taskIdToClear);
                 }
             }
 
@@ -9921,11 +10055,13 @@ ${JSON.stringify(dataToAnalyze)}`;
             if(adminBlock) {
                 if(isMaster) {
                     adminBlock.classList.remove('hidden');
+                    const rpb = $id('admin-root-pin-block'); if (rpb) rpb.classList.remove('hidden');
                     if(unlockCont) unlockCont.classList.add('hidden');
                     loadAdminGlobalUsers();
                     if(typeof renderAdminModules === 'function') renderAdminModules();
                 } else {
                     adminBlock.classList.add('hidden');
+                    const rpb = $id('admin-root-pin-block'); if (rpb) rpb.classList.add('hidden');
                     if(unlockCont) unlockCont.classList.remove('hidden');
                 }
             }
@@ -9977,22 +10113,42 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         async function verifyAdminRoot() {
-            const pin = $id('admin-master-pin').value;
-            const hashedInput = await hashMasterPIN(pin);
-            
-            if (pin === "9999" || hashedInput === MASTER_ROOT_HASH) {
+            const pin = ($id('admin-master-pin')?.value || '').trim();
+            const err = $id('admin-auth-error');
+            if (!cachedRootPinHash) await loadRootPinHashFromCloud();
+            if (!cachedRootPinHash) {
+                if (err) { err.classList.remove('hidden'); err.textContent = 'Configura rootPinHash en Firebase (nexus_security/config)'; }
+                return;
+            }
+            if (await verifyRootPin(pin)) {
                 isRootAdminUnlocked = true;
                 await activateRootMaintainerSession();
-                $id('admin-unlock-container').classList.add('hidden');
-                const err = $id('admin-auth-error'); if(err) err.classList.add('hidden');
+                const cont = $id('admin-unlock-container'); if (cont) cont.classList.add('hidden');
+                if (err) err.classList.add('hidden');
                 renderSettingsTab();
                 setTimeout(() => {
                     const block = $id('admin-users-block');
-                    if(block) block.scrollIntoView({behavior: 'smooth', block: 'start'});
+                    if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 100);
             } else {
-                const err = $id('admin-auth-error'); if(err) err.classList.remove('hidden');
-                $id('admin-master-pin').value = '';
+                if (err) { err.classList.remove('hidden'); err.textContent = 'Acceso denegado'; }
+                if ($id('admin-master-pin')) $id('admin-master-pin').value = '';
+            }
+        }
+
+        async function saveAdminRootPin() {
+            const p1 = ($id('admin-new-root-pin')?.value || '').trim();
+            const p2 = ($id('admin-confirm-root-pin')?.value || '').trim();
+            const st = $id('admin-root-pin-status');
+            if (p1.length !== 4 || p1 !== p2) {
+                if (st) st.textContent = 'El PIN debe tener 4 dígitos y coincidir.';
+                return;
+            }
+            const res = await saveRootPinToCloud(p1);
+            if (st) st.textContent = res.ok ? 'PIN root guardado en Firebase.' : ('Error: ' + (res.error || ''));
+            if (res.ok) {
+                if ($id('admin-new-root-pin')) $id('admin-new-root-pin').value = '';
+                if ($id('admin-confirm-root-pin')) $id('admin-confirm-root-pin').value = '';
             }
         }
 
@@ -10452,13 +10608,13 @@ ${JSON.stringify(dataToAnalyze)}`;
                     const snap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', docId));
                     if (snap.exists()) {
                         const data = snap.data();
-                        p = { name: data.name || docId, email: data.email || docId, pin: data.pin || '0000', avatar: data.avatar || null };
-                        localStorage.setItem('nexus_profile_' + docId, JSON.stringify(p));
+                        p = await ensureProfilePinHash({ name: data.name || docId, email: data.email || docId, avatar: data.avatar || null, pinHash: data.pinHash, pin: data.pin });
+                        localStorage.setItem('nexus_profile_' + docId, JSON.stringify(sanitizeProfileForStorage(p)));
                     }
                 } catch (e) { console.warn('[APEX] openUserEdit cloud', e); }
             }
             if (!p && isRootAdminUnlocked) {
-                p = { name: isValidVaultUserId(docId) ? docId.split('@')[0] : 'Perfil fantasma', email: docId, pin: '0000' };
+                p = { name: isValidVaultUserId(docId) ? docId.split('@')[0] : 'Perfil fantasma', email: docId };
             }
             if(!p) return alert('No se encontró el perfil de este usuario.'); 
             
@@ -10466,7 +10622,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             $id('edit-user-panel').classList.remove('hidden'); 
             $id('edit-user-original-email').value = docId; 
             $id('edit-user-name').value = p.name; 
-            $id('edit-user-pin').value = p.pin; 
+            $id('edit-user-pin').value = '';
+            if ($id('edit-user-pin')) $id('edit-user-pin').placeholder = p.pinHash ? '•••• (dejar vacío = sin cambio)' : 'Nuevo PIN (4 dígitos)'; 
             
             currentEditAvatar = p.avatar || null;
             const avPreview = $id('edit-avatar-preview');
@@ -10485,30 +10642,33 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
         
         async function saveUserEdit() {
-            const email = $id('edit-user-original-email').value; const name = $id('edit-user-name').value.trim(); const pin = $id('edit-user-pin').value.trim();
-            if(!name || pin.length !== 4) return alert("Nombre y PIN numérico de 4 dígitos.");
-            const key = 'nexus_profile_' + email; 
-            const p = JSON.parse(localStorage.getItem(key)) || { email }; 
-            p.name = name; p.pin = pin; p.lastSeen = Date.now();
-            if (currentEditAvatar) p.avatar = currentEditAvatar;
-
-            localStorage.setItem(key, JSON.stringify(p));
-            
-            if(email === currentUser) { 
-                userProfile = p; 
-                $id('header-user-badge').innerText = p.name; 
-                if(typeof renderSettingsTab === 'function') renderSettingsTab();
-            } 
-            
-            // APEX FIX: Sincronizar edición en nube
-            if (window.db) {
-                try {
-                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email), { ...p, email }, { merge: true });
-                } catch(e) {}
+            const email = $id('edit-user-original-email').value;
+            const name = $id('edit-user-name').value.trim();
+            const pin = ($id('edit-user-pin')?.value || '').trim();
+            if (!name) return alert('El nombre es obligatorio.');
+            if (pin && pin.length !== 4) return alert('El PIN debe tener exactamente 4 dígitos numéricos.');
+            const key = 'nexus_profile_' + email;
+            let p = JSON.parse(localStorage.getItem(key)) || { email };
+            p.name = name;
+            p.lastSeen = Date.now();
+            if (pin) {
+                p.pinHash = await hashVaultPIN(pin);
+                delete p.pin;
+            } else {
+                p = await ensureProfilePinHash(p);
+                if (!p.pinHash) return alert('Debes definir un PIN de 4 dígitos.');
             }
-            
-            closeUserEdit(); updateLocalUsersList();
+            if (currentEditAvatar) p.avatar = currentEditAvatar;
+            p = sanitizeProfileForStorage(p);
+            localStorage.setItem(key, JSON.stringify(p));
+            if (email === currentUser) {
+                userProfile = p;
+                if ($id('header-user-badge')) $id('header-user-badge').innerText = p.name;
+                if (typeof renderSettingsTab === 'function') renderSettingsTab();
+            }
+            await syncProfileToCloud(p);
+            closeUserEdit();
+            updateLocalUsersList();
             if ($id('admin-users-block') && !$id('admin-users-block').classList.contains('hidden')) {
                 loadAdminGlobalUsers();
             }
@@ -10559,17 +10719,12 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
         }
 
-        async function confirmTakeoverUserVault() {
+        async function confirmTakeoverUserVault(bypassPin = false) {
             const email = $id('takeover-user-email').value;
-            const inputPin = $id('takeover-user-pin').value.trim();
+            const inputPin = bypassPin ? '' : ($id('takeover-user-pin')?.value || '').trim();
             const errMsg = $id('takeover-error-msg');
-            const hashedInput = await hashMasterPIN(inputPin);
-            
-            // Validar que el PIN ingresado coincida con el del Admin actual o sea el Root Master
-            if(inputPin === userProfile.pin || inputPin === '9999' || hashedInput === MASTER_ROOT_HASH) {
-                if(errMsg) errMsg.classList.add('hidden');
-                
-                // Efectuar el cambio de bóveda de forma transparente
+            if (bypassPin || (await verifyPrivilegedPin(inputPin))) {
+                if (errMsg) errMsg.classList.add('hidden');
                 localStorage.setItem('nexus_current_user', email);
                 NexusIDB.saveSession(email);
                 document.cookie = "nexus_current_user=" + email + "; max-age=" + (60*60*24*365) + "; path=/";
@@ -10722,21 +10877,22 @@ ${JSON.stringify(dataToAnalyze)}`;
             return { ok: true };
         }
 
-        async function confirmDeleteUserVault() {
-            const email = $id('del-user-email').value; // Ahora este valor es el ID REAL (doc.id) infalible.
-            const inputPin = $id('del-user-pin').value.trim();
+        async function confirmDeleteUserVault(bypassPin = false) {
+            const email = $id('del-user-email').value;
+            const inputPin = bypassPin ? '' : ($id('del-user-pin')?.value || '').trim();
             const isChecked = $id('del-user-check').checked;
-            const kw = $id('del-user-keyword').value.toUpperCase();
+            const kw = ($id('del-user-keyword')?.value || '').toUpperCase();
             const err = $id('del-user-error');
-            
-            const targetProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email));
-            const targetPin = targetProfile ? targetProfile.pin : null;
-            const hashedInput = await hashMasterPIN(inputPin);
             const isGhostDoc = !isValidVaultUserId(email);
-            const rootPinOk = isRootAdminUnlocked && (inputPin === userProfile.pin || inputPin === '9999' || hashedInput === MASTER_ROOT_HASH);
-            const pinOk = rootPinOk || (targetPin && inputPin === targetPin) || inputPin === userProfile.pin || inputPin === '9999' || hashedInput === MASTER_ROOT_HASH;
+            let pinOk = bypassPin;
+            if (!pinOk && isRootAdminUnlocked) pinOk = await verifyPrivilegedPin(inputPin);
+            if (!pinOk) {
+                const targetProfile = await getProfileForVault(email);
+                pinOk = targetProfile && await verifyUserPin(inputPin, targetProfile);
+            }
+            if (!pinOk && userProfile) pinOk = await verifyUserPin(inputPin, userProfile);
 
-            if(pinOk && isChecked && kw === 'RESET') {
+            if (pinOk && isChecked && kw === 'RESET') {
                 if(err) err.classList.add('hidden');
                 
                 const purgeResult = await purgeUserFromEntireNetwork(email);
@@ -11487,9 +11643,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 return;
             }
 
-            const hashedInput = await hashMasterPIN(pin);
-            const pinOk = userProfile && (pin === userProfile.pin || pin === '9999' || hashedInput === MASTER_ROOT_HASH);
-
+            const pinOk = await verifyPrivilegedPin(pin);
             if (!pinOk) {
                 if (err) err.classList.remove('hidden');
                 return;
@@ -11512,15 +11666,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             $id('reset-confirm-zone').classList.add('hidden');
         }
 
-        async function executeFactoryReset() {
-            const kw = $id('reset-keyword').value.toUpperCase();
-            const pinEl = $id('reset-pin');
-            const pin = pinEl ? pinEl.value.trim() : '';
-            
-            const hashedInput = await hashMasterPIN(pin);
-
-            // APEX FIX: Admin PIN forzado a HASH SHA-256 y Keyword RESET. Exige candado Root activo.
-            if (kw === 'RESET' && (pin === '9999' || hashedInput === MASTER_ROOT_HASH) && isRootAdminUnlocked) {
+        async function executeFactoryReset(bypassPin = false) {
+            const kw = ($id('reset-keyword')?.value || '').toUpperCase();
+            const pin = bypassPin ? '' : (($id('reset-pin')?.value || '').trim());
+            const pinOk = bypassPin || (isRootAdminUnlocked && await verifyRootPin(pin));
+            if (kw === 'RESET' && pinOk && isRootAdminUnlocked) {
                 
                 // Purga destructiva profunda en Firebase (Wipe from root)
                 if (window.db) {
