@@ -4977,6 +4977,7 @@
             if (task.lastAlarmDate === dStr) return;
             task.lastAlarmDate = dStr;
             saveState();
+            clearNativeAppBadge();
             if (isNativeIosApp()) {
                 const remPayload = {
                     id: 'rem_' + task.id + '_' + dStr,
@@ -5020,14 +5021,109 @@
             taskReminderTimeouts.set(key, tid);
         }
 
-        function cancelNativeTaskAlarm(taskId) {
-            if (!isNativeIosApp()) return;
-            window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId }));
-            for (let i = 0; i <= 3; i++) {
-                window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify({ id: taskId + '_rem' + i }));
+        function getTaskReminderDayList(task) {
+            if (!task || !task.date) return [];
+            if (task.id && task.id.startsWith('task_pse_')) {
+                const due = new Date(task.date + 'T12:00:00');
+                const days = [];
+                for (let i = 3; i >= 0; i--) {
+                    const nD = new Date(due);
+                    nD.setDate(nD.getDate() - i);
+                    days.push(getLocalDateStr(nD));
+                }
+                return days;
             }
+            if (task.reminderDate && task.reminderDate !== task.date) {
+                const days = [];
+                const start = new Date(task.reminderDate + 'T12:00:00');
+                const end = new Date(task.date + 'T12:00:00');
+                if (end < start) return [task.date];
+                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                    days.push(getLocalDateStr(d));
+                }
+                return days;
+            }
+            return [task.date];
         }
 
+        function buildTaskNotificationAlarms(task) {
+            if (!task || task.completed || !task.date || !task.timeAlarm) return [];
+            const timeNorm = normalizeTaskTimeAlarm(task.timeAlarm);
+            const alarms = [];
+            const dayList = getTaskReminderDayList(task);
+            const nowMs = Date.now();
+            const isPse = !!(task.id && task.id.startsWith('task_pse_'));
+            dayList.forEach((dayStr, idx) => {
+                const fireAt = buildTaskFireDate(dayStr, timeNorm);
+                if (!fireAt || fireAt.getTime() < nowMs - 5000) return;
+                let body = task.description || 'Tarea pendiente programada.';
+                let title = 'NEXUS: ' + task.title;
+                let alarmId = task.id + '__' + dayStr;
+                let priority = task.priority || 'medium';
+                if (isPse) {
+                    const due = new Date(task.date + 'T12:00:00');
+                    const diff = Math.round((due.getTime() - new Date(dayStr + 'T12:00:00').getTime()) / 86400000);
+                    body = (diff === 0 ? 'HOY es el último día de pago.' : (diff === 1 ? 'Vence MAÑANA.' : 'Vence en ' + diff + ' días.')) + ' ' + body;
+                    title = 'Aviso: ' + task.title;
+                    alarmId = task.id + '_rem' + (3 - idx);
+                    priority = 'high';
+                }
+                alarms.push({
+                    id: alarmId,
+                    title,
+                    body: body.trim(),
+                    date: dayStr,
+                    time: timeNorm,
+                    fireAtMs: fireAt.getTime(),
+                    priority
+                });
+            });
+            return alarms;
+        }
+
+        function persistTaskNotificationPlan(task) {
+            const alarms = buildTaskNotificationAlarms(task);
+            task.notificationPlan = {
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                tzOffsetMin: new Date().getTimezoneOffset(),
+                updatedAt: Date.now(),
+                alarms
+            };
+            return alarms;
+        }
+
+        function collectNativeAlarmIdsForTask(taskId, task) {
+            const ids = new Set();
+            if (!taskId) return ids;
+            ids.add(taskId);
+            for (let i = 0; i <= 31; i++) ids.add(taskId + '_rem' + i);
+            if (task && task.notificationPlan && task.notificationPlan.alarms) {
+                task.notificationPlan.alarms.forEach(a => { if (a && a.id) ids.add(a.id); });
+            }
+            return ids;
+        }
+
+        function cancelNativeTaskAlarm(taskId, task) {
+            if (!isNativeIosApp() || !taskId) return;
+            const ids = Array.from(collectNativeAlarmIdsForTask(taskId, task));
+            window.webkit.messageHandlers.cancelAlarmHandler.postMessage(JSON.stringify(ids.length > 1 ? { ids } : { id: ids[0] }));
+        }
+
+        function clearNativeAppBadge() {
+            if (!isNativeIosApp()) return;
+            try {
+                window.webkit.messageHandlers.appInterface.postMessage({ action: 'clearBadge' });
+            } catch (e) { console.warn('[NEXUS] clearBadge', e); }
+        }
+
+        window.onNexusNotificationTapped = function(notifId) {
+            clearNativeAppBadge();
+            if (!notifId || !state.tasks) return;
+            const baseId = String(notifId).replace(/__\d{4}-\d{2}-\d{2}$/, '').replace(/_rem\d+$/, '');
+            const t = state.tasks.find(x => x.id === baseId || x.id === notifId);
+            if (t) t.lastAlarmDate = getLocalDateStr();
+            saveState();
+        };
 
         /** true solo en el contenedor iOS (WKWebView con puente nativo completo). */
         function isNativeIosApp() {
@@ -5080,7 +5176,9 @@
             const n = (state.settings && state.settings.iosNotifications) ? { ...state.settings.iosNotifications } : readIosNotificationSettingsFromUI();
             if (!n) return null;
             const payload = { sound: n.sound, alertStyle: n.alertStyle, interruption: n.interruption };
-            if (priority === 'high' && n.boostHighPriority) payload.interruption = 'timeSensitive';
+            if (n.boostHighPriority && (priority === 'high' || priority === 'medium')) {
+                payload.interruption = 'timeSensitive';
+            }
             return payload;
         }
 
@@ -5177,7 +5275,8 @@
                 time: timeNorm,
                 priority: priority || 'medium',
                 fireAtMs: fireAt.getTime(),
-                fireAtISO: fireAt.toISOString()
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                tzOffsetMin: new Date().getTimezoneOffset()
             };
             const alarmNotif = getIosNotificationPayload(priority);
             if (alarmNotif) alarmPayload.notification = alarmNotif;
@@ -5187,47 +5286,24 @@
         function syncNativeTaskAlarm(task) {
             if (!task) return;
             if (task.completed || !task.date || !task.timeAlarm) {
-                if (task.id) cancelNativeTaskAlarm(task.id);
+                if (task.id) cancelNativeTaskAlarm(task.id, task);
                 return;
             }
             if (!isNativeIosApp()) return;
-
-            cancelNativeTaskAlarm(task.id);
-            const timeNorm = normalizeTaskTimeAlarm(task.timeAlarm);
-
-            if (task.id.startsWith('task_pse_')) {
-                const due = new Date(task.date + 'T12:00:00');
-                for (let i = 3; i >= 0; i--) {
-                    const nD = new Date(due);
-                    nD.setDate(nD.getDate() - i);
-                    const nDStr = getLocalDateStr(nD);
-                    const dMsg = i === 0 ? 'HOY es el último día de pago.' : (i === 1 ? 'Vence MAÑANA.' : 'Vence en ' + i + ' días.');
-                    const fireAt = buildTaskFireDate(nDStr, timeNorm);
-                    if (!fireAt) continue;
-                    postNativeScheduledAlarm({
-                        id: task.id + '_rem' + i,
-                        title: 'Aviso: ' + task.title,
-                        body: dMsg + ' ' + (task.description || ''),
-                        date: nDStr,
-                        time: timeNorm,
-                        priority: 'high',
-                        fireAt
-                    });
-                }
-                return;
-            }
-
-            const fireAt = buildTaskFireDate(task.date, timeNorm);
-            if (!fireAt) return;
-            postNativeScheduledAlarm({
-                id: task.id,
-                title: 'NEXUS: ' + task.title,
-                body: task.description ? task.description : 'Tarea pendiente programada.',
-                date: task.date,
-                time: timeNorm,
-                priority: task.priority,
-                fireAt
+            cancelNativeTaskAlarm(task.id, task);
+            const alarms = persistTaskNotificationPlan(task);
+            alarms.forEach(alarm => {
+                postNativeScheduledAlarm({
+                    id: alarm.id,
+                    title: alarm.title,
+                    body: alarm.body,
+                    date: alarm.date,
+                    time: alarm.time,
+                    priority: alarm.priority,
+                    fireAt: new Date(alarm.fireAtMs)
+                });
             });
+            saveState();
         }
 
         function rescheduleAllTaskReminders() {
@@ -5723,8 +5799,12 @@
         function toggleTaskStatusDash(id) {
             const t = state.tasks.find(x => x.id === id);
             if(t) { 
-                t.completed = !t.completed; saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); 
-                
+                t.completed = !t.completed;
+                if (t.completed) {
+                    cancelNativeTaskAlarm(t.id, t);
+                    clearNativeAppBadge();
+                }
+                saveState(); updateDashboard(); if(state.activeTab === 'tasks') renderTasksTab(); 
                 if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
             }
         }
@@ -8803,6 +8883,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function renderTasksTab() {
+            if (typeof clearNativeAppBadge === 'function') clearNativeAppBadge(); // renderTasksTab clear badge
             if(!state.tasks) state.tasks = [];
             
             const pendingList = $id('tasks-list-pending');
@@ -9084,7 +9165,11 @@ ${JSON.stringify(dataToAnalyze)}`;
 
             state.tasks = state.tasks.filter(t => !idsToDelete.includes(t.id));
             
-            idsToDelete.forEach(id => cancelNativeTaskAlarm(id));
+            idsToDelete.forEach(id => {
+                const t = state.tasks.find(x => x.id === id);
+                cancelNativeTaskAlarm(id, t);
+            });
+            clearNativeAppBadge();
             
             saveState();
             if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
@@ -9155,7 +9240,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             const desc = $id('ftk-desc').value.trim();
             const date = $id('ftk-date').value;
             const timeAlarmRaw = $id('ftk-time-alarm') ? $id('ftk-time-alarm').value : '';
-            const timeAlarm = timeAlarmRaw.length > 5 ? timeAlarmRaw.substring(0, 5) : timeAlarmRaw;
+            let timeAlarm = timeAlarmRaw.length > 5 ? timeAlarmRaw.substring(0, 5) : timeAlarmRaw;
+            if (date && !timeAlarm) timeAlarm = '09:00';
             const priority = $id('ftk-priority').value;
             const assignedTo = $id('ftk-assigned-to') ? $id('ftk-assigned-to').value.trim() : '';
             const vaultId = $id('ftk-vault') && !$id('ftk-vault-container').classList.contains('hidden') ? $id('ftk-vault').value : 'personal';
@@ -9175,7 +9261,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             } else {
                 finalId = 'task_' + Date.now();
                 const creatorName = userProfile && userProfile.name ? userProfile.name : 'Usuario';
-                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, lastAlarmDate: null, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName, assignedTo: assignedTo });
+                state.tasks.push({ id: finalId, title, description: desc, date, timeAlarm, priority, completed: false, lastAlarmDate: null, notificationPlan: null, createdAt: new Date().toISOString(), projectId: projectId || null, vaultId: vaultId, createdBy: creatorName, assignedTo: assignedTo });
             }
             saveState(); renderTasksTab(); closeTaskForm(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
@@ -9191,7 +9277,11 @@ ${JSON.stringify(dataToAnalyze)}`;
         function toggleTaskStatus(id) {
             const t = state.tasks.find(x => x.id === id);
             if(t) { 
-                t.completed = !t.completed; 
+                t.completed = !t.completed;
+                if (t.completed) {
+                    cancelNativeTaskAlarm(t.id, t);
+                    clearNativeAppBadge();
+                }
                 saveState(); renderTasksTab(); updateDashboard(); 
                 if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
             }
@@ -9210,7 +9300,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             saveState(); renderTasksTab(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
             
-            cancelNativeTaskAlarm(id);
+            cancelNativeTaskAlarm(id, t);
+            clearNativeAppBadge();
             if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
         }
         
