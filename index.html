@@ -2824,6 +2824,8 @@
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, autoBackupTimeout = null, LIVE_RATES = EXCHANGE_RATES; 
         let isRootAdminUnlocked = false;
         let _firstSetupFirebaseUser = null;
+        let _loginRoutePhase = null;
+        let _firstSetupBusy = false;
 
         function isUserAdmin(profile) {
             const p = profile || userProfile;
@@ -2894,7 +2896,6 @@
         function showFirstSetupPinStep() {
             const u = _firstSetupFirebaseUser;
             if (!u) return;
-            resetGoogleLoginButton();
             showLoginRoutingStatus('');
             hideAllLoginPanels();
             const fs = $id('login-first-setup');
@@ -2913,6 +2914,52 @@
         function hideFirstTimeSetup() {
             const fs = $id('login-first-setup');
             if (fs) fs.classList.add('hidden');
+        }
+
+        function sleepMs(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function nexusRetryAsync(fn, attempts = 4, delayMs = 400) {
+            let lastErr = null;
+            let lastResult = null;
+            for (let i = 0; i < attempts; i++) {
+                try {
+                    const r = await fn();
+                    lastResult = r;
+                    if (r && typeof r === 'object' && r.ok === false) {
+                        lastErr = new Error(r.error || 'Operación fallida');
+                        if (i < attempts - 1) { await sleepMs(delayMs * (i + 1)); continue; }
+                        return r;
+                    }
+                    return r;
+                } catch (e) {
+                    lastErr = e;
+                    if (i < attempts - 1) await sleepMs(delayMs * (i + 1));
+                }
+            }
+            if (lastResult && typeof lastResult === 'object' && lastResult.ok === false) return lastResult;
+            throw lastErr || new Error('Sin respuesta');
+        }
+
+        function beginLoginRoutingUI(message) {
+            hideFirstTimeSetup();
+            ['login-initial-choice', 'login-user-selection', 'login-new-section', 'login-pin-section'].forEach(id => {
+                const el = $id(id);
+                if (el) el.classList.add('hidden');
+            });
+            showLoginRoutingStatus(message || 'Conectando con Firebase…');
+        }
+
+        function setFirstSetupButtonBusy(busy) {
+            const btn = document.querySelector('#login-first-setup button[onclick="completeFirstSetup()"]');
+            if (!btn) return;
+            btn.disabled = !!busy;
+            if (busy) {
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Activando…';
+            } else {
+                btn.innerHTML = 'Activar administrador <i class="fa-solid fa-shield-halved"></i>';
+            }
         }
 
         const GOOGLE_LOGIN_BTN_HTML = `<svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg> Continuar con Google`;
@@ -2942,20 +2989,24 @@
 
         /** Tras Google/Firebase: si ya hay usuarios → cliente normal; si no → administrador fundador. */
         async function routeAfterFirebaseAuth(fbAuthUser, displayName, photoURL) {
-            resetGoogleLoginButton();
+            _loginRoutePhase = null;
+            beginLoginRoutingUI('Verificando cuenta en Firebase…');
             try {
-                if (!fbAuthUser) { alert('No se obtuvo sesión de Firebase.'); return; }
+                if (!fbAuthUser) {
+                    _loginRoutePhase = 'error';
+                    alert('No se obtuvo sesión de Firebase.');
+                    return;
+                }
                 const email = (fbAuthUser.email || '').trim().toLowerCase();
                 if (!email || !email.includes('@')) {
+                    _loginRoutePhase = 'error';
                     alert('Tu cuenta debe tener correo (usa Google en Firebase Auth).');
                     return;
                 }
                 fbUser = fbAuthUser;
-                showLoginRoutingStatus('Verificando cuenta en Firebase…');
                 await initCloud();
 
                 const initialized = await isSystemInitialized();
-                showLoginRoutingStatus('');
 
                 if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) {
                     _firstSetupFirebaseUser = {
@@ -2966,12 +3017,13 @@
                         isGoogle: true
                     };
                     showFirstSetupPinStep();
+                    _loginRoutePhase = 'first-setup';
                     return;
                 }
 
                 if (initialized) {
-                    hideFirstTimeSetup();
                     await continueNormalClientLogin(fbAuthUser, displayName, photoURL);
+                    _loginRoutePhase = 'pin';
                     return;
                 }
 
@@ -2983,12 +3035,17 @@
                     isGoogle: true
                 };
                 showFirstSetupPinStep();
+                _loginRoutePhase = 'first-setup';
             } catch (e) {
                 console.error('[NEXUS] routeAfterFirebaseAuth', e);
-                showLoginRoutingStatus('');
+                _loginRoutePhase = 'error';
                 alert('Error al continuar: ' + (e.message || 'revisa la conexión'));
             } finally {
-                resetGoogleLoginButton();
+                showLoginRoutingStatus('');
+                if (_loginRoutePhase === 'error') {
+                    resetGoogleLoginButton();
+                    showInitialLoginChoice();
+                }
             }
         }
 
@@ -3005,13 +3062,13 @@
                 pinInput.value = '';
                 pinInput.onkeypress = (e) => { if (e.key === 'Enter') handleLoginExisting(); };
             }
-            resetGoogleLoginButton();
+            showLoginRoutingStatus('');
             if (profile.useBiometrics === true) {
                 setTimeout(() => {
                     triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
-                }, 150);
+                }, 200);
             } else if (pinInput) {
-                setTimeout(() => pinInput.focus(), 150);
+                setTimeout(() => pinInput.focus(), 200);
             }
         }
 
@@ -4285,7 +4342,7 @@
             loginSelectedEmail = email;
             currentUser = email;
             isRootAdminUnlocked = true;
-            resetGoogleLoginButton();
+            _loginRoutePhase = 'app';
             showLoginRoutingStatus('');
             const st = $id('first-setup-status');
             if (st) st.textContent = 'Accediendo a tu bóveda…';
@@ -4295,6 +4352,7 @@
         }
 
         async function completeFirstSetup() {
+            if (_firstSetupBusy) return;
             const auth = _firstSetupFirebaseUser;
             const st = $id('first-setup-status');
             if (!auth || !auth.email || !auth.uid) {
@@ -4306,14 +4364,18 @@
             if (userPin.length !== 4 || rootPin.length !== 4 || rootPin !== rootPin2) {
                 return alert('Define PIN de acceso y PIN root (4 dígitos cada uno). El PIN root debe coincidir.');
             }
+
+            _firstSetupBusy = true;
+            setFirstSetupButtonBusy(true);
             if (st) st.textContent = 'Registrando administrador en Firebase…';
+
             try {
                 if (!window.db || !fbUser) await initCloud();
                 if (!fbUser || fbUser.uid !== auth.uid) {
                     return alert('La sesión Firebase no coincide. Vuelve a conectar con Google.');
                 }
 
-                const boot = await getBootstrapInfo();
+                const boot = await nexusRetryAsync(() => getBootstrapInfo(), 3, 300);
                 if (boot && boot.initialized && !isBootstrapFounder(boot, auth.email, auth.uid)) {
                     return alert('El sistema ya fue inicializado por otro administrador.');
                 }
@@ -4334,18 +4396,20 @@
                     return;
                 }
 
-                const bootRes = await writeBootstrapToCloud(auth.email, auth.uid);
+                if (st) st.textContent = 'Sincronizando sistema (reintento automático)…';
+                const bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 4, 450);
                 if (!bootRes.ok) {
                     if (st) st.textContent = bootRes.error || 'Error bootstrap';
                     return alert(bootRes.error || 'No se pudo inicializar el sistema.');
                 }
                 if (bootRes.existing && st) st.textContent = 'Completando configuración del fundador…';
 
-                const rootRes = await saveRootPinToCloud(rootPin, true);
+                const rootRes = await nexusRetryAsync(() => saveRootPinToCloud(rootPin, true), 4, 450);
                 if (!rootRes.ok) {
                     if (st) st.textContent = 'Error PIN root: ' + (rootRes.error || '');
                     return alert('No se pudo guardar el PIN root: ' + (rootRes.error || ''));
                 }
+
                 userProfile = {
                     name: auth.name,
                     email: auth.email,
@@ -4363,15 +4427,23 @@
                 localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
                 const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...userProfile }));
-                await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', auth.email), safe, { merge: true });
+                await nexusRetryAsync(async () => {
+                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', auth.email), safe, { merge: true });
+                    return { ok: true };
+                }, 4, 450);
+
                 localStorage.setItem('nexus_system_initialized', '1');
                 sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 await finishFounderLoginEntry(auth.email);
-            } catch (e) {
+} catch (e) {
                 console.error('[NEXUS] completeFirstSetup', e);
                 if (st) st.textContent = 'Error de conexión';
                 alert('Error al activar administrador: ' + (e.message || 'revisa Firebase'));
+            } finally {
+                _firstSetupBusy = false;
+                setFirstSetupButtonBusy(false);
             }
+        }
         }
 
         async function fetchLoginUsers(scanCloud = false) {
@@ -4719,7 +4791,10 @@
                         alert("Error de autenticación web: " + error.message);
                     }
                 } finally {
-                    resetGoogleLoginButton();
+                    if (_loginRoutePhase === 'error') {
+                        resetGoogleLoginButton();
+                        showInitialLoginChoice();
+                    }
                     showLoginRoutingStatus('');
                 }
             }
@@ -4756,7 +4831,10 @@
                     alert("Error de autenticación: " + error.message);
                 }
             } finally {
-                resetGoogleLoginButton();
+                if (_loginRoutePhase === 'error') {
+                    resetGoogleLoginButton();
+                    showInitialLoginChoice();
+                }
                 showLoginRoutingStatus('');
             }
         };
