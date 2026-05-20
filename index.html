@@ -4354,49 +4354,25 @@
                 }
             });
 
-            // APEX FIX: Recuperación profunda de sesión (LocalStorage + IndexedDB + Cookies)
-            currentUser = localStorage.getItem('nexus_current_user');
-            
-            if (!currentUser) {
-                currentUser = await NexusIDB.getSession();
-                if (currentUser) localStorage.setItem('nexus_current_user', currentUser);
-            }
-            
-            if (!currentUser) {
-                const match = document.cookie.match(new RegExp('(^| )nexus_current_user=([^;]+)'));
-                if (match) {
-                    currentUser = match[2];
-                    localStorage.setItem('nexus_current_user', currentUser);
-                }
-            }
+            // Arranque en frío: SIEMPRE pantalla de autenticación (no entrar directo por sesión guardada)
+            sessionUnlocked = false;
+            currentUser = null;
+            isRootAdminUnlocked = false;
+            loginSelectedEmail = null;
 
-            if (!currentUser) {
-                const ls = $id('login-screen'); if(ls) { ls.classList.add('opacity-0'); ls.classList.remove('hidden'); requestAnimationFrame(() => ls.classList.remove('opacity-0')); }
-                
-                // APEX FIX: Renderizado instantáneo local y sin escaneo de nube automático
-                fetchLoginUsers(false);
-                showInitialLoginChoice();
-            } else {
-                const profile = loadLocalProfile(currentUser);
-                if (!profile) {
-                    console.warn('[NEXUS] Sesión guardada sin perfil, mostrando login');
-                    showLoginFlow();
-                } else {
-                    try {
-                        await initCloud();
-                        await bootApp();
-                        const loginScreen = $id('login-screen');
-                        if (loginScreen) loginScreen.classList.add('hidden');
-                        hideLoginRoutingLoading();
-                        fetchCloudState().then(async () => {
-                            if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
-                        }).catch(e => console.warn('[NEXUS] sync on cold start', e));
-                    } catch (e) {
-                        console.error('[NEXUS] cold start boot', e);
-                        showLoginFlow();
-                    }
-                }
+            const ls = $id('login-screen');
+            if (ls) {
+                ls.classList.add('opacity-0');
+                ls.classList.remove('hidden', 'pointer-events-none');
+                requestAnimationFrame(() => ls.classList.remove('opacity-0'));
             }
+            const lock = $id('session-lock-screen');
+            if (lock) lock.classList.add('hidden');
+            hideLoginRoutingLoading();
+
+            initCloud().catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+            fetchLoginUsers(false);
+            showInitialLoginChoice();
         };
 
         let loginSelectedEmail = null;
