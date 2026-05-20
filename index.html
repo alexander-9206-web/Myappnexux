@@ -656,6 +656,56 @@
                     </div>
                 </div>
 
+
+                <div id="ios-notif-settings-block" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2 border-indigo-100 bg-indigo-50/20">
+                    <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-indigo-600 mb-2"><i class="fa-brands fa-apple mr-1"></i> Alertas iOS</h3>
+                    <p class="text-[8px] text-slate-500 text-center font-bold leading-relaxed px-2">Sonido, banner y prioridad de recordatorios nativos. El modo persistente también se ajusta en Ajustes del iPhone.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Sonido</label>
+                            <select id="set-ios-notif-sound" class="form-input text-xs mt-1 font-bold" onchange="updateIosNotificationSettings()">
+                                <option value="default">Predeterminado</option>
+                                <option value="ringtone">Tono (iOS 17+)</option>
+                                <option value="alert">Alerta fuerte</option>
+                                <option value="chime">Campanilla (bundle)</option>
+                                <option value="cash">Caja (bundle)</option>
+                                <option value="silent">Silencio</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Tipo en pantalla</label>
+                            <select id="set-ios-notif-style" class="form-input text-xs mt-1 font-bold" onchange="updateIosNotificationSettings()">
+                                <option value="banner">Banner temporal</option>
+                                <option value="alert">Banner + centro</option>
+                                <option value="silent">Solo insignia</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Prioridad sistema</label>
+                            <select id="set-ios-notif-interruption" class="form-input text-xs mt-1 font-bold" onchange="updateIosNotificationSettings()">
+                                <option value="passive">Discreta</option>
+                                <option value="active">Activa</option>
+                                <option value="timeSensitive">Urgente</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col justify-end gap-2">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="set-ios-notif-badge" class="w-4 h-4 accent-indigo-600" onchange="updateIosNotificationSettings()">
+                                <span class="text-[9px] font-black text-slate-600 uppercase">Insignia</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="set-ios-notif-boost" class="w-4 h-4 accent-indigo-600" checked onchange="updateIosNotificationSettings()">
+                                <span class="text-[9px] font-black text-slate-600 uppercase">Alta → urgente</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 pt-2">
+                        <button type="button" onclick="previewIosNotification()" class="bg-indigo-600 text-white p-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95"><i class="fa-solid fa-bell mr-1"></i> Probar</button>
+                        <button type="button" onclick="openIosSystemNotificationSettings()" class="bg-white text-indigo-700 p-3 rounded-xl font-black uppercase text-[9px] border border-indigo-200 shadow-sm active:scale-95"><i class="fa-solid fa-gear mr-1"></i> Ajustes iPhone</button>
+                    </div>
+                    <p id="ios-notif-status" class="text-[8px] font-bold text-indigo-500 text-center"></p>
+                </div>
+
                 <div class="theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2">
                     <h3 class="text-[10px] font-black uppercase opacity-60 tracking-widest text-center text-amber-500 mb-4">Engine Global</h3>
                     <div><label class="text-[10px] font-black text-slate-400 ml-2">Moneda Base</label><select id="set-base-currency" class="form-input text-center" onchange="updateSettings()"></select></div>
@@ -4508,7 +4558,9 @@
                 window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({
                     id: 'rem_' + task.id + '_' + dStr,
                     title: 'Recordatorio: ' + task.title,
-                    body: task.description || 'Tienes una tarea pendiente.'
+                    body: task.description || 'Tienes una tarea pendiente.',
+                    priority: task.priority || 'medium',
+                    notification: typeof getIosNotificationPayload === 'function' ? getIosNotificationPayload(task.priority) : undefined
                 }));
             } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
                 new Notification('Recordatorio: ' + task.title, { body: task.description || 'Tienes una tarea pendiente.' });
@@ -4551,7 +4603,82 @@
             }
         }
 
-        function postNativeScheduledAlarm({ id, title, body, date, time, priority, fireAt }) {
+
+        function isNativeIosApp() {
+            return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface);
+        }
+
+        window.onNativeNotificationSettings = function(prefs) {
+            if (!state.settings) state.settings = {};
+            state.settings.iosNotifications = prefs;
+            applyIosNotificationSettingsToUI(prefs);
+            const st = $id('ios-notif-status');
+            if (st) st.textContent = 'Preferencias sincronizadas con iOS.';
+        };
+
+        function applyIosNotificationSettingsToUI(prefs) {
+            if (!prefs) return;
+            const s = $id('set-ios-notif-sound'); if (s && prefs.sound) s.value = prefs.sound;
+            const a = $id('set-ios-notif-style'); if (a && prefs.alertStyle) a.value = prefs.alertStyle;
+            const i = $id('set-ios-notif-interruption'); if (i && prefs.interruption) i.value = prefs.interruption;
+            const b = $id('set-ios-notif-badge'); if (b) b.checked = prefs.showBadge !== false;
+            const h = $id('set-ios-notif-boost'); if (h) h.checked = prefs.boostHighPriority !== false;
+        }
+
+        function readIosNotificationSettingsFromUI() {
+            return {
+                sound: ($id('set-ios-notif-sound') || {}).value || 'default',
+                alertStyle: ($id('set-ios-notif-style') || {}).value || 'banner',
+                interruption: ($id('set-ios-notif-interruption') || {}).value || 'active',
+                showBadge: $id('set-ios-notif-badge') ? $id('set-ios-notif-badge').checked : true,
+                boostHighPriority: $id('set-ios-notif-boost') ? $id('set-ios-notif-boost').checked : true
+            };
+        }
+
+        function getIosNotificationPayload(priority) {
+            const n = (state.settings && state.settings.iosNotifications) ? { ...state.settings.iosNotifications } : readIosNotificationSettingsFromUI();
+            const payload = { sound: n.sound, alertStyle: n.alertStyle, interruption: n.interruption };
+            if (priority === 'high' && n.boostHighPriority) payload.interruption = 'timeSensitive';
+            return payload;
+        }
+
+        function loadNativeNotificationSettings() {
+            const block = $id('ios-notif-settings-block');
+            if (block) block.classList.toggle('hidden', !isNativeIosApp());
+            if (!isNativeIosApp()) return;
+            if (state.settings && state.settings.iosNotifications) applyIosNotificationSettingsToUI(state.settings.iosNotifications);
+            window.webkit.messageHandlers.appInterface.postMessage({ action: 'getNotificationSettings' });
+        }
+
+        function updateIosNotificationSettings() {
+            if (!isNativeIosApp()) return;
+            const prefs = readIosNotificationSettingsFromUI();
+            if (!state.settings) state.settings = {};
+            state.settings.iosNotifications = prefs;
+            saveState();
+            window.webkit.messageHandlers.appInterface.postMessage({ action: 'setNotificationSettings', settings: prefs });
+            const st = $id('ios-notif-status');
+            if (st) st.textContent = 'Guardado en el contenedor iOS.';
+        }
+
+        function previewIosNotification() {
+            if (!isNativeIosApp()) return;
+            const prefs = readIosNotificationSettingsFromUI();
+            window.webkit.messageHandlers.appInterface.postMessage({
+                action: 'previewNotification',
+                title: 'NEXUS AR',
+                body: 'Vista previa: ' + (prefs.sound || 'default') + ' · ' + (prefs.alertStyle || 'banner'),
+                notification: prefs
+            });
+        }
+
+        function openIosSystemNotificationSettings() {
+            if (!isNativeIosApp()) return;
+            window.webkit.messageHandlers.appInterface.postMessage({ action: 'openSystemNotificationSettings' });
+        }
+
+
+                function postNativeScheduledAlarm({ id, title, body, date, time, priority, fireAt }) {
             if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.scheduleAlarmHandler) return;
             const timeNorm = normalizeTaskTimeAlarm(time);
             window.webkit.messageHandlers.scheduleAlarmHandler.postMessage(JSON.stringify({
@@ -4562,7 +4689,8 @@
                 time: timeNorm,
                 priority: priority || 'medium',
                 fireAtMs: fireAt.getTime(),
-                fireAtISO: fireAt.toISOString()
+                fireAtISO: fireAt.toISOString(),
+                notification: typeof getIosNotificationPayload === 'function' ? getIosNotificationPayload(priority) : undefined
             }));
         }
 
@@ -9784,6 +9912,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (typeof scanTaskP2PRadarDirect === 'function') scanTaskP2PRadarDirect();
             if (typeof updateCloudStorageIndicator === 'function') updateCloudStorageIndicator();
             if (typeof updateCatManageView === 'function') updateCatManageView();
+            if (typeof loadNativeNotificationSettings === 'function') loadNativeNotificationSettings();
 
             const isMaster = isRootAdminUnlocked;
             const adminBlock = $id('admin-users-block');
