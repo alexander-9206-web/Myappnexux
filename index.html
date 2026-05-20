@@ -115,7 +115,7 @@
             <div class="absolute top-[-50px] left-[-50px] w-32 h-32 bg-indigo-500/30 rounded-full blur-3xl pointer-events-none"></div>
             <div class="absolute bottom-[-50px] right-[-50px] w-32 h-32 bg-purple-500/30 rounded-full blur-3xl pointer-events-none"></div>
 
-            <div class="text-center space-y-2 relative z-10">
+            <div id="login-identity-header" class="text-center space-y-2 relative z-10">
                 <div class="w-16 h-16 bg-white/5 border border-white/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-inner backdrop-blur-md">
                     <i class="fa-solid fa-fingerprint"></i>
                 </div>
@@ -123,9 +123,13 @@
                 <p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p>
             </div>
             
-            <div id="login-routing-loading" class="hidden text-center py-8 space-y-3 relative z-10">
+            <div id="login-routing-loading" class="hidden text-center py-6 space-y-4 relative z-10 w-full">
                 <i class="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
                 <p id="login-routing-loading-text" class="text-[10px] font-black uppercase tracking-widest text-indigo-300">Conectando…</p>
+                <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                    <div id="login-routing-progress-bar" class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-150" style="width:0%"></div>
+                </div>
+                <p id="login-routing-progress-pct" class="text-[9px] font-black text-indigo-400">0%</p>
             </div>
 
             <!-- Elección Inicial (MODERNIZADO) -->
@@ -2931,9 +2935,13 @@
             const u = _firstSetupFirebaseUser;
             if (!u) return;
             hideLoginRoutingLoading();
+            resetGoogleLoginButton();
             hideAllLoginPanels();
+            const hdr = $id('login-identity-header');
+            if (hdr) hdr.classList.add('hidden');
             const fs = $id('login-first-setup');
             if (fs) fs.classList.remove('hidden');
+            isRootAdminUnlocked = true;
             const nm = $id('setup-auth-name'); if (nm) nm.textContent = u.name;
             const em = $id('setup-auth-email'); if (em) em.textContent = u.email;
             const uidEl = $id('setup-auth-uid'); if (uidEl) uidEl.textContent = 'UID: ' + (u.uid || '—');
@@ -2943,6 +2951,10 @@
                     ? `<img src="${u.photoURL}" class="w-full h-full object-cover" referrerpolicy="no-referrer">`
                     : `<i class="fa-solid fa-user-shield"></i>`;
             }
+            if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+            const st = $id('first-setup-status');
+            if (st) st.textContent = 'Modo administrador fundador — define PIN bóveda y PIN root';
+            setTimeout(() => { const p = $id('setup-user-pin'); if (p) p.focus(); }, 200);
         }
 
         function hideFirstTimeSetup() {
@@ -3045,28 +3057,80 @@
             showInitialLoginChoice();
         }
 
+        let _loginRoutingProgressTimer = null;
+
+        function stopLoginRoutingProgress() {
+            if (_loginRoutingProgressTimer) {
+                clearInterval(_loginRoutingProgressTimer);
+                _loginRoutingProgressTimer = null;
+            }
+        }
+
+        function setLoginRoutingProgress(pct, message) {
+            const bar = $id('login-routing-progress-bar');
+            const pctEl = $id('login-routing-progress-pct');
+            const txt = $id('login-routing-loading-text');
+            const n = Math.max(0, Math.min(100, Math.round(pct)));
+            if (bar) bar.style.width = n + '%';
+            if (pctEl) pctEl.textContent = n + '%';
+            if (txt && message) txt.textContent = message;
+        }
+
         function showLoginRoutingLoading(message) {
             const box = $id('login-routing-loading');
             const txt = $id('login-routing-loading-text');
             const ls = $id('login-screen');
+            const hdr = $id('login-identity-header');
+            if (hdr) hdr.classList.add('hidden');
             if (ls) ls.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
-            ['login-initial-choice', 'login-user-selection', 'login-new-section', 'login-pin-section', 'login-first-setup'].forEach(id => {
+            ['login-initial-choice', 'login-user-selection', 'login-new-section', 'login-pin-section', 'login-first-setup', 'login-recent-avatars-container'].forEach(id => {
                 const el = $id(id);
                 if (el) el.classList.add('hidden');
             });
             if (box) box.classList.remove('hidden');
             if (txt) txt.textContent = message || 'Conectando…';
+            setLoginRoutingProgress(0);
         }
 
         function hideLoginRoutingLoading() {
+            stopLoginRoutingProgress();
             const box = $id('login-routing-loading');
             if (box) box.classList.add('hidden');
+            setLoginRoutingProgress(0);
             showLoginRoutingStatus('');
         }
 
         function beginLoginRoutingUI(message) {
             hideFirstTimeSetup();
             showLoginRoutingLoading(message || 'Conectando con Firebase…');
+        }
+
+        /** Barra 2–3 s con % mientras Firebase responde (usuario normal o verificación fundador). */
+        async function runLoginRoutingWithProgress(message, workFn, minMs = 2800) {
+            beginLoginRoutingUI(message || 'Consultando Firebase…');
+            let pct = 0;
+            const tickMs = 60;
+            const steps = Math.max(1, Math.ceil(minMs / tickMs));
+            let step = 0;
+            const progressDone = new Promise(resolve => {
+                _loginRoutingProgressTimer = setInterval(() => {
+                    step++;
+                    pct = Math.min(99, Math.round((step / steps) * 100));
+                    setLoginRoutingProgress(pct);
+                }, tickMs);
+                setTimeout(() => {
+                    stopLoginRoutingProgress();
+                    setLoginRoutingProgress(100);
+                    resolve();
+                }, minMs);
+            });
+            let result;
+            try {
+                result = await workFn();
+            } finally {
+                await progressDone;
+            }
+            return result;
         }
 
         function setFirstSetupButtonBusy(busy) {
@@ -3108,7 +3172,6 @@
         /** Tras Google/Firebase: si ya hay usuarios → cliente normal; si no → administrador fundador. */
         async function routeAfterFirebaseAuth(fbAuthUser, displayName, photoURL) {
             _loginRoutePhase = null;
-            beginLoginRoutingUI('Verificando cuenta en Firebase…');
             try {
                 if (!fbAuthUser) {
                     _loginRoutePhase = 'error';
@@ -3124,26 +3187,12 @@
                 fbUser = fbAuthUser;
                 await initCloud();
 
-                const initialized = await isSystemInitialized();
-
-                if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) {
-                    _firstSetupFirebaseUser = {
-                        email,
-                        name: displayName || fbAuthUser.displayName || email.split('@')[0],
-                        uid: fbAuthUser.uid,
-                        photoURL: photoURL || fbAuthUser.photoURL || null,
-                        isGoogle: true
-                    };
-                    showFirstSetupPinStep();
-                    _loginRoutePhase = 'first-setup';
-                    return;
-                }
-
-                if (initialized) {
-                    await continueNormalClientLogin(fbAuthUser, displayName, photoURL);
-                    _loginRoutePhase = 'pin';
-                    return;
-                }
+                const routeKind = await runLoginRoutingWithProgress('Esperando respuesta de Firebase…', async () => {
+                    const initialized = await isSystemInitialized();
+                    if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) return 'founder-resume';
+                    if (initialized) return 'client';
+                    return 'founder-new';
+                }, 2800);
 
                 _firstSetupFirebaseUser = {
                     email,
@@ -3152,6 +3201,13 @@
                     photoURL: photoURL || fbAuthUser.photoURL || null,
                     isGoogle: true
                 };
+
+                if (routeKind === 'client') {
+                    await continueNormalClientLogin(fbAuthUser, displayName, photoURL);
+                    _loginRoutePhase = 'pin';
+                    return;
+                }
+
                 showFirstSetupPinStep();
                 _loginRoutePhase = 'first-setup';
             } catch (e) {
@@ -3171,7 +3227,10 @@
             loginSelectedEmail = userEmail;
             userProfile = profile;
             hideLoginRoutingLoading();
+            resetGoogleLoginButton();
             hideAllLoginPanels();
+            const hdr = $id('login-identity-header');
+            if (hdr) hdr.classList.remove('hidden');
             const pinSection = $id('login-pin-section');
             if (pinSection) pinSection.classList.remove('hidden');
             const activeEmail = $id('login-active-email');
@@ -3230,7 +3289,11 @@
             }
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile)));
             showLoginPinStep(userEmail, userName, profile);
+            ensureProfilePinHash(profile).catch(e => console.warn('[NEXUS] pin hash background', e));
             syncProfileToCloud(profile).catch(e => console.warn('[NEXUS] syncProfile background', e));
+            if (typeof loadRootPinHashFromCloud === 'function') {
+                loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin background', e));
+            }
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -4428,16 +4491,22 @@
         async function finishFounderLoginEntry(email) {
             _firstSetupFirebaseUser = null;
             hideFirstTimeSetup();
-            showLoginRoutingLoading('Abriendo tu bóveda…');
+            hideLoginRoutingLoading();
             loginSelectedEmail = email;
             isRootAdminUnlocked = true;
             _loginRoutePhase = 'app';
+            const st = $id('first-setup-status');
+            if (st) st.textContent = 'Acceso concedido — abriendo app…';
             try {
                 await activateRootMaintainerSession();
                 await processLoginSuccess(email);
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+                if (typeof loadRootPinHashFromCloud === 'function') {
+                    loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin post-founder', e));
+                }
             } catch (e) {
                 console.error('[NEXUS] finishFounderLoginEntry', e);
+                _loginRoutePhase = 'error';
                 showLoginFlow();
                 alert('No se pudo abrir la bóveda. Intenta iniciar sesión de nuevo.');
             }
@@ -4459,12 +4528,15 @@
 
             _firstSetupBusy = true;
             setFirstSetupButtonBusy(true);
-            if (st) st.textContent = 'Registrando administrador en Firebase…';
+            hideLoginRoutingLoading();
+            if (st) st.textContent = 'Enviando PIN y activando administrador…';
 
             try {
                 if (!window.db || !fbUser) await initCloud();
                 if (!fbUser || fbUser.uid !== auth.uid) {
-                    return alert('La sesión Firebase no coincide. Vuelve a conectar con Google.');
+                    _loginRoutePhase = 'error';
+                    alert('La sesión Firebase no coincide. Vuelve a conectar con Google.');
+                    return;
                 }
 
                 const boot = await nexusRetryAsync(() => getBootstrapInfo(), 3, 300);
@@ -4647,6 +4719,8 @@
             nexusRequireAuthScreen();
             hideFirstTimeSetup();
             hideAllLoginPanels();
+            const hdr = $id('login-identity-header');
+            if (hdr) hdr.classList.remove('hidden');
             const choice = $id('login-initial-choice');
             if (choice) choice.classList.remove('hidden');
             const sel = $id('login-user-selection'); if (sel) sel.classList.add('hidden');
@@ -4747,15 +4821,18 @@
 
         async function processLoginSuccess(email) {
             if (!email) return showLoginFlow();
-            showLoginRoutingLoading('Abriendo tu bóveda…');
             currentUser = email;
             sessionUnlocked = true;
+            showLoginRoutingLoading('Abriendo tu bóveda…');
+            setLoginRoutingProgress(15, 'Cargando perfil…');
             try {
+                setLoginRoutingProgress(45, 'Preparando bóveda…');
                 await bootApp();
+                setLoginRoutingProgress(90, 'Sincronizando…');
                 localStorage.setItem('nexus_current_user', email);
                 await NexusIDB.saveSession(email);
                 document.cookie = 'nexus_current_user=' + email + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
-                hideLoginRoutingLoading();
+                setLoginRoutingProgress(100, 'Listo');
                 nexusReleaseAppShell();
                 initCloud().then(async () => {
                     try {
@@ -4769,6 +4846,8 @@
                 clearStaleSession();
                 showLoginFlow();
                 throw e;
+            } finally {
+                hideLoginRoutingLoading();
             }
         }
 
@@ -4795,7 +4874,7 @@
                 userProfile.lastSeen = Date.now();
                 delete userProfile.needsPinSetup;
                 localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-                await syncProfileToCloud(userProfile);
+                syncProfileToCloud(userProfile).catch(e => console.warn('[NEXUS] syncProfile login', e));
                 sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
                 await processLoginSuccess(loginSelectedEmail);
@@ -5007,7 +5086,9 @@
                 } catch (e) { console.warn('[NEXUS] bootApp profile refresh', e); }
             }
             if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(userProfile);
-            if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
+            if (typeof loadRootPinHashFromCloud === 'function') {
+                loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] loadRootPinHash background', e));
+            }
             
             // APEX FIX: Migración Transparente a IndexedDB
             let savedState = await NexusIDB.getState(currentUser);
