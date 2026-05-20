@@ -615,7 +615,8 @@
                         </div>
                         <input type="hidden" id="edit-user-original-email">
                         <input type="text" id="edit-user-name" class="form-input text-xs bg-white mb-2" placeholder="Nombre">
-                        <input type="password" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-center tracking-[0.5em] mb-2 font-bold text-blue-600" placeholder="PIN">
+                        <input type="password" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-center tracking-[0.5em] mb-1 font-bold text-blue-600" placeholder="PIN (4 dígitos)" onfocus="unlockPinEditField()">
+                        <p id="edit-user-pin-hint" class="text-[8px] font-bold text-blue-500 text-center mb-2 hidden">Toca el campo para cambiar el PIN</p>
                         <div class="flex gap-2">
                             <button onclick="saveUserEdit()" class="flex-1 bg-blue-600 text-white py-2 rounded-xl text-[10px] font-black">Guardar</button>
                             <button onclick="openDeleteUserModal()" class="flex-1 bg-red-50 text-red-600 border border-red-100 py-2 rounded-xl text-[10px] font-black">Borrar</button>
@@ -651,8 +652,17 @@
                         </label>
                     </div>
 
-                    <div class="pt-4 border-t border-slate-100/50">
-                        <button onclick="openUserEdit(currentUser)" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-600 p-3.5 rounded-xl font-black uppercase text-[10px] transition-colors shadow-sm active:scale-95 border border-slate-200 flex items-center justify-center gap-2"><i class="fa-solid fa-key"></i> Cambiar PIN de Acceso</button>
+                    <div class="flex items-center justify-between pt-4 border-t border-slate-100/50">
+                        <div>
+                            <h4 class="text-[10px] font-black uppercase text-slate-700">PIN de acceso</h4>
+                            <p id="settings-pin-hint" class="text-[8px] text-slate-400">Estado del bloqueo</p>
+                        </div>
+                        <span id="settings-pin-mask" class="hidden font-mono text-xl font-black tracking-[0.35em] text-emerald-600 select-none" aria-label="PIN configurado">****</span>
+                        <span id="settings-pin-missing" class="hidden text-[9px] font-black uppercase text-amber-600">Sin PIN</span>
+                    </div>
+
+                    <div class="pt-3 border-t border-slate-100/50">
+                        <button onclick="openUserEdit(currentUser)" type="button" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-600 p-3.5 rounded-xl font-black uppercase text-[10px] transition-colors shadow-sm active:scale-95 border border-slate-200 flex items-center justify-center gap-2"><i class="fa-solid fa-key"></i> Cambiar PIN de Acceso</button>
                     </div>
                 </div>
 
@@ -2819,6 +2829,59 @@
             return copy;
         }
 
+        function profileHasPin(profile) {
+            return !!(profile && profile.pinHash && String(profile.pinHash).length === 64);
+        }
+
+        function updateSettingsPinDisplay(profile) {
+            const p = profile || userProfile;
+            const mask = $id('settings-pin-mask');
+            const missing = $id('settings-pin-missing');
+            const hint = $id('settings-pin-hint');
+            const hasPin = profileHasPin(p);
+            if (mask) mask.classList.toggle('hidden', !hasPin);
+            if (missing) missing.classList.toggle('hidden', hasPin);
+            if (hint) {
+                hint.textContent = hasPin
+                    ? 'PIN activo — se muestra enmascarado'
+                    : 'Configura un PIN de 4 dígitos';
+            }
+        }
+
+        function fillPinEditField(profile) {
+            const el = $id('edit-user-pin');
+            const hint = $id('edit-user-pin-hint');
+            if (!el) return;
+            const hasPin = profileHasPin(profile);
+            el.dataset.hasPin = hasPin ? '1' : '0';
+            el.dataset.editing = '0';
+            if (hasPin) {
+                el.value = '****';
+                el.readOnly = true;
+                el.classList.add('bg-slate-100', 'text-emerald-700');
+                el.placeholder = '';
+                if (hint) hint.classList.remove('hidden');
+            } else {
+                el.value = '';
+                el.readOnly = false;
+                el.classList.remove('bg-slate-100', 'text-emerald-700');
+                el.placeholder = 'Nuevo PIN (4 dígitos)';
+                if (hint) hint.classList.add('hidden');
+            }
+        }
+
+        function unlockPinEditField() {
+            const el = $id('edit-user-pin');
+            const hint = $id('edit-user-pin-hint');
+            if (!el || el.dataset.hasPin !== '1' || el.dataset.editing === '1') return;
+            el.dataset.editing = '1';
+            el.readOnly = false;
+            el.value = '';
+            el.classList.remove('bg-slate-100', 'text-emerald-700');
+            el.placeholder = 'Nuevo PIN (4 dígitos)';
+            if (hint) hint.classList.add('hidden');
+        }
+
         async function verifyUserPin(pin, profile) {
             if (!profile || !pin || String(pin).length !== 4) return false;
             const p = await ensureProfilePinHash({ ...profile });
@@ -4033,11 +4096,27 @@
             if(!loginSelectedEmail || (!bypassPin && pin.length !== 4)) return alert("Ingresa un PIN de 4 dígitos.");
             
             let profile = await getProfileForVault(loginSelectedEmail);
-            if (profile && (bypassPin || await verifyUserPin(pin, profile))) {
-                userProfile = await ensureProfilePinHash(profile);
+            if (!profile) return alert('No se encontró el perfil de este usuario.');
+
+            profile = await ensureProfilePinHash(profile);
+            let pinOk = bypassPin || await verifyUserPin(pin, profile);
+
+            // Primera vez: guardar el PIN ingresado en login
+            if (!pinOk && !bypassPin && pin.length === 4 && !profileHasPin(profile)) {
+                profile.pinHash = await hashVaultPIN(pin);
+                delete profile.pin;
+                delete profile.needsPinSetup;
+                pinOk = true;
+            }
+
+            if (pinOk) {
+                userProfile = profile;
                 userProfile.lastSeen = Date.now();
+                delete userProfile.needsPinSetup;
                 localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
                 await syncProfileToCloud(userProfile);
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
                 await processLoginSuccess(loginSelectedEmail);
             } else {
                 alert('PIN incorrecto.');
@@ -4056,9 +4135,11 @@
             if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
             
             userProfile = { name, email, lastSeen: Date.now(), pinHash: await hashVaultPIN(pin) };
+            delete userProfile.needsPinSetup;
             localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
             await initCloud();
             await syncProfileToCloud(userProfile);
+            sessionStorage.setItem('nexus_pin_banner_ok', '1');
             
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
@@ -4249,6 +4330,7 @@
         async function bootApp() {
             userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
             if (userProfile) userProfile = await ensureProfilePinHash(userProfile);
+            if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(userProfile);
             if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
             
             // APEX FIX: Migración Transparente a IndexedDB
@@ -4675,7 +4757,7 @@
         }
 
         function showPinSetupBannerIfNeeded() {
-            if (!userProfile || userProfile.pinHash || sessionStorage.getItem('nexus_pin_banner_ok')) return;
+            if (!userProfile || profileHasPin(userProfile) || sessionStorage.getItem('nexus_pin_banner_ok')) return;
             const homeTab = $id('tab-home');
             if (!homeTab || $id('nexus-pin-banner')) return;
             const box = document.createElement('div');
@@ -4694,7 +4776,7 @@
             applyThemeCSS();
             setContext(state.context || 'day');
             const resumeTab = state.activeTab || 'home';
-            if (resumeTab === 'settings' && sessionStorage.getItem('nexus_pin_banner_ok') !== '1' && userProfile && !userProfile.pinHash) {
+            if (resumeTab === 'settings' && sessionStorage.getItem('nexus_pin_banner_ok') !== '1' && userProfile && !profileHasPin(userProfile)) {
                 switchTab('home');
             } else {
                 switchTab(resumeTab);
@@ -10138,6 +10220,7 @@ ${JSON.stringify(dataToAnalyze)}`;
 
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
             const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
+            if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(userProfile);
 
             const abEl = $id('set-auto-backup'); if(abEl) abEl.checked = !!state.settings.autoBackup;
             const btEl = $id('set-backup-time'); if(btEl) btEl.value = state.settings.backupTime || '23:59';
@@ -10747,9 +10830,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             const wrapper = $id('edit-user-wrapper'); if(wrapper) wrapper.classList.remove('hidden');
             $id('edit-user-panel').classList.remove('hidden'); 
             $id('edit-user-original-email').value = docId; 
-            $id('edit-user-name').value = p.name; 
-            $id('edit-user-pin').value = '';
-            if ($id('edit-user-pin')) $id('edit-user-pin').placeholder = p.pinHash ? '•••• (dejar vacío = sin cambio)' : 'Nuevo PIN (4 dígitos)'; 
+            $id('edit-user-name').value = p.name;
+            if (typeof fillPinEditField === 'function') fillPinEditField(p);
             
             currentEditAvatar = p.avatar || null;
             const avPreview = $id('edit-avatar-preview');
@@ -10770,26 +10852,31 @@ ${JSON.stringify(dataToAnalyze)}`;
         async function saveUserEdit() {
             const email = $id('edit-user-original-email').value;
             const name = $id('edit-user-name').value.trim();
-            const pin = ($id('edit-user-pin')?.value || '').trim();
+            const pinEl = $id('edit-user-pin');
+            let pin = (pinEl?.value || '').trim();
             if (!name) return alert('El nombre es obligatorio.');
-            if (pin && pin.length !== 4) return alert('El PIN debe tener exactamente 4 dígitos numéricos.');
+            const keepExistingPin = pinEl && pinEl.dataset.hasPin === '1' && pinEl.dataset.editing !== '1' && (pin === '' || pin === '****');
+            if (!keepExistingPin && pin && pin.length !== 4) return alert('El PIN debe tener exactamente 4 dígitos numéricos.');
             const key = 'nexus_profile_' + email;
             let p = JSON.parse(localStorage.getItem(key)) || { email };
             p.name = name;
             p.lastSeen = Date.now();
-            if (pin) {
+            if (!keepExistingPin && pin && pin !== '****') {
                 p.pinHash = await hashVaultPIN(pin);
                 delete p.pin;
+                delete p.needsPinSetup;
             } else {
                 p = await ensureProfilePinHash(p);
-                if (!p.pinHash) return alert('Debes definir un PIN de 4 dígitos.');
+                if (!profileHasPin(p)) return alert('Debes definir un PIN de 4 dígitos.');
             }
             if (currentEditAvatar) p.avatar = currentEditAvatar;
             p = sanitizeProfileForStorage(p);
             localStorage.setItem(key, JSON.stringify(p));
             if (email === currentUser) {
                 userProfile = p;
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 if ($id('header-user-badge')) $id('header-user-badge').innerText = p.name;
+                if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(p);
                 if (typeof renderSettingsTab === 'function') renderSettingsTab();
             }
             await syncProfileToCloud(p);
