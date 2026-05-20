@@ -76,7 +76,24 @@
         #session-lock-screen > div::-webkit-scrollbar { 
             display: none; 
         }
+
+        /* Bloqueo: sin autenticación no se muestra el dashboard (evita arranque directo con caché vieja) */
+        html.nexus-auth-pending body > header,
+        html.nexus-auth-pending body > main,
+        html.nexus-auth-pending #fab-main,
+        html.nexus-auth-pending #session-lock-screen {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+        html.nexus-auth-pending #login-screen {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
     </style>
+    <script>document.documentElement.classList.add('nexus-auth-pending');</script>
 </head>
 <body class="pb-40">
 
@@ -111,6 +128,8 @@
                         <!-- Avatares dinámicos JS -->
                     </div>
                 </div>
+
+                <p id="login-founder-hint" class="hidden text-[9px] text-amber-300 font-bold text-center leading-relaxed border border-amber-500/30 bg-amber-500/10 rounded-xl p-3"><i class="fa-solid fa-shield-halved mr-1"></i> Primer uso del sistema: inicia con <b>Google</b> para crear el administrador fundador.</p>
 
                 <button onclick="triggerNativeGoogleLogin()" class="w-full bg-white text-black hover:bg-slate-100 p-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
                     <svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg>
@@ -2968,8 +2987,12 @@
             } catch (e) { return null; }
         }
 
-        function showLoginFlow() {
-            clearStaleSession();
+        function nexusRequireAuthScreen() {
+            document.documentElement.classList.add('nexus-auth-pending');
+            sessionUnlocked = false;
+            currentUser = null;
+            isRootAdminUnlocked = false;
+            loginSelectedEmail = null;
             const ls = $id('login-screen');
             if (ls) {
                 ls.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
@@ -2977,6 +3000,37 @@
             const lock = $id('session-lock-screen');
             if (lock) lock.classList.add('hidden');
             hideLoginRoutingLoading();
+        }
+
+        function nexusReleaseAppShell() {
+            document.documentElement.classList.remove('nexus-auth-pending');
+            const ls = $id('login-screen');
+            if (ls) ls.classList.add('hidden');
+            const lock = $id('session-lock-screen');
+            if (lock) lock.classList.add('hidden');
+        }
+
+        async function refreshFounderLoginHint() {
+            const el = $id('login-founder-hint');
+            if (!el) return;
+            try {
+                if (!window.db) await initCloud();
+                el.classList.toggle('hidden', await isSystemInitialized());
+            } catch (e) {
+                el.classList.remove('hidden');
+            }
+        }
+
+        function showColdStartLogin() {
+            nexusRequireAuthScreen();
+            initCloud().then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+            fetchLoginUsers(false);
+            showInitialLoginChoice();
+        }
+
+        function showLoginFlow() {
+            clearStaleSession();
+            nexusRequireAuthScreen();
             fetchLoginUsers(false);
             showInitialLoginChoice();
         }
@@ -4354,25 +4408,8 @@
                 }
             });
 
-            // Arranque en frío: SIEMPRE pantalla de autenticación (no entrar directo por sesión guardada)
-            sessionUnlocked = false;
-            currentUser = null;
-            isRootAdminUnlocked = false;
-            loginSelectedEmail = null;
-
-            const ls = $id('login-screen');
-            if (ls) {
-                ls.classList.add('opacity-0');
-                ls.classList.remove('hidden', 'pointer-events-none');
-                requestAnimationFrame(() => ls.classList.remove('opacity-0'));
-            }
-            const lock = $id('session-lock-screen');
-            if (lock) lock.classList.add('hidden');
-            hideLoginRoutingLoading();
-
-            initCloud().catch(e => console.warn('[NEXUS] initCloud en arranque', e));
-            fetchLoginUsers(false);
-            showInitialLoginChoice();
+            // Arranque en frío: SIEMPRE autenticación primero (Google → fundador o PIN)
+            showColdStartLogin();
         };
 
         let loginSelectedEmail = null;
@@ -4705,10 +4742,7 @@
                 await NexusIDB.saveSession(email);
                 document.cookie = 'nexus_current_user=' + email + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
                 hideLoginRoutingLoading();
-                const loginScreen = $id('login-screen');
-                if (loginScreen) loginScreen.classList.add('hidden');
-                const lock = $id('session-lock-screen');
-                if (lock) lock.classList.add('hidden');
+                nexusReleaseAppShell();
                 initCloud().then(async () => {
                     try {
                         await fetchCloudState();
@@ -4928,7 +4962,7 @@
         }
 
         async function bootApp() {
-            if (!currentUser) throw new Error('Sin usuario de sesión');
+            if (!sessionUnlocked || !currentUser) throw new Error('Sesión no autenticada');
             const localP = loadLocalProfile(currentUser);
             if (!localP) throw new Error('Perfil local no encontrado');
             userProfile = await ensureProfilePinHash(localP);
@@ -5028,7 +5062,8 @@
         function logout() { 
             isRootAdminUnlocked = false;
             deactivateRootMaintainerSession();
-            sessionUnlocked = false; 
+            sessionUnlocked = false;
+            document.documentElement.classList.add('nexus-auth-pending'); 
             
             if(unsubscribeSnapshot) unsubscribeSnapshot();
             if(window.sharedUnsubscribers) {
@@ -5430,6 +5465,7 @@
         }
 
         function initNexus() {
+            if (!sessionUnlocked || !currentUser) return;
             installNexusNativeNavigation();
             applyThemeCSS();
             setContext(state.context || 'day');
