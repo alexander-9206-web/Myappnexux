@@ -3537,8 +3537,7 @@
                                         updateCurrencyLabels();
                                         updateModuleVisibility();
                                         updateDashboard(); 
-                                        if(state.activeTab === 'settings') renderSettingsTab();
-                                        if(state.activeTab) switchTab(state.activeTab); 
+                                        if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
                                     }
                                     // Liberar promesa solo tras renderizar la data descargada
                                     if(isFirstLoad) { isFirstLoad = false; resolve(); }
@@ -4317,14 +4316,6 @@
                 sessionStorage.setItem('nexus_session_active', 'true');
             }
 
-            if (!userProfile.pinHash) {
-                setTimeout(() => {
-                    alert('Define tu PIN de 4 dígitos en Configuración → Cambiar PIN de acceso.');
-                    if (typeof switchTab === 'function') switchTab('settings');
-                    if (typeof openUserEdit === 'function') openUserEdit(currentUser);
-                }, 600);
-            }
-
             setupInactivityLock(); 
             setupAutoBackup();
             const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
@@ -4627,7 +4618,94 @@
             reader.readAsDataURL(file);
         }
 
-        function initNexus() { applyThemeCSS(); setContext(state.context || 'day'); switchTab(state.activeTab || 'home'); populateFilters(); updateCurrencyLabels(); updateModuleVisibility(); fetchLiveRates(); startReminderEngine(); }
+        function installNexusNativeNavigation() {
+            if (window.__nexusNavInstalled) return;
+            window.__nexusNavInstalled = true;
+            window.__nexusTabStack = [(state && state.activeTab) || 'home'];
+            window.__nexusNavLock = false;
+            const nativeSwitch = window.switchTab;
+            window.switchTab = function(id) {
+                id = id || 'home';
+                const prev = state && state.activeTab;
+                const out = nativeSwitch.apply(this, arguments);
+                if (!window.__nexusNavLock && id && id !== prev) {
+                    const top = window.__nexusTabStack[window.__nexusTabStack.length - 1];
+                    if (top !== id) window.__nexusTabStack.push(id);
+                    if (typeof isNativeIosApp === 'function' && isNativeIosApp()) {
+                        const base = location.pathname + location.search;
+                        try { history.pushState({ nexusTab: id }, '', base + '#tab=' + id); } catch (e) {}
+                    }
+                }
+                return out;
+            };
+            window.addEventListener('popstate', function() {
+                if (window.__nexusNavLock) return;
+                if (!window.__nexusTabStack || window.__nexusTabStack.length <= 1) {
+                    if (typeof isNativeIosApp === 'function' && isNativeIosApp() && window.__nexusTabStack && window.__nexusTabStack[0]) {
+                        const base = location.pathname + location.search;
+                        try { history.pushState({ nexusTab: window.__nexusTabStack[0] }, '', base + '#tab=' + window.__nexusTabStack[0]); } catch (e) {}
+                    }
+                    return;
+                }
+                window.__nexusNavLock = true;
+                window.__nexusTabStack.pop();
+                const tab = window.__nexusTabStack[window.__nexusTabStack.length - 1] || 'home';
+                nativeSwitch(tab);
+                window.__nexusNavLock = false;
+            });
+        }
+
+        function refreshActiveTabView() {
+            const id = (state && state.activeTab) || 'home';
+            if (id === 'loans') renderLoansList();
+            else if (id === 'analysis') renderAnalysis();
+            else if (id === 'afterpay') renderAfterpay();
+            else if (id === 'report') renderReport();
+            else if (id === 'accounts') renderAccountsTab();
+            else if (id === 'settings') renderSettingsTab();
+            else if (id === 'database') renderDatabase();
+            else if (id === 'calendar') renderCalendar();
+            else if (id === 'finances') renderFinancesUnified();
+            else if (id === 'budget') renderBudgetTab();
+            else if (id === 'taxes') renderTaxes();
+            else if (id === 'tasks') renderTasksTab();
+            else if (id === 'projects') renderProjectsTab();
+            else if (id === 'home') updateDashboard();
+            else if (id === 'scanner') initScanner();
+        }
+
+        function showPinSetupBannerIfNeeded() {
+            if (!userProfile || userProfile.pinHash || sessionStorage.getItem('nexus_pin_banner_ok')) return;
+            const homeTab = $id('tab-home');
+            if (!homeTab || $id('nexus-pin-banner')) return;
+            const box = document.createElement('div');
+            box.id = 'nexus-pin-banner';
+            box.className = 'mb-4 p-4 rounded-2xl border border-amber-200 bg-amber-50 flex flex-col gap-2';
+            box.innerHTML = '<p class="text-[10px] font-black text-amber-800 uppercase"><i class="fa-solid fa-key mr-1"></i> Configura tu PIN</p><p class="text-[9px] font-bold text-amber-700">Recomendado para bloquear la app. Tú eliges cuándo configurarlo.</p><div class="flex gap-2"><button type="button" id="nexus-pin-banner-setup" class="flex-1 bg-amber-600 text-white py-2 rounded-xl text-[9px] font-black uppercase">Definir PIN</button><button type="button" id="nexus-pin-banner-later" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase bg-white border border-amber-200 text-amber-800">Luego</button></div>';
+            homeTab.insertBefore(box, homeTab.firstChild);
+            const setupBtn = $id('nexus-pin-banner-setup');
+            const laterBtn = $id('nexus-pin-banner-later');
+            if (setupBtn) setupBtn.onclick = () => { sessionStorage.removeItem('nexus_pin_banner_ok'); switchTab('settings'); if (typeof openUserEdit === 'function') openUserEdit(currentUser); };
+            if (laterBtn) laterBtn.onclick = () => { sessionStorage.setItem('nexus_pin_banner_ok', '1'); box.remove(); };
+        }
+
+        function initNexus() {
+            installNexusNativeNavigation();
+            applyThemeCSS();
+            setContext(state.context || 'day');
+            const resumeTab = state.activeTab || 'home';
+            if (resumeTab === 'settings' && sessionStorage.getItem('nexus_pin_banner_ok') !== '1' && userProfile && !userProfile.pinHash) {
+                switchTab('home');
+            } else {
+                switchTab(resumeTab);
+            }
+            populateFilters();
+            updateCurrencyLabels();
+            updateModuleVisibility();
+            fetchLiveRates();
+            startReminderEngine();
+            showPinSetupBannerIfNeeded();
+        }
         
         // APEX FIX: Motor de Recordatorios Push Multidía (JS Fallback Foreground)
         function getLocalDateStr(d) {
@@ -4795,16 +4873,62 @@
             if (st) st.textContent = 'Guardado en el contenedor iOS.';
         }
 
+        window.onNexusPreviewNotificationResult = function(ok, denied) {
+            const st = $id('ios-notif-status');
+            if (!st) return;
+            if (denied) {
+                st.textContent = 'Permite notificaciones para NEXUS en Ajustes del iPhone.';
+                st.className = 'text-[8px] font-bold text-amber-600 text-center';
+                return;
+            }
+            if (!ok) {
+                st.textContent = 'No se pudo enviar la prueba. Reintenta.';
+                st.className = 'text-[8px] font-bold text-red-500 text-center';
+                return;
+            }
+            st.className = 'text-[8px] font-bold text-emerald-600 text-center';
+            const snd = ($id('set-ios-notif-sound') || {}).value || 'default';
+            st.textContent = snd === 'silent'
+                ? 'Prueba enviada (sin sonido). Mira el banner arriba.'
+                : 'Prueba enviada en ~1 s. Mira el banner y escucha el sonido.';
+        };
+
         function previewIosNotification() {
-            if (!isNativeIosApp()) return;
+            const st = $id('ios-notif-status');
+            if (!isNativeIosApp()) {
+                if (st) st.textContent = 'Disponible solo en la app iOS (no en el navegador).';
+                return;
+            }
             const prefs = readIosNotificationSettingsFromUI();
             if (!prefs) return;
-            window.webkit.messageHandlers.appInterface.postMessage({
+            if (st) {
+                st.className = 'text-[8px] font-bold text-indigo-500 text-center';
+                st.textContent = 'Enviando prueba…';
+            }
+            updateIosNotificationSettings();
+            const payload = {
                 action: 'previewNotification',
                 title: 'NEXUS AR',
                 body: 'Vista previa: ' + (prefs.sound || 'default') + ' · ' + (prefs.alertStyle || 'banner'),
                 notification: prefs
-            });
+            };
+            try {
+                window.webkit.messageHandlers.appInterface.postMessage(payload);
+            } catch (e) {
+                console.warn('[NEXUS] previewNotification', e);
+                try {
+                    window.webkit.messageHandlers.immediateAlarmHandler.postMessage(JSON.stringify({
+                        id: 'nexus_preview_' + Date.now(),
+                        title: payload.title,
+                        body: payload.body,
+                        priority: 'high',
+                        notification: prefs
+                    }));
+                    if (st) st.textContent = 'Prueba enviada (modo alternativo).';
+                } catch (e2) {
+                    if (st) st.textContent = 'Error al contactar iOS. Recompila la app.';
+                }
+            }
         }
 
         function openIosSystemNotificationSettings() {
@@ -5002,6 +5126,8 @@
             if(id === 'taxes') renderTaxes(); 
             if(id === 'tasks') renderTasksTab(); 
             if(id === 'projects') renderProjectsTab();
+
+            if (!isSameTab && typeof saveState === 'function') saveState();
         }
 
         function toggleFab() { 
