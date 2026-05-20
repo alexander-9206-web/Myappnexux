@@ -12350,13 +12350,17 @@ ${JSON.stringify(dataToAnalyze)}`;
             const avail = {};
             NEXUS_BACKUP_SECTIONS.forEach(s => { avail[s.id] = sectionHasData(data, s.id); });
             if (data._nexusBackup && Array.isArray(data._nexusBackup.sections)) {
-                data._nexusBackup.sections.forEach(id => { if (avail[id] !== undefined) avail[id] = true; });
+                data._nexusBackup.sections.forEach(id => {
+                    if (avail[id] !== undefined) avail[id] = true;
+                });
             }
             if (!Object.values(avail).some(Boolean)) {
-                NEXUS_BACKUP_SECTIONS.forEach(s => {
-                    if (s.id === 'tx' && (data.tx || data.accounts)) avail.tx = !!(data.tx && data.tx.length);
-                    if (s.id === 'accounts' && data.accounts) avail.accounts = true;
-                });
+                if (data.accounts) avail.accounts = true;
+                if (data.pseLinks && data.pseLinks.length) avail.pse = true;
+                if (data.tx && data.tx.length) avail.tx = true;
+                if (data.tasks && data.tasks.length) avail.tasks = true;
+                if (data.loans && data.loans.length) avail.loans = true;
+                if (data.settings) avail.prefs = true;
             }
             return avail;
         }
@@ -12386,14 +12390,89 @@ ${JSON.stringify(dataToAnalyze)}`;
             });
         }
 
+        function faviconFromBankUrl(bankUrl) {
+            if (!bankUrl) return null;
+            try {
+                const host = new URL(bankUrl).hostname.replace(/^www\./, '');
+                return 'https://www.google.com/s2/favicons?domain=' + host + '&sz=128';
+            } catch (e) { return null; }
+        }
+
+        function normalizeBackupImportPayload(raw) {
+            const imported = JSON.parse(JSON.stringify(raw || {}));
+            if (Array.isArray(imported.accounts)) {
+                imported.accounts = imported.accounts.map(a => {
+                    const acc = { ...a };
+                    if (acc.logoUrl && String(acc.logoUrl).length > 2048) {
+                        acc.logoUrl = faviconFromBankUrl(acc.bankUrl);
+                    }
+                    return acc;
+                });
+            }
+            if (!imported.categories || typeof imported.categories !== 'object') {
+                imported.categories = { global: [] };
+            }
+            if (!Array.isArray(imported.categories.global)) imported.categories.global = [];
+            if (!imported.catParents || typeof imported.catParents !== 'object') {
+                imported.catParents = { global: [] };
+            }
+            if (!Array.isArray(imported.catParents.global)) imported.catParents.global = [];
+            if (!Array.isArray(imported.pseLinks)) imported.pseLinks = imported.pseLinks || [];
+            if (!Array.isArray(imported.tx)) imported.tx = [];
+            if (!Array.isArray(imported.loans)) imported.loans = [];
+            if (!Array.isArray(imported.tasks)) imported.tasks = [];
+            if (!imported.settings || typeof imported.settings !== 'object') {
+                imported.settings = { baseCurrency: 'AUD', apLimit: 5000000, apPayDay: 5, requirePin: false };
+            }
+            return imported;
+        }
+
+        function isValidNexusBackupPayload(imported) {
+            if (!imported || typeof imported !== 'object') return false;
+            if (imported._nexusBackup) return true;
+            return !!(
+                (Array.isArray(imported.accounts) && imported.accounts.length) ||
+                (Array.isArray(imported.pseLinks) && imported.pseLinks.length) ||
+                (Array.isArray(imported.tx) && imported.tx.length) ||
+                (Array.isArray(imported.tasks) && imported.tasks.length) ||
+                (Array.isArray(imported.loans) && imported.loans.length)
+            );
+        }
+
+        function getImportSelectionFromMetadata(imported) {
+            const sel = {};
+            NEXUS_BACKUP_SECTIONS.forEach(s => { sel[s.id] = false; });
+            const sections = imported && imported._nexusBackup && Array.isArray(imported._nexusBackup.sections)
+                ? imported._nexusBackup.sections : null;
+            if (sections && sections.length) {
+                sections.forEach(id => { if (sel[id] !== undefined) sel[id] = true; });
+                return sel;
+            }
+            NEXUS_BACKUP_SECTIONS.forEach(s => {
+                if (sectionHasData(imported, s.id)) sel[s.id] = true;
+            });
+            return sel;
+        }
+
+        async function forcePersistVaultState() {
+            if (!currentUser) throw new Error('Debes iniciar sesión antes de importar una copia.');
+            if (!state) throw new Error('La bóveda no está inicializada. Abre la app e inicia sesión primero.');
+            if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
+            await NexusIDB.saveState(currentUser, state);
+            try {
+                localStorage.setItem('nexus_db_' + currentUser, JSON.stringify(state));
+            } catch (e) { console.warn('[NEXUS] localStorage backup mirror', e); }
+        }
+
         function renderBackupSectionsList(mode, importData) {
             const list = $id('backup-sections-list');
             if (!list) return;
             const avail = mode === 'import' && importData ? getSectionsAvailableInImport(importData) : null;
             let html = '';
+            const presetSel = (mode === 'import' && importData) ? getImportSelectionFromMetadata(importData) : null;
             NEXUS_BACKUP_SECTIONS.forEach(s => {
                 const disabled = avail && !avail[s.id];
-                const checked = avail ? avail[s.id] : true;
+                const checked = presetSel ? !!presetSel[s.id] : (avail ? avail[s.id] : true);
                 const countHint = mode === 'export' && state ? (() => {
                     if (s.id === 'tx') return (state.tx || []).length + ' reg.';
                     if (s.id === 'accounts') return (state.accounts || []).length + ' ctas.';
@@ -12427,16 +12506,23 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function openBackupImportSelectModal(importData) {
-            pendingBackupImport = importData;
+            pendingBackupImport = normalizeBackupImportPayload(importData);
             backupSelectMode = 'import';
             const mod = $id('backup-select-modal');
             const title = $id('backup-select-title');
             const hint = $id('backup-select-hint');
             const btn = $id('backup-select-confirm-btn');
+            const meta = pendingBackupImport._nexusBackup;
             if (title) title.innerHTML = '<i class="fa-solid fa-file-import mr-2"></i>Importar datos';
-            if (hint) hint.textContent = 'Archivo cargado. Elige qué secciones fusionar con tu bóveda actual.';
+            if (hint) {
+                const nAcc = (pendingBackupImport.accounts || []).length;
+                const nPse = (pendingBackupImport.pseLinks || []).length;
+                hint.textContent = meta && meta.sections
+                    ? `Archivo listo (${nAcc} cuentas, ${nPse} enlaces PSE). Las secciones del archivo ya están marcadas — pulsa «Importar selección».`
+                    : 'Archivo cargado. Elige qué secciones fusionar con tu bóveda actual.';
+            }
             if (btn) btn.textContent = 'Importar selección';
-            renderBackupSectionsList('import', importData);
+            renderBackupSectionsList('import', pendingBackupImport);
             if (mod) mod.classList.remove('hidden');
         }
 
@@ -12524,60 +12610,80 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         async function applyPartialBackupImport(imported, selection) {
-            const allChecked = NEXUS_BACKUP_SECTIONS.every(s => selection[s.id]);
-            const isLegacyFull = !imported._nexusBackup && (imported.tx || imported.accounts);
-            if (isLegacyFull && allChecked && confirm('¿Reemplazar toda la bóveda con esta copia? (Cancelar = fusionar solo lo marcado)')) {
-                state = JSON.parse(JSON.stringify(imported));
+            if (!currentUser || !sessionUnlocked) {
+                return alert('Inicia sesión en Nexus Identity (Google + PIN) antes de restaurar el JSON.');
+            }
+            if (!state) {
+                return alert('La bóveda aún no está lista. Espera a que cargue el panel principal e intenta de nuevo.');
+            }
+            try {
+                imported = normalizeBackupImportPayload(imported);
+                const allChecked = NEXUS_BACKUP_SECTIONS.every(s => selection[s.id]);
+                const isLegacyFull = !imported._nexusBackup && (imported.tx || imported.accounts);
+                if (isLegacyFull && allChecked && confirm('¿Reemplazar toda la bóveda con esta copia? (Cancelar = fusionar solo lo marcado)')) {
+                    state = JSON.parse(JSON.stringify(imported));
+                    if (state._nexusBackup) delete state._nexusBackup;
+                } else {
+                    mergeBackupIntoState(state, imported, selection);
+                }
+
                 if (state._nexusBackup) delete state._nexusBackup;
-            } else {
-                mergeBackupIntoState(state, imported, selection);
-            }
 
-            if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
-                unsubscribeSnapshot();
-                unsubscribeSnapshot = null;
-            }
-            if (!state.settings) state.settings = { baseCurrency: 'COP', apLimit: 5000000, apPayDay: 5 };
-            if (!state.activeCurrency) state.activeCurrency = 'GLOBAL';
-            if (!state.context) state.context = 'day';
-            if (!state.categories) state.categories = { global: [] };
-            if (!state.catParents) state.catParents = { global: [] };
-            if (!state.taskVaults) state.taskVaults = [];
-            if (!state.tasks) state.tasks = [];
-            if (!state.pseLinks) state.pseLinks = [];
-            if (!state.goals) state.goals = [];
-            if (!state.budgets) state.budgets = {};
+                if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
+                    unsubscribeSnapshot();
+                    unsubscribeSnapshot = null;
+                }
+                if (!state.settings) state.settings = { baseCurrency: 'COP', apLimit: 5000000, apPayDay: 5 };
+                if (!state.activeCurrency) state.activeCurrency = 'GLOBAL';
+                if (!state.context) state.context = 'day';
+                if (!state.categories) state.categories = { global: [] };
+                if (!state.catParents) state.catParents = { global: [] };
+                if (!state.taskVaults) state.taskVaults = [];
+                if (!state.tasks) state.tasks = [];
+                if (!state.pseLinks) state.pseLinks = [];
+                if (!state.goals) state.goals = [];
+                if (!state.budgets) state.budgets = {};
+                if (!state.accounts) state.accounts = [];
+                if (!state.tx) state.tx = [];
+                if (!state.loans) state.loans = [];
 
-            await NexusIDB.saveState(currentUser, state);
-            saveState();
-            if (typeof triggerCloudSync === 'function') {
-                lastCloudSyncHash = {};
-                if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
-                triggerCloudSync();
-                setTimeout(() => { if (typeof fetchCloudState === 'function') fetchCloudState(); }, 2000);
+                await forcePersistVaultState();
+                if (typeof triggerCloudSync === 'function') {
+                    lastCloudSyncHash = {};
+                    if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
+                    triggerCloudSync();
+                    setTimeout(() => { if (typeof fetchCloudState === 'function') fetchCloudState(); }, 2000);
+                }
+                const gc = document.getElementById('global-currency');
+                if (gc) gc.value = state.activeCurrency;
+                applyThemeCSS();
+                updateCurrencyLabels();
+                populateFilters();
+                if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
+                if (typeof renderAccounts === 'function') renderAccounts();
+                if (typeof renderAccountsTab === 'function') renderAccountsTab();
+                if (typeof renderLoansList === 'function') renderLoansList();
+                if (typeof renderAfterpay === 'function') renderAfterpay();
+                if (typeof renderDatabase === 'function') renderDatabase();
+                if (typeof renderAnalysis === 'function') renderAnalysis();
+                if (typeof renderReport === 'function') renderReport();
+                if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
+                if (typeof renderBudgetTab === 'function') renderBudgetTab();
+                if (typeof renderCalendar === 'function') renderCalendar();
+                if (typeof renderTasksTab === 'function') renderTasksTab();
+                if (typeof renderProjectsTab === 'function') renderProjectsTab();
+                if (typeof renderPSELinks === 'function') renderPSELinks();
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+                if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
+                updateDashboard();
+                switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
+                const nAcc = (state.accounts || []).length;
+                const nPse = (state.pseLinks || []).length;
+                alert('✅ Copia importada: ' + nAcc + ' cuenta(s), ' + nPse + ' enlace(s) PSE.');
+            } catch (e) {
+                console.error('[NEXUS] applyPartialBackupImport', e);
+                alert('Error al importar la copia: ' + (e.message || 'revisa la consola'));
             }
-            const gc = document.getElementById('global-currency');
-            if (gc) gc.value = state.activeCurrency;
-            applyThemeCSS();
-            updateCurrencyLabels();
-            populateFilters();
-            if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
-            if (typeof renderAccounts === 'function') renderAccounts();
-            if (typeof renderAccountsTab === 'function') renderAccountsTab();
-            if (typeof renderLoansList === 'function') renderLoansList();
-            if (typeof renderAfterpay === 'function') renderAfterpay();
-            if (typeof renderDatabase === 'function') renderDatabase();
-            if (typeof renderAnalysis === 'function') renderAnalysis();
-            if (typeof renderReport === 'function') renderReport();
-            if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
-            if (typeof renderBudgetTab === 'function') renderBudgetTab();
-            if (typeof renderCalendar === 'function') renderCalendar();
-            if (typeof renderTasksTab === 'function') renderTasksTab();
-            if (typeof renderProjectsTab === 'function') renderProjectsTab();
-            updateDashboard();
-            if (state.activeTab) switchTab(state.activeTab);
-            else switchTab('home');
-            alert('✅ Datos importados en las secciones seleccionadas.');
         }
 
 
@@ -12600,14 +12706,19 @@ ${JSON.stringify(dataToAnalyze)}`;
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    const imported = JSON.parse(e.target.result);
-                    const valid = imported && (imported._nexusBackup || imported.tx || imported.accounts || imported.tasks || imported.loans);
-                    if (!valid) throw new Error('Invalid Format');
+                    let text = (e.target.result || '').toString().replace(/^\uFEFF/, '').trim();
+                    if (!text) throw new Error('Archivo vacío');
+                    const imported = JSON.parse(text);
+                    if (!isValidNexusBackupPayload(imported)) throw new Error('Formato no reconocido');
                     openBackupImportSelectModal(imported);
                 } catch (err) {
-                    console.error('[APEX SYS] Error leyendo backup:', err);
-                    alert('⚠️ El archivo JSON está corrupto o no pertenece a Nexus AR.');
+                    console.error('[NEXUS] Error leyendo backup:', err);
+                    alert('⚠️ No se pudo leer la copia: ' + (err.message || 'JSON inválido o archivo demasiado grande.'));
                 }
+                event.target.value = '';
+            };
+            reader.onerror = function() {
+                alert('⚠️ No se pudo abrir el archivo en este dispositivo.');
                 event.target.value = '';
             };
             reader.readAsText(file);
