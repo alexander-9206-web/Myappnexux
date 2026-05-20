@@ -96,6 +96,11 @@
                 <p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p>
             </div>
             
+            <div id="login-routing-loading" class="hidden text-center py-8 space-y-3 relative z-10">
+                <i class="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
+                <p id="login-routing-loading-text" class="text-[10px] font-black uppercase tracking-widest text-indigo-300">Conectando…</p>
+            </div>
+
             <!-- Elección Inicial (MODERNIZADO) -->
             <div id="login-initial-choice" class="space-y-4 pt-4 border-t border-white/10 relative z-10">
                 
@@ -2896,7 +2901,7 @@
         function showFirstSetupPinStep() {
             const u = _firstSetupFirebaseUser;
             if (!u) return;
-            showLoginRoutingStatus('');
+            hideLoginRoutingLoading();
             hideAllLoginPanels();
             const fs = $id('login-first-setup');
             if (fs) fs.classList.remove('hidden');
@@ -2942,13 +2947,62 @@
             throw lastErr || new Error('Sin respuesta');
         }
 
-        function beginLoginRoutingUI(message) {
-            hideFirstTimeSetup();
-            ['login-initial-choice', 'login-user-selection', 'login-new-section', 'login-pin-section'].forEach(id => {
+        function clearStaleSession() {
+            currentUser = null;
+            sessionUnlocked = false;
+            isRootAdminUnlocked = false;
+            loginSelectedEmail = null;
+            _loginRoutePhase = null;
+            localStorage.removeItem('nexus_current_user');
+            if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) NexusIDB.saveSession(null);
+            document.cookie = 'nexus_current_user=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        }
+
+        function loadLocalProfile(email) {
+            if (!email) return null;
+            try {
+                const raw = localStorage.getItem('nexus_profile_' + email);
+                if (!raw) return null;
+                const p = JSON.parse(raw);
+                return (p && p.email) ? p : null;
+            } catch (e) { return null; }
+        }
+
+        function showLoginFlow() {
+            clearStaleSession();
+            const ls = $id('login-screen');
+            if (ls) {
+                ls.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            }
+            const lock = $id('session-lock-screen');
+            if (lock) lock.classList.add('hidden');
+            hideLoginRoutingLoading();
+            fetchLoginUsers(false);
+            showInitialLoginChoice();
+        }
+
+        function showLoginRoutingLoading(message) {
+            const box = $id('login-routing-loading');
+            const txt = $id('login-routing-loading-text');
+            const ls = $id('login-screen');
+            if (ls) ls.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            ['login-initial-choice', 'login-user-selection', 'login-new-section', 'login-pin-section', 'login-first-setup'].forEach(id => {
                 const el = $id(id);
                 if (el) el.classList.add('hidden');
             });
-            showLoginRoutingStatus(message || 'Conectando con Firebase…');
+            if (box) box.classList.remove('hidden');
+            if (txt) txt.textContent = message || 'Conectando…';
+        }
+
+        function hideLoginRoutingLoading() {
+            const box = $id('login-routing-loading');
+            if (box) box.classList.add('hidden');
+            showLoginRoutingStatus('');
+        }
+
+        function beginLoginRoutingUI(message) {
+            hideFirstTimeSetup();
+            showLoginRoutingLoading(message || 'Conectando con Firebase…');
         }
 
         function setFirstSetupButtonBusy(busy) {
@@ -3041,8 +3095,8 @@
                 _loginRoutePhase = 'error';
                 alert('Error al continuar: ' + (e.message || 'revisa la conexión'));
             } finally {
-                showLoginRoutingStatus('');
                 if (_loginRoutePhase === 'error') {
+                    hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
                 }
@@ -3052,6 +3106,7 @@
         function showLoginPinStep(userEmail, userName, profile) {
             loginSelectedEmail = userEmail;
             userProfile = profile;
+            hideLoginRoutingLoading();
             hideAllLoginPanels();
             const pinSection = $id('login-pin-section');
             if (pinSection) pinSection.classList.remove('hidden');
@@ -4322,14 +4377,25 @@
                 fetchLoginUsers(false);
                 showInitialLoginChoice();
             } else {
-                // ARRANQUE LOCAL-FIRST
-                await bootApp(); 
-                
-                // SINCRONIZACIÓN EN SEGUNDO PLANO GOOGLE SHEETS
-                initCloud().then(async () => {
-                    await fetchCloudState();
-                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
-                });
+                const profile = loadLocalProfile(currentUser);
+                if (!profile) {
+                    console.warn('[NEXUS] Sesión guardada sin perfil, mostrando login');
+                    showLoginFlow();
+                } else {
+                    try {
+                        await initCloud();
+                        await bootApp();
+                        const loginScreen = $id('login-screen');
+                        if (loginScreen) loginScreen.classList.add('hidden');
+                        hideLoginRoutingLoading();
+                        fetchCloudState().then(async () => {
+                            if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                        }).catch(e => console.warn('[NEXUS] sync on cold start', e));
+                    } catch (e) {
+                        console.error('[NEXUS] cold start boot', e);
+                        showLoginFlow();
+                    }
+                }
             }
         };
 
@@ -4338,17 +4404,19 @@
         async function finishFounderLoginEntry(email) {
             _firstSetupFirebaseUser = null;
             hideFirstTimeSetup();
-            hideAllLoginPanels();
+            showLoginRoutingLoading('Abriendo tu bóveda…');
             loginSelectedEmail = email;
-            currentUser = email;
             isRootAdminUnlocked = true;
             _loginRoutePhase = 'app';
-            showLoginRoutingStatus('');
-            const st = $id('first-setup-status');
-            if (st) st.textContent = 'Accediendo a tu bóveda…';
-            await activateRootMaintainerSession();
-            await processLoginSuccess(email);
-            if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+            try {
+                await activateRootMaintainerSession();
+                await processLoginSuccess(email);
+                if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+            } catch (e) {
+                console.error('[NEXUS] finishFounderLoginEntry', e);
+                showLoginFlow();
+                alert('No se pudo abrir la bóveda. Intenta iniciar sesión de nuevo.');
+            }
         }
 
         async function completeFirstSetup() {
@@ -4651,35 +4719,33 @@
         }
 
         async function processLoginSuccess(email) {
-            localStorage.setItem('nexus_current_user', email); 
-            await NexusIDB.saveSession(email);
-            document.cookie = "nexus_current_user=" + email + "; max-age=" + (60*60*24*365) + "; path=/";
-            
-            currentUser = email; sessionUnlocked = true; 
-            
-            // APEX FIX: Await Atómico. No liberamos la pantalla de carga hasta asegurar que Firebase respondió.
-            return new Promise((resolve) => {
+            if (!email) return showLoginFlow();
+            showLoginRoutingLoading('Abriendo tu bóveda…');
+            currentUser = email;
+            sessionUnlocked = true;
+            try {
+                await bootApp();
+                localStorage.setItem('nexus_current_user', email);
+                await NexusIDB.saveSession(email);
+                document.cookie = 'nexus_current_user=' + email + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
+                hideLoginRoutingLoading();
                 const loginScreen = $id('login-screen');
-                if(loginScreen) { 
-                    loginScreen.classList.add('opacity-0', 'pointer-events-none'); 
-                    setTimeout(async () => { 
-                        loginScreen.classList.add('hidden'); 
-                        loginScreen.classList.remove('opacity-0', 'pointer-events-none'); 
-                        await bootApp(); 
-                        await initCloud(); 
-                        await fetchCloudState(); 
+                if (loginScreen) loginScreen.classList.add('hidden');
+                const lock = $id('session-lock-screen');
+                if (lock) lock.classList.add('hidden');
+                initCloud().then(async () => {
+                    try {
+                        await fetchCloudState();
                         if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                         if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                        resolve();
-                    }, 300); 
-                } else {
-                    bootApp().then(async () => {
-                        await initCloud();
-                        await fetchCloudState();
-                        resolve();
-                    });
-                }
-            });
+                    } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
+                }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
+            } catch (e) {
+                console.error('[NEXUS] processLoginSuccess', e);
+                clearStaleSession();
+                showLoginFlow();
+                throw e;
+            }
         }
 
         async function handleLoginExisting(bypassPin = false) {
@@ -4886,9 +4952,11 @@
         }
 
         async function bootApp() {
-            userProfile = JSON.parse(localStorage.getItem(`nexus_profile_${currentUser}`));
-            if (userProfile) userProfile = await ensureProfilePinHash(userProfile);
-            if (currentUser && window.db) {
+            if (!currentUser) throw new Error('Sin usuario de sesión');
+            const localP = loadLocalProfile(currentUser);
+            if (!localP) throw new Error('Perfil local no encontrado');
+            userProfile = await ensureProfilePinHash(localP);
+            if (window.db) {
                 try {
                     const cloudP = await getProfileForVault(currentUser);
                     if (cloudP) {
@@ -4918,7 +4986,7 @@
             const reqPin = savedState && savedState.settings ? savedState.settings.requirePin : false;
             if(!sessionUnlocked && reqPin && !bypass) {
                 const lock = $id('session-lock-screen');
-                if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(ln) ln.innerText = userProfile.name; } return;
+                if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(ln) ln.innerText = (userProfile && userProfile.name) ? userProfile.name : currentUser; } return;
             }
             if(bypass) sessionStorage.removeItem('nexus_admin_bypass');
             sessionUnlocked = true; 
@@ -4969,7 +5037,7 @@
             setupAutoBackup();
             const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
             currSelects.forEach(s => { const currentVal = s.value || state.activeCurrency; s.innerHTML = ''; if (s.id === 'global-currency') s.innerHTML += `<option value="GLOBAL">🌐</option>`; CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`); s.value = currentVal; });
-            const hb = $id('header-user-badge'); if(hb) hb.innerText = userProfile.name;
+            const hb = $id('header-user-badge'); if(hb) hb.innerText = (userProfile && userProfile.name) ? userProfile.name : currentUser;
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
