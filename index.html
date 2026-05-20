@@ -3817,28 +3817,40 @@
             }
         }
 
+        function normalizeMemberEmail(email) {
+            return (email || '').trim().toLowerCase();
+        }
+
         async function claimSharedDocAccess(collectionName, vaultId) {
             if (!fbUser || !currentUser || !window.db || !vaultId) return false;
+            const memberEmail = normalizeMemberEmail(currentUser || fbUser.email);
+            const memberUid = fbUser.uid;
+            if (!memberEmail || !memberUid) return false;
             try {
                 const { doc, getDoc, updateDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', collectionName, vaultId);
-                const snap = await getDoc(ref);
-                const memberEmail = currentUser;
-                const memberUid = fbUser.uid;
-                if (!snap.exists()) {
-                    await setDoc(ref, {
-                        owner: currentUser,
-                        ownerUid: memberUid,
-                        members: [memberEmail],
-                        memberUids: [memberUid],
-                        createdAt: new Date().toISOString(),
+
+                // 1) Intentar unirse sin leer primero (regla canSelfJoinShared)
+                try {
+                    await updateDoc(ref, {
+                        members: arrayUnion(memberEmail),
+                        memberUids: arrayUnion(memberUid),
                         updatedAt: new Date().toISOString()
-                    }, { merge: true });
+                    });
                     return true;
+                } catch (joinErr) {
+                    console.warn('[NEXUS P2P] updateDoc join', joinErr?.code || joinErr);
                 }
+
+                // 2) ¿Ya era miembro? (lectura permitida si joinEnabled o miembro)
+                const snap = await getDoc(ref);
+                if (!snap.exists()) return false;
                 const data = snap.data() || {};
-                const alreadyIn = (data.members && data.members.includes(memberEmail)) || (data.memberUids && data.memberUids.includes(memberUid));
-                if (alreadyIn) return true;
+                const members = Array.isArray(data.members) ? data.members.map(normalizeMemberEmail) : [];
+                const uids = Array.isArray(data.memberUids) ? data.memberUids : [];
+                if (members.includes(memberEmail) || uids.includes(memberUid)) return true;
+
+                // 3) Reintento join explícito
                 await updateDoc(ref, {
                     members: arrayUnion(memberEmail),
                     memberUids: arrayUnion(memberUid),
@@ -3846,19 +3858,21 @@
                 });
                 return true;
             } catch (e) {
-                console.error("[APEX P2P] claimSharedDocAccess falló:", e);
+                console.error('[NEXUS P2P] claimSharedDocAccess falló:', e);
                 return false;
             }
         }
 
-        function buildSharedAclFields() {
-            const memberEmail = currentUser || '';
+        function buildSharedAclFields(forCreate = false) {
+            const memberEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
             const memberUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+            if (!forCreate) return { joinEnabled: true };
             return {
-                owner: currentUser,
+                owner: memberEmail,
                 ownerUid: memberUid,
                 members: memberEmail ? [memberEmail] : [],
-                memberUids: memberUid ? [memberUid] : []
+                memberUids: memberUid ? [memberUid] : [],
+                joinEnabled: true
             };
         }
 
@@ -4377,7 +4391,7 @@
 
                         const sharedPayload = { 
                             name: sharedAcc.name.replace('👥 ', ''),
-                            ...buildSharedAclFields(),
+                            ...buildSharedAclFields(false),
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txsMap: txsMap,
@@ -4389,11 +4403,16 @@
                         }
 
                         const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); // Hash compacto
+                        const sharedCacheKey = 'shared_' + sharedAcc.remoteId;
+                        const isNewSharedVault = !lastCloudSyncHash[sharedCacheKey];
+                        if (isNewSharedVault) {
+                            Object.assign(sharedPayload, buildSharedAclFields(true));
+                        }
                         
-                        if (lastCloudSyncHash['shared_' + sharedAcc.remoteId] !== sharedStr) {
+                        if (lastCloudSyncHash[sharedCacheKey] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
                             batch.set(sharedRef, sharedPayload, { merge: true });
-                            lastCloudSyncHash['shared_' + sharedAcc.remoteId] = sharedStr;
+                            lastCloudSyncHash[sharedCacheKey] = sharedStr;
                             writesCount++;
                         }
                     });
@@ -4407,8 +4426,8 @@
                         sTasks.forEach(t => { tasksMap[t.id] = t; });
 
                         const sharedPayload = {
-                            name: vault.name,
-                            ...buildSharedAclFields(),
+                            name: (vault.name || '').replace('👥 ', ''),
+                            ...buildSharedAclFields(false),
                             tasksMap: tasksMap,
                             updatedAt: new Date().toISOString()
                         };
@@ -4418,10 +4437,15 @@
                         }
 
                         const sharedStr = JSON.stringify({ t: sTasks, d: dTasks });
-                        if (lastCloudSyncHash['stask_' + vault.remoteId] !== sharedStr) {
+                        const taskCacheKey = 'stask_' + vault.remoteId;
+                        const isNewTaskVault = !lastCloudSyncHash[taskCacheKey];
+                        if (isNewTaskVault) {
+                            Object.assign(sharedPayload, buildSharedAclFields(true));
+                        }
+                        if (lastCloudSyncHash[taskCacheKey] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
                             batch.set(sharedRef, sharedPayload, { merge: true });
-                            lastCloudSyncHash['stask_' + vault.remoteId] = sharedStr;
+                            lastCloudSyncHash[taskCacheKey] = sharedStr;
                             writesCount++;
                         }
                     });
@@ -10869,7 +10893,7 @@ ${JSON.stringify(dataToAnalyze)}`;
 
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_vaults', shareData.vaultId);
-                if (!joined) return alert("No se pudo autorizar el acceso a la bóveda. Verifica tu conexión y que el token sea válido.");
+                if (!joined) return alert("No se pudo unir a la bóveda P2P. Publica las reglas Firestore, inicia sesión con Google y revisa el token nx_...");
 
                 const newAcc = { 
                     id: 'acc_' + Date.now(), 
@@ -12983,7 +13007,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if(state.taskVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_tasks', data.vaultId);
-                if (!joined) return alert("No se pudo autorizar el acceso a la bóveda de tareas.");
+                if (!joined) return alert("No se pudo unir a la bóveda de tareas. Publica las reglas Firestore actualizadas, verifica que iniciaste sesión con Google y que el token nxt_... es correcto.");
                 state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('task-vault-token').value = '';
