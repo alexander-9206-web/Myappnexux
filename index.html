@@ -333,7 +333,10 @@
             <div id="projects-main-view" class="space-y-6">
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-4"><button onclick="switchTab('home')" type="button" class="w-10 h-10 theme-card border rounded-full shadow-sm theme-text hover:bg-slate-50 transition-colors"><i class="fa-solid fa-house text-cyan-600"></i></button><h2 class="text-2xl font-black uppercase italic tracking-tighter text-cyan-600">Proyectos</h2></div>
+                    <div class="flex gap-2">
+                    <button onclick="openProjectVaultModal()" type="button" title="Proyectos compartidos P2P" class="w-10 h-10 bg-cyan-700 text-white rounded-full shadow-lg shadow-cyan-700/30 active:scale-90 transition-transform"><i class="fa-solid fa-users"></i></button>
                     <button onclick="openProjectModal()" type="button" class="w-10 h-10 bg-cyan-500 text-white rounded-full shadow-lg shadow-cyan-500/30 active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
+                    </div>
                 </div>
                 <div id="projects-kpi-container" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4"></div>
                 <div id="projects-list" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-6 md:space-y-0"></div>
@@ -819,15 +822,17 @@
                             </div>
                             <div>
                                 <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Modelo Predictivo</label>
-                                <select id="set-gemini-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="updateSettings()">
+                                <select id="set-gemini-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="syncGeminiModelUI(); updateSettings()">
                                     <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recomendado)</option>
                                     <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Rápido)</option>
                                     <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                                     <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                    <option value="__custom__">Otro modelo (manual)</option>
                                 </select>
+                                <input type="text" id="set-gemini-model-custom" class="form-input text-xs mt-2 bg-white border-indigo-100 font-mono hidden" placeholder="ej: gemini-2.5-pro o gemini-2.0-flash-001" onchange="updateSettings()">
                             </div>
                         </div>
-                        <p class="text-[8px] text-slate-500 mt-2 font-bold leading-tight ml-2">Si el auditor falla, puedes ingresar tu propia clave gratuita generada en <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-indigo-500 underline active:opacity-50">Google AI Studio</a>.</p>
+                        <p class="text-[8px] text-slate-500 mt-2 font-bold leading-tight ml-2">Soporta cualquier ID de modelo publicado en la API v1beta. El auditor solo responde temas financieros. Clave gratuita en <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-indigo-500 underline active:opacity-50">Google AI Studio</a>.</p>
                     </div>
 
                     <div class="pt-4 border-t border-slate-100">
@@ -837,7 +842,7 @@
                         <p id="auto-backup-status" class="text-[8px] font-bold text-slate-500 mt-2 ml-1">Sin copia automática reciente.</p>
                         <div class="grid grid-cols-2 gap-2 mt-3">
                             <button type="button" onclick="openBackupSelectModal('export')" class="bg-slate-800 text-white p-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar ahora</button>
-                            <button type="button" onclick="pickBackupFileForImport()" class="bg-slate-100 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] border border-slate-200 shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-file-import mr-1"></i> Restaurar JSON</button>
+                            <button type="button" onclick="openBackupImportWizard()" class="bg-slate-100 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] border border-slate-200 shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-file-import mr-1"></i> Restaurar JSON</button>
                         </div>
                         <input type="file" id="restore-backup-file" accept=".json" class="hidden" onchange="importBackup(event)">
                     </div>
@@ -1382,7 +1387,8 @@
                 <div class="w-32 h-32 mx-auto rounded-full border-8 border-emerald-400 flex items-center justify-center bg-emerald-50 shadow-inner transition-colors duration-500">
                     <span id="score-modal-val" class="text-4xl font-black text-emerald-600 tabular-nums tracking-tighter transition-colors duration-500">--</span>
                 </div>
-                <p class="text-xs text-slate-500 font-bold leading-relaxed">Tu Score se calcula de 300 a 850 mediante un algoritmo logarítmico que evalúa tu <b>Ratio de Endeudamiento</b> frente a tu liquidez real, ajustándose a magnitudes financieras estándar.</p>
+                <p id="score-modal-summary" class="text-[9px] text-slate-500 font-bold leading-relaxed px-2">Escala 300–850 según patrimonio, deuda y ratio de endeudamiento.</p>
+                <div id="score-breakdown-list" class="text-left space-y-1.5 max-h-48 overflow-y-auto hide-scrollbar border-t border-slate-100 pt-3"></div>
             </div>
             <button type="button" onclick="closeScoreModal()" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Entendido</button>
         </div>
@@ -1432,7 +1438,7 @@
         <div class="theme-card w-full max-w-lg md:max-w-xl lg:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 md:p-10 space-y-6 animate-slideUp max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-2"><h3 id="form-title" class="text-2xl font-black uppercase tracking-tighter theme-text">Registro</h3><button type="button" onclick="closeForm()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button></div>
             <form id="data-form" onsubmit="saveTransaction(event)">
-                <input type="hidden" id="f-id"><input type="hidden" id="f-type">
+                <input type="hidden" id="f-id"><input type="hidden" id="f-type"><input type="hidden" id="f-tx-proj-id">
                 <div id="form-fields-wrapper" class="flex flex-col gap-4">
                     <div id="currency-account-container" class="grid grid-cols-2 gap-4" style="order: 3;">
                         <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="f-currency" class="form-input text-sm text-center" onchange="populateFormAccounts()"></select></div>
@@ -1928,7 +1934,8 @@
                 </div>
 
                 <div class="shrink-0 space-y-3 pt-2 border-t border-slate-100/50">
-                    <textarea id="ai-user-query" rows="2" class="form-input text-xs w-full bg-slate-50 border-slate-200 focus:border-indigo-400 outline-none transition-colors resize-none" placeholder="Ej: Resume mis mayores gastos y dame un consejo de ahorro..."></textarea>
+                    <p class="text-[8px] font-bold text-indigo-600/80 text-center">Solo temas financieros: gastos, ingresos, deudas, ahorro, presupuesto, inversiones.</p>
+                    <textarea id="ai-user-query" rows="2" class="form-input text-xs w-full bg-slate-50 border-slate-200 focus:border-indigo-400 outline-none transition-colors resize-none" placeholder="Ej: ¿Cuáles son mis mayores fugas de capital este mes y cómo reducir deuda?"></textarea>
                     <button id="btn-ask-ai" onclick="executeAIAudit()" class="w-full bg-indigo-600 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg active:scale-95 transition-transform flex justify-center items-center gap-2"><i class="fa-solid fa-paper-plane"></i> Analizar Datos</button>
                 </div>
             </div>
@@ -1965,6 +1972,11 @@
                     <div>
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Fecha Límite (Entrega)</label>
                         <input type="date" id="f-proj-date" required class="form-input text-sm font-bold text-slate-700">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Espacio del proyecto</label>
+                        <select id="f-proj-vault" class="form-input text-xs bg-cyan-50/50 border-cyan-100 font-bold text-cyan-900"></select>
+                        <p class="text-[8px] text-cyan-700/70 ml-2 mt-1 font-bold">Personal o bóveda compartida (token nxp_...).</p>
                     </div>
                     <button type="submit" class="w-full bg-cyan-500 text-white p-4 rounded-2xl font-black uppercase text-sm mt-4 shadow-lg active:scale-95 transition-transform">Guardar Proyecto</button>
                 </form>
@@ -2097,6 +2109,35 @@
             </div>
         </div>
 
+        <!-- MODAL PROYECTOS COMPARTIDOS P2P -->
+        <div id="project-vault-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-cyan-200 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-black uppercase tracking-tighter text-cyan-700"><i class="fa-solid fa-users mr-2"></i>Proyectos compartidos</h3>
+                    <button type="button" onclick="closeProjectVaultModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <p class="text-[9px] font-bold text-cyan-800/90 leading-relaxed bg-cyan-50 p-3 rounded-xl border border-cyan-100"><i class="fa-solid fa-shield-halved mr-1"></i> Pega un token <b>nxp_...</b> para unirte, o crea una bóveda y comparte el token con <i class="fa-solid fa-share-nodes"></i>.</p>
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <p class="text-[10px] font-black uppercase text-slate-700 tracking-widest mb-2"><i class="fa-solid fa-link mr-1"></i> Pegar token</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="project-vault-token" placeholder="nxp_..." class="form-input text-xs font-mono flex-1 text-center tracking-widest bg-white" onkeydown="if(event.key==='Enter'){event.preventDefault();linkProjectVault();}">
+                        <button type="button" onclick="linkProjectVault()" class="bg-slate-800 text-white px-4 rounded-xl font-black text-xs shadow-sm active:scale-95"><i class="fa-solid fa-link"></i></button>
+                    </div>
+                </div>
+                <div class="bg-cyan-50 p-4 rounded-2xl border border-cyan-100">
+                    <p class="text-[10px] font-black uppercase text-cyan-800 tracking-widest mb-2">Nueva bóveda de equipo</p>
+                    <div class="flex gap-2">
+                        <input type="text" id="new-project-vault-name" placeholder="Ej: Obra casa" class="form-input text-xs flex-1 border-cyan-200">
+                        <button type="button" onclick="createProjectVault()" class="bg-cyan-600 text-white px-4 rounded-xl font-black text-xs shadow-sm active:scale-95"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                </div>
+                <div>
+                    <p class="text-[9px] font-black uppercase text-slate-500 tracking-widest mb-2">Mis bóvedas compartidas</p>
+                    <div id="project-vaults-list" class="max-h-40 overflow-y-auto space-y-2 hide-scrollbar"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- MODAL SELECCIÓN BACKUP (exportar / importar parcial) -->
         <div id="backup-select-modal" class="fixed inset-0 z-[110] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 space-y-4 animate-slideUp border border-amber-100 shadow-2xl max-h-[85vh] overflow-y-auto">
@@ -2105,6 +2146,11 @@
                     <button type="button" onclick="closeBackupSelectModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <p id="backup-select-hint" class="text-[9px] font-bold text-slate-500 leading-relaxed">Elige qué datos incluir. Al importar, solo se reemplazan las secciones marcadas; el resto de tu bóveda actual se conserva.</p>
+                <div id="backup-import-file-zone" class="hidden bg-amber-50 p-3 rounded-xl border border-amber-200 space-y-2">
+                    <p class="text-[9px] font-black uppercase text-amber-800"><i class="fa-solid fa-file-arrow-up mr-1"></i> Paso 1: archivo JSON</p>
+                    <button type="button" onclick="pickBackupFileForImport()" class="w-full bg-white text-amber-800 border border-amber-200 py-2.5 rounded-lg text-[9px] font-black uppercase active:scale-95">Seleccionar archivo</button>
+                    <p id="backup-import-file-name" class="text-[8px] font-bold text-amber-700/80 text-center truncate"></p>
+                </div>
                 <div class="flex gap-2">
                     <button type="button" onclick="setAllBackupSections(true)" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-[9px] font-black uppercase">Todo</button>
                     <button type="button" onclick="setAllBackupSections(false)" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-[9px] font-black uppercase">Nada</button>
@@ -2647,6 +2693,10 @@
             exportBackup: 'Exportar copia de seguridad JSON',
             importBackup: 'Restaurar copia de seguridad JSON',
             pickBackupFileForImport: 'Seleccionar archivo JSON de copia',
+            openBackupImportWizard: 'Restaurar copia: elegir secciones e importar',
+            openProjectVaultModal: 'Proyectos compartidos P2P (token nxp_)',
+            linkProjectVault: 'Unirse a bóveda de proyectos con token',
+            createProjectVault: 'Crear bóveda de proyectos compartida',
             openBackupSelectModal: 'Elegir secciones a exportar',
             linkTaskVault: 'Unirse a bóveda de tareas con token nxt_',
             createTaskVault: 'Crear bóveda de tareas compartida',
@@ -3578,6 +3628,9 @@
         const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash';
         const GEMINI_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
         const GEMINI_DEPRECATED_MODELS = ['gemini-2.5-flash-preview-09-2025', 'gemini-2.5-flash-preview-04-17', 'gemini-2.5-pro-preview-03-25'];
+        const NEXUS_AI_FINANCIAL_SYSTEM = 'Eres el auditor IA exclusivo de Nexus AR Finance. SOLO respondes sobre finanzas personales o empresariales: gastos, ingresos, deudas, préstamos, presupuestos, ahorro, liquidez, patrimonio, impuestos, flujo de caja, metas y proyectos con impacto económico. Si la pregunta no es financiera, recházala en una línea indicando que solo atiendes temas de dinero y finanzas. No des consejos médicos, legales no tributarios, políticos, románticos ni de programación general. Usa markdown básico (**negritas**, listas).';
+        const NEXUS_AI_OFF_TOPIC_RE = /\b(receta|poema|chiste|amor|política|religión|deporte sin dinero|programar html|hack|crack|película|música|horóscopo|salud sin costo|psicolog)\b/i;
+        let lastNexusScoreBreakdown = null;
 
         function getGeminiApiKey() {
             const fromSettings = (state && state.settings && state.settings.geminiApiKey) ? state.settings.geminiApiKey.trim() : '';
@@ -3586,20 +3639,59 @@
             return (apiKey || '').trim();
         }
 
+        function getEffectiveGeminiModel() {
+            if (!state.settings) state.settings = {};
+            const sel = ($id('set-gemini-model') && $id('set-gemini-model').value) || state.settings.geminiModel || '';
+            if (sel === '__custom__') {
+                const custom = (($id('set-gemini-model-custom') && $id('set-gemini-model-custom').value) || state.settings.geminiModelCustom || '').trim();
+                return custom || GEMINI_DEFAULT_MODEL;
+            }
+            return (sel || state.settings.geminiModel || GEMINI_DEFAULT_MODEL).trim();
+        }
+
+        function syncGeminiModelUI() {
+            const sel = $id('set-gemini-model');
+            const customEl = $id('set-gemini-model-custom');
+            if (!sel || !customEl) return;
+            const isCustom = sel.value === '__custom__';
+            customEl.classList.toggle('hidden', !isCustom);
+            if (isCustom && state.settings && state.settings.geminiModelCustom) {
+                customEl.value = state.settings.geminiModelCustom;
+            }
+        }
+
         function normalizeGeminiModel() {
             if (!state.settings) state.settings = {};
+            const sel = ($id('set-gemini-model') && $id('set-gemini-model').value) || '';
+            if (sel === '__custom__') {
+                const custom = getEffectiveGeminiModel();
+                if (custom) state.settings.geminiModelCustom = custom;
+                state.settings.geminiModel = '__custom__';
+                return;
+            }
             const current = (state.settings.geminiModel || '').trim();
-            if (!current || GEMINI_DEPRECATED_MODELS.includes(current)) {
+            if (!current || current === '__custom__') {
+                state.settings.geminiModel = GEMINI_DEFAULT_MODEL;
+            } else if (GEMINI_DEPRECATED_MODELS.includes(current)) {
                 state.settings.geminiModel = GEMINI_DEFAULT_MODEL;
             }
         }
 
         function getGeminiModelCandidates() {
             normalizeGeminiModel();
-            const preferred = (state.settings.geminiModel || GEMINI_DEFAULT_MODEL).trim();
+            const preferred = getEffectiveGeminiModel();
             const list = [preferred];
-            GEMINI_FALLBACK_MODELS.forEach(m => { if (!list.includes(m)) list.push(m); });
+            if (preferred !== GEMINI_DEFAULT_MODEL && !list.includes(GEMINI_DEFAULT_MODEL)) list.push(GEMINI_DEFAULT_MODEL);
+            GEMINI_FALLBACK_MODELS.forEach(m => { if (m !== preferred && !list.includes(m)) list.push(m); });
             return list;
+        }
+
+        function assertFinancialAIQuery(userQuestion) {
+            const t = (userQuestion || '').trim();
+            if (!t || t.length < 4) throw new Error('OFF_TOPIC');
+            if (NEXUS_AI_OFF_TOPIC_RE.test(t)) throw new Error('OFF_TOPIC');
+            const financialHints = /financ|dinero|gasto|ingreso|ahorro|deuda|préstamo|presupuesto|invers|patrimonio|liquidez|capital|interés|divisa|factura|nexus|transacc|cuenta|afterpay|meta|proyecto|impuesto|egreso|ing\.|roi|cash\s*flow|endeudamiento|score|auditor|resumen.*gasto|fuga/i;
+            if (!financialHints.test(t)) throw new Error('OFF_TOPIC');
         }
 
         async function callGeminiGenerate({ prompt, systemInstruction }) {
@@ -4337,6 +4429,58 @@
                 });
             });
         }
+
+        function attachProjectP2PListener() {
+            if (!window.db) return;
+            if (!window.sharedProjectUnsubscribers) window.sharedProjectUnsubscribers = {};
+            const sharedVaults = state.projectVaults ? state.projectVaults.filter(v => v.isShared && v.remoteId) : [];
+            const activeIds = sharedVaults.map(v => v.remoteId);
+            for (const rId in window.sharedProjectUnsubscribers) {
+                if (!activeIds.includes(rId)) {
+                    window.sharedProjectUnsubscribers[rId]();
+                    delete window.sharedProjectUnsubscribers[rId];
+                }
+            }
+            if (sharedVaults.length === 0) return;
+            import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then(({ doc, onSnapshot }) => {
+                sharedVaults.forEach(vaultRef => {
+                    const rId = vaultRef.remoteId;
+                    if (window.sharedProjectUnsubscribers[rId]) return;
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', rId);
+                    window.sharedProjectUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
+                        if (!docSnap.exists()) return;
+                        const currentVault = state.projectVaults.find(v => v.remoteId === rId);
+                        if (!currentVault) return;
+                        const data = docSnap.data();
+                        let hasChanges = false;
+                        let incoming = [];
+                        if (data.projects && Array.isArray(data.projects)) incoming = incoming.concat(data.projects);
+                        if (data.projectsMap) incoming = incoming.concat(Object.values(data.projectsMap));
+                        incoming.forEach(netProj => {
+                            const mapped = { ...netProj, sharedVaultId: rId };
+                            const idx = state.projects.findIndex(p => p.id === mapped.id);
+                            if (idx === -1) {
+                                state.projects.push(mapped);
+                                hasChanges = true;
+                            } else if (JSON.stringify(state.projects[idx]) !== JSON.stringify(mapped)) {
+                                state.projects[idx] = mapped;
+                                hasChanges = true;
+                            }
+                        });
+                        if (!currentVault.syncedOnce) {
+                            currentVault.syncedOnce = true;
+                            hasChanges = true;
+                        }
+                        if (hasChanges) {
+                            state.projects = state.projects.filter((p, i, self) => i === self.findIndex(x => x.id === p.id));
+                            saveState();
+                            if (sessionUnlocked && state.activeTab === 'projects') renderProjectsTab();
+                        }
+                    });
+                });
+            });
+        }
+
         function nexusFormatFirebaseError(e) {
             const msg = (e && (e.message || e.code)) ? String(e.message || e.code) : String(e || 'Firebase');
             if (/permission|insufficient|PERMISSION_DENIED/i.test(msg)) {
@@ -4577,7 +4721,8 @@
                         // Conectar radares P2P Inmediatamente DESPUÉS de que el snapshot descargue el 'core' 
                         // Esto garantiza que el sistema ya conoce los IDs de las cuentas compartidas antes de escanear
                         attachP2PListener();
-                        attachTaskP2PListener(); 
+                        attachTaskP2PListener();
+                        attachProjectP2PListener();
 
                         updateCloudBadge(true, false);
                     }, (error) => {
@@ -4732,6 +4877,28 @@
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
                             batch.set(sharedRef, sharedPayload, { merge: true });
                             lastCloudSyncHash[taskCacheKey] = sharedStr;
+                            writesCount++;
+                        }
+                    });
+
+                    (state.projectVaults || []).filter(v => v.isShared && v.remoteId).forEach(vault => {
+                        const sProjects = (state.projects || []).filter(p => p.sharedVaultId === vault.remoteId);
+                        const projectsMap = {};
+                        sProjects.forEach(p => { projectsMap[p.id] = p; });
+                        const sharedPayload = {
+                            name: (vault.name || '').replace('👥 ', ''),
+                            ...buildSharedAclFields(false),
+                            projectsMap: projectsMap,
+                            updatedAt: new Date().toISOString()
+                        };
+                        const sharedStr = JSON.stringify({ p: sProjects });
+                        const projCacheKey = 'sproj_' + vault.remoteId;
+                        const isNewProjVault = !lastCloudSyncHash[projCacheKey];
+                        if (isNewProjVault) Object.assign(sharedPayload, buildSharedAclFields(true));
+                        if (lastCloudSyncHash[projCacheKey] !== sharedStr) {
+                            const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', vault.remoteId);
+                            batch.set(sharedRef, sharedPayload, { merge: true });
+                            lastCloudSyncHash[projCacheKey] = sharedStr;
                             writesCount++;
                         }
                     });
@@ -5456,6 +5623,7 @@
             if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
 
             if (!state.taskVaults) state.taskVaults = [];
+            if (!state.projectVaults) state.projectVaults = [];
             populateTaskVaultSelects(); // APEX FIX: Popular opciones de Bóvedas de Tareas en Arranque
 
             // APEX FIX: App Real Behavior - Solo redirigir al Dashboard en un inicio en frío puro (Primera carga de memoria)
@@ -6610,26 +6778,9 @@
             const nwTotEl = $id('net-worth-total'); if(nwTotEl) nwTotEl.innerText = fmt(uNW, bC);
             const baseCurrLabel = $id('base-curr-label'); if(baseCurrLabel) baseCurrLabel.innerText = bC;
             
-            // APEX FIX: Motor de Score Financiero Mejorado (Basado en Ratios y Logaritmos para evitar roturas por inflación)
-            let dynamicScore = 550;
-            const debtRatio = totAssets > 0 ? (totLiab / totAssets) : (totLiab > 0 ? 1 : 0);
-            
-            // Bonificaciones y penalizaciones por endeudamiento
-            if (totAssets > 0 && totLiab === 0) dynamicScore += 100;
-            else if (debtRatio < 0.2) dynamicScore += 50;
-            else if (debtRatio > 0.5 && debtRatio <= 0.8) dynamicScore -= 80;
-            else if (debtRatio > 0.8) dynamicScore -= 150;
-
-            // Escala logarítmica de Patrimonio (Convierte a una magnitud estándar ~USD para aplicar el logaritmo de manera justa en cualquier divisa)
-            let magAssets = totAssets; let magLiab = totLiab;
-            if (bC === 'COP') { magAssets /= 4000; magLiab /= 4000; }
-            else if (bC === 'MXN') { magAssets /= 17; magLiab /= 17; }
-            else if (bC === 'EUR') { magAssets *= 1.1; magLiab *= 1.1; }
-
-            if (magAssets > 1) dynamicScore += (Math.log10(magAssets) * 35);
-            if (totAssets === 0 && magLiab > 1) dynamicScore -= (Math.log10(magLiab) * 50);
-
-            dynamicScore = Math.floor(Math.max(300, Math.min(850, dynamicScore)));
+            const scoreResult = computeNexusScore(totAssets, totLiab, bC);
+            const dynamicScore = scoreResult.score;
+            lastNexusScoreBreakdown = scoreResult;
             
             // APEX FIX: Corrección de dependencias que ocultaban los módulos
             const scoreEl = $id('nexus-score');
@@ -6771,7 +6922,85 @@
             }
         }
 
-        function showScoreModal() { const mod = $id('score-modal'); if(mod) mod.classList.remove('hidden'); }
+        function computeNexusScore(totAssets, totLiab, bC) {
+            const factors = [];
+            let score = 550;
+            const push = (id, label, delta, detail) => factors.push({ id, label, delta, detail });
+            push('base', 'Base Nexus', 550, 'Punto de partida del modelo (escala 300–850).');
+
+            const debtRatio = totAssets > 0 ? (totLiab / totAssets) : (totLiab > 0 ? 1 : 0);
+            if (totAssets > 0 && totLiab === 0) {
+                score += 100;
+                push('debt_free', 'Sin deuda', +100, 'Activos positivos y pasivos en cero.');
+            } else if (debtRatio < 0.2) {
+                score += 50;
+                push('low_debt', 'Bajo endeudamiento', +50, `Ratio deuda/activos ${(debtRatio * 100).toFixed(0)}% (< 20%).`);
+            } else if (debtRatio > 0.5 && debtRatio <= 0.8) {
+                score -= 80;
+                push('mid_debt', 'Endeudamiento elevado', -80, `Ratio ${(debtRatio * 100).toFixed(0)}% (50–80%).`);
+            } else if (debtRatio > 0.8) {
+                score -= 150;
+                push('high_debt', 'Endeudamiento crítico', -150, `Ratio ${(debtRatio * 100).toFixed(0)}% (> 80%).`);
+            } else {
+                push('debt_neutral', 'Ratio de deuda', 0, `Ratio ${(debtRatio * 100).toFixed(0)}% (zona neutra).`);
+            }
+
+            let magAssets = totAssets;
+            let magLiab = totLiab;
+            if (bC === 'COP') { magAssets /= 4000; magLiab /= 4000; }
+            else if (bC === 'MXN') { magAssets /= 17; magLiab /= 17; }
+            else if (bC === 'EUR') { magAssets *= 1.1; magLiab *= 1.1; }
+
+            if (magAssets > 1) {
+                const bonus = Math.round(Math.log10(magAssets) * 35);
+                score += bonus;
+                push('wealth', 'Escala de patrimonio', bonus, `Activos ${fmt(totAssets, bC)} → magnitud log ${magAssets.toFixed(2)}.`);
+            }
+            if (totAssets === 0 && magLiab > 1) {
+                const penalty = Math.round(Math.log10(magLiab) * 50);
+                score -= penalty;
+                push('liab_only', 'Pasivos sin activos', -penalty, `Deuda ${fmt(totLiab, bC)} sin colchón de activos.`);
+            }
+
+            const netWorth = totAssets - totLiab;
+            if (netWorth > 0 && totLiab > 0 && netWorth >= totLiab) {
+                score += 25;
+                push('surplus', 'Patrimonio neto sólido', +25, `Neto ${fmt(netWorth, bC)} ≥ deuda total.`);
+            }
+
+            const raw = score;
+            score = Math.floor(Math.max(300, Math.min(850, score)));
+            if (score !== raw) {
+                push('clamp', 'Límites 300–850', score - raw, score < raw ? 'Tope superior aplicado.' : 'Piso inferior aplicado.');
+            }
+            return { score, debtRatio, totAssets, totLiab, netWorth, bC, factors };
+        }
+
+        function renderScoreBreakdownUI() {
+            const list = $id('score-breakdown-list');
+            const summary = $id('score-modal-summary');
+            if (!list || !lastNexusScoreBreakdown) return;
+            const b = lastNexusScoreBreakdown;
+            if (summary) {
+                summary.innerHTML = `Patrimonio <b>${fmt(b.totAssets, b.bC)}</b> · Deuda <b>${fmt(b.totLiab, b.bC)}</b> · Ratio <b>${(b.debtRatio * 100).toFixed(0)}%</b>`;
+            }
+            list.innerHTML = b.factors.map(f => {
+                const sign = f.delta > 0 ? '+' : '';
+                const cls = f.delta > 0 ? 'text-emerald-600' : (f.delta < 0 ? 'text-red-500' : 'text-slate-500');
+                return `<div class="flex justify-between gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                    <div class="min-w-0 flex-1"><p class="text-[9px] font-black uppercase text-slate-700 truncate">${f.label}</p><p class="text-[7px] font-bold text-slate-400 leading-tight mt-0.5">${f.detail}</p></div>
+                    <span class="text-[10px] font-black tabular-nums shrink-0 ${cls}">${sign}${f.delta}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function showScoreModal() {
+            const mod = $id('score-modal');
+            if (mod) {
+                renderScoreBreakdownUI();
+                mod.classList.remove('hidden');
+            }
+        }
         function closeScoreModal() { const modal = $id('score-modal'); if(modal) { modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
 
         function showWealthInfoModal() { const mod = $id('wealth-info-modal'); if(mod) mod.classList.remove('hidden'); }
@@ -8066,7 +8295,8 @@
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
             const mod = $id('tx-modal'); if(!mod) return; mod.classList.remove('hidden'); 
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
-            if($id('f-proj-id')) $id('f-proj-id').value = projectId || '';
+            const txProjEl = $id('f-tx-proj-id');
+            if (txProjEl) txProjEl.value = projectId || '';
             const fT = $id('form-title'); const titlesMap = { 'income': 'Ingreso (+)', 'expense': 'Gasto (-)', 'transfer': 'Transferencia', 'afterpay': 'Afterpay' }; fT.innerText = txId ? `Editar ${titlesMap[type]}` : `Nuevo ${titlesMap[type]}`; 
             
             const fNoteLbl = $id('f-note-label');
@@ -8180,6 +8410,8 @@
             }
 
             if(!txId) { 
+                const txProjEl = $id('f-tx-proj-id');
+                if (txProjEl && !projectId) txProjEl.value = '';
                 const amtEl = $id('f-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('f-note').value = ''; $id('f-date').value = new Date().toISOString().split('T')[0]; const localNow = new Date(); if($id('f-time')) $id('f-time').value = String(localNow.getHours()).padStart(2, '0') + ':' + String(localNow.getMinutes()).padStart(2, '0');
                 if($id('f-cat-parent')) { $id('f-cat-parent').value = ''; if(selP) selP.value = ''; }
                 if($id('f-cat-sub')) $id('f-cat-sub').value = '';
@@ -8195,6 +8427,8 @@
             } else {
                 const oldTx = state.tx.find(t => t.id === txId);
                 if (oldTx) {
+                    const txProjEl = $id('f-tx-proj-id');
+                    if (txProjEl) txProjEl.value = oldTx.projectId || '';
                     const amtEl = $id('f-amount');
                     if (amtEl) {
                         const rawAmt = oldTx.original_amount || oldTx.amount;
@@ -8882,6 +9116,15 @@
             const userQuestion = $id('ai-user-query').value.trim();
             if(!userQuestion) return alert("Por favor, escribe una pregunta para la IA.");
 
+            try {
+                assertFinancialAIQuery(userQuestion);
+            } catch (e) {
+                if (e.message === 'OFF_TOPIC') {
+                    return alert('El auditor IA solo atiende temas financieros: gastos, ingresos, deudas, ahorro, presupuesto, patrimonio, impuestos, etc.');
+                }
+                throw e;
+            }
+
             if (!getGeminiApiKey()) {
                 if (typeof updateAIAuditorKeyStatus === 'function') updateAIAuditorKeyStatus();
                 return alert("Configura tu API Key en Configuración → Motor IA (Google AI Studio).");
@@ -8903,10 +9146,10 @@
                 divisa: t.original_currency || t.currency
             }));
 
-            const prompt = `Actúa como un analista financiero experto (CFO) de Nexus AR Finance.
-Analiza los datos JSON y responde en español de forma concisa, profesional y con insights accionables.
+            const prompt = `Analiza EXCLUSIVAMENTE desde la óptica financiera los datos JSON y responde en español de forma concisa y accionable.
+Si la pregunta no es de finanzas, recházala.
 
-PREGUNTA DEL USUARIO: ${userQuestion}
+PREGUNTA: ${userQuestion}
 
 DATOS CONTABLES (${dataToAnalyze.length} registros):
 ${JSON.stringify(dataToAnalyze)}`;
@@ -8914,8 +9157,12 @@ ${JSON.stringify(dataToAnalyze)}`;
             try {
                 const { text, modelUsed } = await callGeminiGenerate({
                     prompt,
-                    systemInstruction: "Eres el auditor IA de Nexus AR Finance. Identifica fugas de capital y sugiere optimizaciones. Usa markdown básico (**negritas**, listas)."
+                    systemInstruction: NEXUS_AI_FINANCIAL_SYSTEM
                 });
+                if (/no (puedo|atiendo|respondo)|solo temas financieros|fuera de (mi )?ámbito|no es financier/i.test(text)) {
+                    $id('ai-response-text').innerHTML = `<p class="text-red-600 font-bold text-center text-[10px] uppercase">${text}</p>`;
+                    return;
+                }
 
                 const formattedResponse = formatGeminiMarkdownToHtml(text);
                 $id('ai-response-text').innerHTML = `<p>${formattedResponse}</p><p class="text-[7px] text-slate-400 font-bold text-center mt-3 uppercase tracking-widest">Modelo: ${modelUsed}</p>`;
@@ -8936,9 +9183,12 @@ ${JSON.stringify(dataToAnalyze)}`;
                 } else if (error.message && error.message.startsWith('NETWORK_ERROR')) {
                     errorMsg = "SIN CONEXIÓN";
                     subMsg = error.message.replace('NETWORK_ERROR: ', '');
+                } else if (error.message === 'OFF_TOPIC') {
+                    errorMsg = "TEMA NO FINANCIERO";
+                    subMsg = "Formula preguntas sobre dinero, gastos, deudas, ahorro o patrimonio.";
                 } else if (/not found|does not exist/i.test(error.message || '')) {
                     errorMsg = "MODELO NO DISPONIBLE";
-                    subMsg = "En Configuración elige Gemini 2.0 Flash y vuelve a intentar.";
+                    subMsg = "Revisa el ID del modelo en Configuración (Motor IA) o usa Gemini 2.0 Flash.";
                 }
 
                 $id('ai-response-text').innerHTML = `<div class="bg-red-50/50 p-4 border border-red-100 rounded-xl"><p class="text-[10px] text-red-600 font-black text-center uppercase tracking-widest"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${errorMsg}</p><p class="text-[8px] text-red-500 font-bold text-center mt-2">${subMsg}</p><p class="text-[7px] text-red-400 font-mono text-center mt-2 break-all opacity-50">${error.message || ''}</p></div>`;
@@ -8950,7 +9200,8 @@ ${JSON.stringify(dataToAnalyze)}`;
 
         function saveTransaction(e, forceOverdraft = false) { 
             if(e && typeof e.preventDefault === 'function') e.preventDefault(); const id = $id('f-id').value; let type = $id('f-type').value; const amount = parseFloat($id('f-amount').dataset.raw) || 0; 
-            const projectId = $id('f-proj-id') ? $id('f-proj-id').value : '';
+            const txProjEl = $id('f-tx-proj-id');
+            const projectId = txProjEl ? txProjEl.value : '';
             
             const parentSel = $id('f-cat-parent-select') ? $id('f-cat-parent-select').value : '';
             const parent = (parentSel === 'ADD_NEW_CAT') ? $id('f-cat-parent').value.trim() : parentSel;
@@ -10317,8 +10568,20 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
         // --- FIN MÓDULO DE TAREAS / RECORDATORIOS ---
         // --- MÓDULO DE PROYECTOS ---
+        function populateProjectVaultSelect() {
+            const sel = $id('f-proj-vault');
+            if (!sel) return;
+            if (!state.projectVaults) state.projectVaults = [];
+            let html = '<option value="">Personal (solo tú)</option>';
+            state.projectVaults.filter(v => v.isShared && v.remoteId).forEach(v => {
+                html += `<option value="${v.remoteId}">${v.name}</option>`;
+            });
+            sel.innerHTML = html;
+        }
+
         function renderProjectsTab() {
             if(!state.projects) state.projects = [];
+            if(!state.projectVaults) state.projectVaults = [];
             const mainView = $id('projects-main-view'); const detailView = $id('projects-detail-view');
             if(mainView) mainView.classList.remove('hidden');
             if(detailView) detailView.classList.add('hidden');
@@ -10349,9 +10612,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const pTasks = (state.tasks || []).filter(t => t.projectId === p.id);
                 const completedTasks = pTasks.filter(t => t.completed).length;
 
+                const sharedBadge = p.sharedVaultId ? '<span class="text-[7px] font-black bg-cyan-700 text-white px-1.5 py-0.5 rounded uppercase mr-1">👥</span>' : '';
                 html += `<div onclick="showProjectDetail('${p.id}')" class="theme-card p-6 rounded-[2rem] border shadow-sm cursor-pointer hover:border-cyan-300 transition-colors">
                     <div class="flex justify-between items-start mb-3">
-                        <h3 class="text-sm font-black uppercase theme-text truncate pr-2">${p.name}</h3>
+                        <h3 class="text-sm font-black uppercase theme-text truncate pr-2">${sharedBadge}${p.name}</h3>
                         <div class="w-8 h-8 rounded-full bg-cyan-50 text-cyan-500 flex items-center justify-center shrink-0"><i class="fa-solid fa-diagram-project text-[10px]"></i></div>
                     </div>
                     <div class="flex justify-between items-end mb-1">
@@ -10403,6 +10667,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const bEl = $id('f-proj-budget'); if(bEl) { bEl.value = ''; bEl.dataset.raw = ''; }
             const dateEl = $id('f-proj-date'); if(dateEl) dateEl.value = new Date().toISOString().split('T')[0];
             const currEl = $id('f-proj-currency'); if(currEl) currEl.value = state.activeCurrency === 'GLOBAL' ? (state.settings && state.settings.baseCurrency ? state.settings.baseCurrency : 'COP') : state.activeCurrency;
+            populateProjectVaultSelect();
             mod.classList.remove('hidden');
         }
 
@@ -10419,6 +10684,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             const budget = parseFloat($id('f-proj-budget').dataset.raw) || 0;
             const date = $id('f-proj-date').value;
             const currency = $id('f-proj-currency').value;
+            const vaultSel = $id('f-proj-vault');
+            const sharedVaultId = vaultSel && vaultSel.value ? vaultSel.value : '';
 
             if(!name || budget <= 0 || !date) return alert("Llena todos los campos. El presupuesto debe ser mayor a cero.");
 
@@ -10426,15 +10693,23 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             if (id) {
                 const p = state.projects.find(x => x.id === id);
-                if(p) { p.name = name; p.budget = budget; p.deadline = date; p.currency = currency; }
+                if(p) {
+                    p.name = name; p.budget = budget; p.deadline = date; p.currency = currency;
+                    if (sharedVaultId) p.sharedVaultId = sharedVaultId; else delete p.sharedVaultId;
+                }
             } else {
-                state.projects.push({
+                const np = {
                     id: 'proj_' + Date.now(),
                     name, budget, currency, deadline: date, phases: [], createdAt: new Date().toISOString()
-                });
+                };
+                if (sharedVaultId) np.sharedVaultId = sharedVaultId;
+                state.projects.push(np);
             }
             
-            saveState(); closeProjectModal(); renderProjectsTab();
+            saveState();
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (sharedVaultId && typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
+            closeProjectModal(); renderProjectsTab();
             
             // APEX FIX: Forzar la redirección a la pestaña de proyectos si se crea desde el FAB global
             const mainView = $id('projects-main-view');
@@ -10564,6 +10839,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             $id('f-proj-id').value = p.id; $id('f-proj-name').value = p.name;
             const bEl = $id('f-proj-budget'); bEl.value = fmt(p.budget, p.currency); bEl.dataset.raw = p.budget;
             $id('f-proj-date').value = p.deadline; $id('f-proj-currency').value = p.currency;
+            populateProjectVaultSelect();
+            const vSel = $id('f-proj-vault'); if (vSel) vSel.value = p.sharedVaultId || '';
         }
 
         function deleteProject(id) {
@@ -10590,6 +10867,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             else if(type === 'pse_link') msgEl.innerText = `¿Eliminar este enlace de pago rápido?`;
             else if(type === 'account_shared') msgEl.innerText = `¿Desvincular la bóveda compartida?\n\nSe eliminará de tu dispositivo junto con su historial local, pero los datos seguirán a salvo en la nube para los demás usuarios.`;
             else if(type === 'task_vault') msgEl.innerText = `¿Desvincular esta bóveda de tareas compartidas?\n\nLas tareas desaparecerán de tu vista local, pero seguirán en la nube para los demás usuarios vinculados.`;
+            else if(type === 'project_vault') msgEl.innerText = `¿Desvincular esta bóveda de proyectos compartidos?\n\nLos proyectos dejarán de mostrarse aquí, pero permanecen en la nube para el equipo.`;
             else if(type === 'account_personal') msgEl.innerText = `⚠ ALERTA CRÍTICA: ¿Estás seguro de eliminar esta bóveda?\n\nSe borrarán de forma permanente TODAS las transacciones asociadas a esta cuenta para evitar datos huérfanos. Esta acción NO se puede deshacer.`;
 
             mod.classList.remove('hidden');
@@ -10660,6 +10938,17 @@ ${JSON.stringify(dataToAnalyze)}`;
                 populateTaskVaultSelects();
                 renderTasksTab();
                 attachTaskP2PListener();
+            } else if (type === 'project_vault') {
+                const vault = (state.projectVaults || []).find(v => v.id === id);
+                state.projectVaults = (state.projectVaults || []).filter(v => v.id !== id);
+                if (vault && vault.remoteId) {
+                    state.projects = (state.projects || []).filter(p => p.sharedVaultId !== vault.remoteId);
+                }
+                saveState();
+                if ($id('project-vault-modal') && !$id('project-vault-modal').classList.contains('hidden')) renderProjectVaultsList();
+                populateProjectVaultSelect();
+                renderProjectsTab();
+                attachProjectP2PListener();
             }
             closeUIDeleteModal();
         }
@@ -11434,7 +11723,19 @@ ${JSON.stringify(dataToAnalyze)}`;
             // APEX FIX: Inicializar módulos de IA y Seguridad
             const gkEl = $id('set-gemini-key'); if(gkEl) gkEl.value = state.settings.geminiApiKey || '';
             normalizeGeminiModel();
-            const gmEl = $id('set-gemini-model'); if(gmEl) gmEl.value = state.settings.geminiModel || GEMINI_DEFAULT_MODEL;
+            const gmEl = $id('set-gemini-model');
+            const gmcEl = $id('set-gemini-model-custom');
+            normalizeGeminiModel();
+            if (gmEl) {
+                const m = state.settings.geminiModel || GEMINI_DEFAULT_MODEL;
+                if (m === '__custom__' || (state.settings.geminiModelCustom && !['gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-flash','gemini-1.5-pro'].includes(m))) {
+                    gmEl.value = '__custom__';
+                    if (gmcEl) gmcEl.value = state.settings.geminiModelCustom || '';
+                } else {
+                    gmEl.value = m;
+                }
+            }
+            if (typeof syncGeminiModelUI === 'function') syncGeminiModelUI();
 
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
             const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
@@ -11924,8 +12225,18 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             // APEX FIX: Guardado de preferencias de Inteligencia Artificial
             const gkEl = $id('set-gemini-key'); if(gkEl) state.settings.geminiApiKey = gkEl.value.trim();
-            const gmEl = $id('set-gemini-model'); if(gmEl) state.settings.geminiModel = gmEl.value;
+            const gmEl = $id('set-gemini-model');
+            const gmcEl = $id('set-gemini-model-custom');
+            if (gmEl) {
+                if (gmEl.value === '__custom__' && gmcEl) {
+                    state.settings.geminiModel = '__custom__';
+                    state.settings.geminiModelCustom = gmcEl.value.trim();
+                } else {
+                    state.settings.geminiModel = gmEl.value;
+                }
+            }
             normalizeGeminiModel();
+            if (typeof syncGeminiModelUI === 'function') syncGeminiModelUI();
 
             const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked;
             const btEl = $id('set-backup-time'); if(btEl) state.settings.backupTime = btEl.value || '23:00';
@@ -12298,7 +12609,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 periodFilter: { type: 'all', cat: 'all' },
                 statsType: 'expense', activeCurrency: 'GLOBAL',
                 calendarFilter: 'week', goals: [], projects: [], budgets: {},
-                taskVaults: [], pseLinks: [],
+                taskVaults: [], projectVaults: [], pseLinks: [],
                 taxes: { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 }, withheld: {}, deductiblePct: {} },
                 ui: {}, deletedSharedTxs: []
             };
@@ -12625,7 +12936,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             { id: 'categories', label: 'Categorías', keys: ['categories', 'catParents'] },
             { id: 'tasks', label: 'Tareas y bóvedas P2P', keys: ['tasks', 'taskVaults', 'deletedSharedTasks'] },
             { id: 'goals', label: 'Metas', keys: ['goals'] },
-            { id: 'projects', label: 'Proyectos', keys: ['projects'] },
+            { id: 'projects', label: 'Proyectos y bóvedas P2P', keys: ['projects', 'projectVaults'] },
             { id: 'budgets', label: 'Presupuestos', keys: ['budgets'] },
             { id: 'pse', label: 'Enlaces PSE', keys: ['pseLinks'] },
             { id: 'taxes', label: 'Impuestos', keys: ['taxes'] },
@@ -12647,6 +12958,10 @@ ${JSON.stringify(dataToAnalyze)}`;
         function sectionHasData(src, sectionId) {
             const sec = NEXUS_BACKUP_SECTIONS.find(x => x.id === sectionId);
             if (!sec || !src) return false;
+            if (sectionId === 'projects') {
+                return (Array.isArray(src.projects) && src.projects.length > 0) ||
+                    (Array.isArray(src.projectVaults) && src.projectVaults.length > 0);
+            }
             return sec.keys.some(k => {
                 const v = src[k];
                 if (v === undefined || v === null) return false;
@@ -12731,6 +13046,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (!Array.isArray(imported.tx)) imported.tx = [];
             if (!Array.isArray(imported.loans)) imported.loans = [];
             if (!Array.isArray(imported.tasks)) imported.tasks = [];
+            if (!Array.isArray(imported.projects)) imported.projects = [];
+            if (!Array.isArray(imported.projectVaults)) imported.projectVaults = [];
             if (!imported.settings || typeof imported.settings !== 'object') {
                 imported.settings = { baseCurrency: 'AUD', apLimit: 5000000, apPayDay: 5, requirePin: false };
             }
@@ -12740,13 +13057,26 @@ ${JSON.stringify(dataToAnalyze)}`;
         function isValidNexusBackupPayload(imported) {
             if (!imported || typeof imported !== 'object') return false;
             if (imported._nexusBackup) return true;
+            const hasArr = (k) => Array.isArray(imported[k]) && imported[k].length > 0;
             return !!(
-                (Array.isArray(imported.accounts) && imported.accounts.length) ||
-                (Array.isArray(imported.pseLinks) && imported.pseLinks.length) ||
-                (Array.isArray(imported.tx) && imported.tx.length) ||
-                (Array.isArray(imported.tasks) && imported.tasks.length) ||
-                (Array.isArray(imported.loans) && imported.loans.length)
+                hasArr('accounts') || hasArr('pseLinks') || hasArr('tx') || hasArr('tasks') ||
+                hasArr('loans') || hasArr('projects') || hasArr('goals') || hasArr('projectVaults') ||
+                (imported.settings && typeof imported.settings === 'object' && Object.keys(imported.settings).length) ||
+                (imported.budgets && typeof imported.budgets === 'object' && Object.keys(imported.budgets).length) ||
+                (imported.categories && imported.categories.global && imported.categories.global.length)
             );
+        }
+
+        function getBackupSectionCountHint(sectionId, src) {
+            if (!src) return '';
+            if (sectionId === 'tx') return (src.tx || []).length + ' reg.';
+            if (sectionId === 'accounts') return (src.accounts || []).length + ' ctas.';
+            if (sectionId === 'tasks') return (src.tasks || []).length + ' tareas';
+            if (sectionId === 'projects') return (src.projects || []).length + ' proy.';
+            if (sectionId === 'loans') return (src.loans || []).length + ' deudas';
+            if (sectionId === 'goals') return (src.goals || []).length + ' metas';
+            if (sectionId === 'pse') return (src.pseLinks || []).length + ' PSE';
+            return '';
         }
 
         function getImportSelectionFromMetadata(imported) {
@@ -12778,18 +13108,15 @@ ${JSON.stringify(dataToAnalyze)}`;
             const list = $id('backup-sections-list');
             if (!list) return;
             const avail = mode === 'import' && importData ? getSectionsAvailableInImport(importData) : null;
+            const waitingFile = mode === 'import' && !importData;
             let html = '';
             const presetSel = (mode === 'import' && importData) ? getImportSelectionFromMetadata(importData) : null;
             NEXUS_BACKUP_SECTIONS.forEach(s => {
-                const disabled = avail && !avail[s.id];
-                const checked = presetSel ? !!presetSel[s.id] : (avail ? avail[s.id] : true);
-                const countHint = mode === 'export' && state ? (() => {
-                    if (s.id === 'tx') return (state.tx || []).length + ' reg.';
-                    if (s.id === 'accounts') return (state.accounts || []).length + ' ctas.';
-                    if (s.id === 'tasks') return (state.tasks || []).length + ' tareas';
-                    return '';
-                })() : '';
-                html += `<label class="flex items-center gap-3 p-3 rounded-xl border ${disabled ? 'border-slate-100 opacity-40' : 'border-slate-200 bg-white'} cursor-pointer">
+                const disabled = waitingFile || (avail && !avail[s.id]);
+                const checked = !waitingFile && (presetSel ? !!presetSel[s.id] : (avail ? avail[s.id] : true));
+                const src = mode === 'export' ? state : importData;
+                const countHint = getBackupSectionCountHint(s.id, src);
+                html += `<label class="flex items-center gap-3 p-3 rounded-xl border ${disabled ? 'border-slate-100 opacity-40' : 'border-slate-200 bg-white'} ${waitingFile ? '' : 'cursor-pointer'}">
                     <input type="checkbox" id="backup-sec-${s.id}" class="w-4 h-4 accent-amber-600" ${checked && !disabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
                     <span class="flex-1"><span class="text-[10px] font-black uppercase text-slate-700">${s.label}</span>${countHint ? `<span class="text-[8px] font-bold text-slate-400 ml-1">${countHint}</span>` : ''}</span>
                 </label>`;
@@ -12797,9 +13124,21 @@ ${JSON.stringify(dataToAnalyze)}`;
             list.innerHTML = html;
         }
 
+        function updateBackupImportFileZone() {
+            const zone = $id('backup-import-file-zone');
+            const nameEl = $id('backup-import-file-name');
+            const isImport = backupSelectMode === 'import';
+            if (zone) zone.classList.toggle('hidden', !isImport);
+            if (nameEl) {
+                nameEl.textContent = pendingBackupImport
+                    ? ('✓ ' + (pendingBackupImport._nexusBackup?.exportedAt ? new Date(pendingBackupImport._nexusBackup.exportedAt).toLocaleString('es-CO') : 'Archivo listo'))
+                    : (isImport ? 'Sin archivo seleccionado' : '');
+            }
+        }
+
         function openBackupSelectModal(mode) {
             backupSelectMode = mode;
-            pendingBackupImport = null;
+            if (mode === 'export') pendingBackupImport = null;
             const mod = $id('backup-select-modal');
             const title = $id('backup-select-title');
             const hint = $id('backup-select-hint');
@@ -12809,10 +13148,18 @@ ${JSON.stringify(dataToAnalyze)}`;
                 : '<i class="fa-solid fa-file-import mr-2"></i>Importar datos';
             if (hint) hint.textContent = mode === 'export'
                 ? 'Marca las secciones que quieres incluir en el archivo JSON.'
-                : 'Marca qué partes del archivo quieres restaurar. Lo demás de tu bóveda actual no se toca.';
+                : (pendingBackupImport
+                    ? 'Marca qué secciones del archivo fusionar. El resto de tu bóveda actual no se toca.'
+                    : 'Paso 1: selecciona el JSON. Paso 2: marca las secciones a restaurar (igual que al exportar).');
             if (btn) btn.textContent = mode === 'export' ? 'Exportar selección' : 'Importar selección';
-            renderBackupSectionsList(mode, null);
+            renderBackupSectionsList(mode, pendingBackupImport);
+            updateBackupImportFileZone();
             if (mod) mod.classList.remove('hidden');
+        }
+
+        function openBackupImportWizard() {
+            pendingBackupImport = null;
+            openBackupSelectModal('import');
         }
 
         function openBackupImportSelectModal(importData) {
@@ -12833,6 +13180,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
             if (btn) btn.textContent = 'Importar selección';
             renderBackupSectionsList('import', pendingBackupImport);
+            updateBackupImportFileZone();
             if (mod) mod.classList.remove('hidden');
         }
 
@@ -12851,10 +13199,16 @@ ${JSON.stringify(dataToAnalyze)}`;
 
         function pickBackupFileForImport() {
             const inp = $id('restore-backup-file');
-            if (inp) inp.click();
+            if (inp) {
+                inp.value = '';
+                inp.click();
+            }
         }
 
         async function confirmBackupSelectModal() {
+            if (backupSelectMode === 'import' && !pendingBackupImport) {
+                return pickBackupFileForImport();
+            }
             const selection = getBackupSelectionFromUI();
             if (!Object.values(selection).some(Boolean)) {
                 return alert('Selecciona al menos una sección.');
@@ -12865,7 +13219,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 await downloadBackupPayload(payload, false);
                 return;
             }
-            if (!pendingBackupImport) return alert('No hay archivo cargado.');
+            if (!pendingBackupImport) return alert('Selecciona primero el archivo JSON.');
             closeBackupSelectModal();
             await applyPartialBackupImport(pendingBackupImport, selection);
             pendingBackupImport = null;
@@ -12952,6 +13306,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (!state.tasks) state.tasks = [];
                 if (!state.pseLinks) state.pseLinks = [];
                 if (!state.goals) state.goals = [];
+                if (!state.projectVaults) state.projectVaults = [];
                 if (!state.budgets) state.budgets = {};
                 if (!state.accounts) state.accounts = [];
                 if (!state.tx) state.tx = [];
@@ -12985,11 +13340,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (typeof renderPSELinks === 'function') renderPSELinks();
                 if (typeof attachP2PListener === 'function') attachP2PListener();
                 if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
+                if (typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
                 updateDashboard();
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
-                const nAcc = (state.accounts || []).length;
-                const nPse = (state.pseLinks || []).length;
-                alert('✅ Copia importada: ' + nAcc + ' cuenta(s), ' + nPse + ' enlace(s) PSE.');
+                const importedLabels = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.label).join(', ');
+                alert('✅ Copia importada (' + importedLabels + ').');
             } catch (e) {
                 console.error('[NEXUS] applyPartialBackupImport', e);
                 alert('Error al importar la copia: ' + (e.message || 'revisa la consola'));
@@ -13311,12 +13666,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                         // 2. Eliminar todas las bóvedas compartidas P2P globales
                         const sharedIds = new Set([
                             ...(state.accounts || []).filter(a => a.isShared && a.remoteId).map(a => a.remoteId),
-                            ...(state.taskVaults || []).filter(v => v.isShared && v.remoteId).map(v => v.remoteId)
+                            ...(state.taskVaults || []).filter(v => v.isShared && v.remoteId).map(v => v.remoteId),
+                            ...(state.projectVaults || []).filter(v => v.isShared && v.remoteId).map(v => v.remoteId)
                         ]);
                         for (const sid of sharedIds) {
                             batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sid));
                             batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', sid));
-                            opsCount += 2;
+                            batch.delete(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', sid));
+                            opsCount += 3;
                             if (opsCount > 400) {
                                 await batch.commit();
                                 batch = writeBatch(window.db);
@@ -13460,6 +13817,88 @@ ${JSON.stringify(dataToAnalyze)}`;
             }, "Autoriza la desvinculación de esta bóveda de tareas.");
         }
 
+        function openProjectVaultModal() {
+            const mod = $id('project-vault-modal'); if(!mod) return;
+            renderProjectVaultsList();
+            mod.classList.remove('hidden');
+        }
+
+        function closeProjectVaultModal() {
+            const mod = $id('project-vault-modal'); if(!mod) return;
+            mod.classList.add('opacity-0', 'transition-opacity');
+            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity'); }, 300);
+        }
+
+        function createProjectVault() {
+            const name = $id('new-project-vault-name').value.trim();
+            if(!name) return alert("Ingresa un nombre para la bóveda de proyectos.");
+            if(!state.projectVaults) state.projectVaults = [];
+            const remoteId = 'pjv_' + Date.now();
+            state.projectVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
+            saveState();
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            $id('new-project-vault-name').value = '';
+            renderProjectVaultsList();
+            populateProjectVaultSelect();
+            attachProjectP2PListener();
+            generateProjectVaultToken(remoteId);
+        }
+
+        async function linkProjectVault() {
+            const token = $id('project-vault-token').value.trim();
+            if(!token.startsWith('nxp_')) return alert("Token inválido (debe empezar por nxp_).");
+            try {
+                const data = JSON.parse(atob(token.substring(4)));
+                if(!state.projectVaults) state.projectVaults = [];
+                if(state.projectVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
+                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                const joined = await claimSharedDocAccess('nexus_shared_projects', data.vaultId);
+                if (!joined) return alert("No se pudo unir. Publica firestore.rules, inicia sesión con Google y verifica el token nxp_...");
+                state.projectVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
+                saveState();
+                $id('project-vault-token').value = '';
+                renderProjectVaultsList();
+                populateProjectVaultSelect();
+                attachProjectP2PListener();
+                alert("✅ Bóveda de proyectos vinculada. Sincronizando...");
+            } catch(e) { alert("Error al leer token."); }
+        }
+
+        async function generateProjectVaultToken(id) {
+            const v = state.projectVaults.find(x => x.id === id); if(!v) return;
+            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner };
+            const token = 'nxp_' + btoa(JSON.stringify(payload));
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(token);
+                else { const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove(); }
+            } catch (e) { console.warn('[NEXUS] copy project token', e); }
+            alert("✅ Token nxp_... copiado.\n\nCompártelo para que otros se unan a «" + v.name.replace('👥 ', '') + "».");
+        }
+
+        function authAndDeleteProjectVault(id) {
+            requireAuthForAction(() => { triggerUIDelete('project_vault', id); }, "Autoriza la desvinculación de esta bóveda de proyectos.");
+        }
+
+        function renderProjectVaultsList() {
+            const list = $id('project-vaults-list'); if(!list) return;
+            if(!state.projectVaults || state.projectVaults.length === 0) {
+                list.innerHTML = '<p class="text-[9px] text-center font-bold text-slate-400 mt-2">Sin bóvedas compartidas.</p>';
+                return;
+            }
+            list.innerHTML = state.projectVaults.map(v => `
+                <div class="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                    <div>
+                        <p class="text-[10px] font-black uppercase text-cyan-700">${v.name}</p>
+                        <p class="text-[8px] font-bold text-slate-400 mt-0.5">ID: ${String(v.remoteId || v.id || '').substring(0, 8)}...</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="generateProjectVaultToken('${v.id}')" class="w-7 h-7 bg-cyan-50 text-cyan-600 rounded-full flex items-center justify-center hover:bg-cyan-100 transition-colors shadow-sm" title="Copiar token nxp_"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
+                        <button onclick="authAndDeleteProjectVault('${v.id}')" class="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm" title="Desvincular"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         function renderTaskVaultsList() {
             const list = $id('task-vaults-list'); if(!list) return;
             if(!state.taskVaults || state.taskVaults.length === 0) { list.innerHTML = '<p class="text-[9px] text-center font-bold text-slate-400 mt-2">Solo tienes tu bóveda privada.</p>'; return; }
@@ -13467,7 +13906,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 <div class="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
                     <div>
                         <p class="text-[10px] font-black uppercase text-purple-700">${v.name}</p>
-                        <p class="text-[8px] font-bold text-slate-400 mt-0.5">ID: ${v.remoteId.substring(0,8)}...</p>
+                        <p class="text-[8px] font-bold text-slate-400 mt-0.5">ID: ${String(v.remoteId || v.id || '').substring(0, 8)}...</p>
                     </div>
                     <div class="flex gap-2">
                         <button onclick="generateTaskVaultToken('${v.id}')" class="w-7 h-7 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>
