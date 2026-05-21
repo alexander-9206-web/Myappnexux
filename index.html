@@ -256,7 +256,7 @@
 
                     <span id="dash-cloud-badge" class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center transition-all shadow-sm"><i class="fa-solid fa-database text-blue-500 text-[12px]" title="Local"></i></span>
                     <div class="flex flex-col items-end gap-1"><select id="global-currency" onchange="changeGlobalCurrency(this.value)" class="text-[12px] font-black uppercase bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full outline-none cursor-pointer"></select><div id="live-rate-badge" class="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full hidden border border-emerald-100 shadow-sm transition-all"></div></div>
-                    <button onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
+                    <button id="header-settings-gear-btn" onclick="switchTab('settings')" type="button" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors shrink-0"><i class="fa-solid fa-gear"></i></button>
                 </div>
             </div>
             <div id="period-nav" class="flex border-t border-slate-50/50">
@@ -366,16 +366,21 @@
             </div>
             
             <div id="scanner-results" class="hidden space-y-4">
-                <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Extracción Detectada</h3>
-                <div id="scanner-results-list" class="space-y-3 max-h-[350px] overflow-y-auto hide-scrollbar"></div>
-                
-                <!-- APEX FIX: Tarjeta Totalizadora de Extracción -->
-                <div class="flex justify-between items-center bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg mt-2">
-                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Balance Total Detectado</p>
+                <div class="flex flex-wrap gap-2 justify-between items-center">
+                    <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Informe de extracto</h3>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="exportScannerExcel()" class="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-emerald-100"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
+                        <button type="button" onclick="exportScannerPDF()" class="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-red-100"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
+                    </div>
+                </div>
+                <p id="scanner-tx-count" class="text-[9px] font-bold text-blue-700"></p>
+                <div id="scanner-meta-panel" class="theme-card p-4 rounded-2xl border text-[9px] overflow-x-auto"></div>
+                <div id="scanner-tx-table-wrap" class="theme-card p-3 rounded-2xl border overflow-x-auto max-h-[280px] hide-scrollbar"></div>
+                <div class="flex justify-between items-center bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total movimientos detectados</p>
                     <p id="scanner-total-val" class="text-xl font-black tracking-tighter tabular-nums">$0.00</p>
                 </div>
-
-                <button onclick="saveScannedData()" class="w-full bg-emerald-500 text-white p-4 rounded-xl font-black uppercase text-xs mt-2 shadow-lg active:scale-95 transition-transform">Guardar en Bóveda SSoT</button>
+                <button onclick="saveScannedData()" class="w-full bg-emerald-500 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Importar a bóveda SSoT</button>
             </div>
         </section>
 
@@ -495,6 +500,7 @@
                     <button onclick="toggleDbSort()" id="db-sort-btn" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg text-[8px] font-black uppercase shadow-sm active:scale-95 shrink-0"><i class="fa-solid fa-arrow-down-short-wide"></i> DESC</button>
                     
                     <!-- APEX FIX: Botones PDF e IA reescalados masivamente para pantallas móviles -->
+                    <button onclick="exportDatabaseExcel()" class="bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-emerald-100 flex items-center gap-1 shrink-0" title="Exportar Excel"><i class="fa-solid fa-file-excel text-sm"></i> Excel</button>
                     <button onclick="exportDatabasePDF()" class="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-2 shrink-0 transition-all hover:bg-red-100" title="Exportar PDF"><i class="fa-solid fa-file-pdf text-sm"></i> PDF</button>
                     <button onclick="openAIAuditor()" class="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-indigo-100 flex items-center gap-2 shrink-0 transition-all hover:bg-indigo-100" title="Auditor IA"><i class="fa-solid fa-wand-magic-sparkles text-sm"></i> Auditor IA</button>
                 </div>
@@ -686,7 +692,7 @@
                         <p class="text-[8px] font-black uppercase text-blue-500 mb-2">Datos del usuario</p>
                         <input type="email" id="edit-user-email-display" class="form-input text-xs bg-slate-100 mb-2 text-slate-500" readonly placeholder="Correo">
                         <input type="text" id="edit-user-name" class="form-input text-xs bg-white mb-2" placeholder="Nombre completo">
-                        <input type="text" id="edit-user-alias" class="form-input text-xs bg-white mb-2" placeholder="Alias / Empresa (opcional)">
+                        <input type="text" id="edit-user-alias" class="form-input text-xs bg-white mb-2" placeholder="Nombre bajo Nexus AR (visible en cabecera)">
                         <input type="tel" id="edit-user-phone" class="form-input text-xs bg-white mb-2" placeholder="Teléfono (opcional)">
                         <textarea id="edit-user-notes" rows="2" class="form-input text-xs bg-white mb-2 resize-none" placeholder="Notas personales (opcional)"></textarea>
                         <input type="password" id="edit-user-pin" maxlength="4" inputmode="numeric" class="form-input text-center tracking-[0.5em] mb-1 font-bold text-blue-600" placeholder="PIN (4 dígitos)" onfocus="unlockPinEditField()">
@@ -1374,6 +1380,30 @@
             <button onclick="openForm('income')" type="button" title="Registrar ingreso" class="w-12 h-12 md:w-14 md:h-14 bg-emerald-500 text-white rounded-full shadow-lg flex items-center justify-center text-lg active:scale-90 transition-transform"><i class="fa-solid fa-plus"></i></button>
         </div>
         <button onclick="toggleFab()" type="button" id="fab-toggle-btn" title="Acciones rápidas: ingreso, gasto, transferencia…" class="w-14 h-14 md:w-16 md:h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center text-2xl transition-transform duration-300 active:scale-90"><i class="fa-solid fa-plus"></i></button>
+    </div>
+
+    <!-- MODAL HISTORIAL DE CUENTA -->
+    <div id="account-history-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-lg md:max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 md:p-8 space-y-4 animate-slideUp max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-3">
+                <div>
+                    <h3 id="hist-acc-name" class="text-lg font-black uppercase theme-text">Cuenta</h3>
+                    <p class="text-[10px] font-bold text-slate-400 mt-1">Saldo: <span id="hist-acc-balance" class="text-indigo-600">--</span></p>
+                </div>
+                <button type="button" onclick="closeAccountHistory()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <button type="button" onclick="setHistFilter('all')" id="hf-all" class="filter-chip active text-[9px]">Todo</button>
+                <button type="button" onclick="setHistFilter('30d')" id="hf-30d" class="filter-chip text-[9px]">30 días</button>
+                <button type="button" onclick="setHistFilter('month')" id="hf-month" class="filter-chip text-[9px]">Mes</button>
+                <button type="button" onclick="setHistFilter('year')" id="hf-year" class="filter-chip text-[9px]">Año</button>
+                <div class="flex gap-2 ml-auto">
+                    <button type="button" onclick="exportAccountExcel()" class="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-emerald-100"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
+                    <button type="button" onclick="exportAccountPDF()" class="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-red-100"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
+                </div>
+            </div>
+            <div id="hist-acc-list" class="space-y-2 max-h-[50vh] overflow-y-auto hide-scrollbar"></div>
+        </div>
     </div>
 
     <!-- MODAL SCORE -->
@@ -2656,8 +2686,7 @@
             { id: 'tasks', icon: 'fa-list-check', name: 'Tareas', title: 'Pendientes, recordatorios y bóvedas compartidas', color: 'text-indigo-400' },
             { id: 'scanner', icon: 'fa-camera', name: 'Escáner', title: 'Escanear recibos y extractos con IA', color: 'text-blue-400' },
             { id: 'taxes', icon: 'fa-file-invoice', name: 'Impuestos', title: 'Retenciones, deducciones y tasas fiscales', color: 'text-emerald-700' },
-            { id: 'settings', icon: 'fa-gear', name: 'Ajustes', title: 'Perfil, tema, copias de seguridad y administración', color: 'text-slate-500' },
-            { id: 'home', icon: 'fa-house', name: 'Inicio', title: 'Panel principal y acceso rápido a módulos', color: 'text-cyan-600' }
+            { id: 'settings', icon: 'fa-gear', name: 'Ajustes', title: 'Perfil, tema, copias de seguridad y administración', color: 'text-slate-500' }
         ];
 
         function getSystemModule(id) {
@@ -2734,6 +2763,13 @@
             openAIAuditor: 'Auditoría financiera con IA',
             runAIQuery: 'Consulta a Gemini sobre tus finanzas',
             exportDatabasePDF: 'Exportar auditoría a PDF',
+            exportDatabaseExcel: 'Exportar auditoría a Excel (CSV)',
+            exportAccountPDF: 'Exportar historial de cuenta a PDF',
+            exportAccountExcel: 'Exportar historial de cuenta a Excel',
+            exportProjectPDF: 'Exportar proyecto a PDF',
+            exportProjectExcel: 'Exportar proyecto a Excel',
+            exportScannerPDF: 'Exportar informe de extracto a PDF',
+            exportScannerExcel: 'Exportar informe de extracto a Excel',
             openCatBudgetForm: 'Presupuesto por categoría',
             toggleGlobalWealth: 'Expandir patrimonio global',
             toggleDashAccounts: 'Expandir resumen de cuentas',
@@ -3745,6 +3781,193 @@
                 .replace(/\n\n/g, '</p><p class="mt-2">')
                 .replace(/\n/g, '<br>')
                 .replace(/^- (.*?)(?=<br>|<\/p>|$)/gm, '<li class="ml-4 list-disc marker:text-indigo-400 mb-1">$1</li>');
+        }
+
+        let lastScannerReport = null;
+
+        function getNexusDisplayName(profile) {
+            const p = profile || userProfile;
+            const alias = (p && p.alias) ? String(p.alias).trim() : '';
+            if (alias) return alias;
+            if (p && p.name) return String(p.name).trim();
+            return currentUser || 'Usuario';
+        }
+
+        function updateNexusHeaderIdentity() {
+            const hb = $id('header-user-badge');
+            if (hb) hb.innerText = getNexusDisplayName();
+        }
+
+        function nexusCsvEscape(val) {
+            const s = val === undefined || val === null ? '' : String(val);
+            if (/[",;\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+            return s;
+        }
+
+        function nexusDownloadCsv(rows, filename) {
+            if (!rows || !rows.length) return alert('No hay datos para exportar.');
+            const csv = '\uFEFF' + rows.map(r => r.map(nexusCsvEscape).join(';')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename.endsWith('.csv') ? filename : filename + '.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 500);
+        }
+
+        function stripPdfText(str) {
+            if (!str) return '';
+            return String(str).replace(/[^\x00-\x7FáéíóúÁÉÍÓÚñÑüÜ\s]/g, '').trim();
+        }
+
+        function buildTxTableRowsForPdf(txs, targetCurr, fAccValue) {
+            return txs.map(t => {
+                const dDate = new Date(t.date);
+                const dateStr = dDate.toLocaleDateString('es-CO') + ' ' + String(dDate.getHours()).padStart(2, '0') + ':' + String(dDate.getMinutes()).padStart(2, '0');
+                const accName = stripPdfText(state.accounts.find(a => a.id === t.accId)?.name || '--');
+                const rType = t.renderType || t.type;
+                const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAccValue);
+                const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAccValue);
+                const sign = isOutflow ? '-' : (isInflow ? '+' : '');
+                const amtStr = sign + fmt(t.original_amount || t.amount, t.original_currency || t.currency);
+                const concept = stripPdfText(t.note || t.cat || '');
+                const typeStr = rType === 'income' ? 'Ingreso' : (rType === 'expense' ? 'Gasto' : (rType === 'afterpay' ? 'Afterpay' : 'Transf.'));
+                return [dateStr, concept, stripPdfText(t.cat), accName, typeStr, amtStr];
+            });
+        }
+
+        function buildTxExcelRows(txs, targetCurr, fAccValue) {
+            const header = ['Fecha', 'Concepto', 'Categoría', 'Cuenta', 'Tipo', 'Valor', 'Divisa'];
+            const rows = [header];
+            txs.forEach(t => {
+                const dDate = new Date(t.date);
+                const rType = t.renderType || t.type;
+                const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAccValue);
+                const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAccValue);
+                const sign = isOutflow ? '-' : (isInflow ? '+' : '');
+                rows.push([
+                    dDate.toLocaleDateString('es-CO'),
+                    t.note || t.cat || '',
+                    t.cat || '',
+                    state.accounts.find(a => a.id === t.accId)?.name || '',
+                    rType,
+                    sign + (t.original_amount || t.amount),
+                    t.original_currency || t.currency || targetCurr
+                ]);
+            });
+            return rows;
+        }
+
+        function exportTxListToPDF(opts) {
+            const { title, subtitle, txs, targetCurr, fAccValue, filename } = opts;
+            if (!txs || !txs.length) return alert('No hay datos para exportar.');
+            if (!window.jspdf) return alert('Motor PDF no cargado.');
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            let totalInc = 0, totalExp = 0;
+            txs.forEach(t => {
+                const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
+                const rType = t.renderType || t.type;
+                const isOut = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAccValue);
+                const isIn = rType === 'income' || (rType === 'transfer' && t.toAccId === fAccValue);
+                if (isIn) totalInc += amt; else if (isOut) totalExp += amt;
+            });
+            const net = totalInc - totalExp;
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text(stripPdfText(title || 'NEXUS AR FINANCE'), 14, 18);
+            doc.setFontSize(8);
+            doc.setFont(undefined, 'normal');
+            doc.text(stripPdfText(subtitle || ''), 14, 24);
+            doc.text('Emisión: ' + new Date().toLocaleDateString('es-CO'), 14, 29);
+            doc.autoTable({
+                startY: 36,
+                head: [['FECHA', 'CONCEPTO', 'CATEGORÍA', 'CUENTA', 'TIPO', 'VALOR']],
+                body: buildTxTableRowsForPdf(txs, targetCurr, fAccValue),
+                foot: [['', '', '', '', 'NETO', (net >= 0 ? '+' : '') + fmt(net, targetCurr)]],
+                theme: 'grid',
+                headStyles: { fillColor: [241, 245, 249], fontSize: 7 },
+                bodyStyles: { fontSize: 7 },
+                margin: { left: 14, right: 14 }
+            });
+            doc.save(filename || 'nexus_export.pdf');
+        }
+
+        async function fileToGeminiInlinePart(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const res = reader.result || '';
+                    const base64 = String(res).includes(',') ? String(res).split(',')[1] : res;
+                    resolve({ inlineData: { mimeType: file.type || 'application/pdf', data: base64 } });
+                };
+                reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function callGeminiWithParts({ parts, systemInstruction }) {
+            const key = getGeminiApiKey();
+            if (!key) throw new Error('API_KEY_MISSING');
+            const payload = { contents: [{ parts }] };
+            if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+            let lastError = null;
+            for (const model of getGeminiModelCandidates()) {
+                const url = `${GEMINI_API_BASE}${model}:generateContent?key=${encodeURIComponent(key)}`;
+                try {
+                    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        const errMsg = data?.error?.message || `HTTP ${response.status}`;
+                        if (response.status === 404 || /not found|not supported/i.test(errMsg)) { lastError = new Error(errMsg); continue; }
+                        throw new Error(errMsg);
+                    }
+                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (!text) { lastError = new Error('Respuesta vacía'); continue; }
+                    return { text, modelUsed: model };
+                } catch (e) { lastError = e; }
+            }
+            throw lastError || new Error('Gemini no respondió');
+        }
+
+        function parseGeminiJsonBlock(text) {
+            const raw = (text || '').trim();
+            const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            const candidate = fenced ? fenced[1] : raw.match(/\{[\s\S]*\}/)?.[0];
+            if (!candidate) throw new Error('La IA no devolvió JSON estructurado');
+            return JSON.parse(candidate);
+        }
+
+        function normalizeScannerReport(raw) {
+            const meta = raw.meta || raw.resumen || raw.summary || {};
+            const txs = Array.isArray(raw.transactions) ? raw.transactions : (Array.isArray(raw.movimientos) ? raw.movimientos : []);
+            const insurance = Array.isArray(meta.insurance) ? meta.insurance : (Array.isArray(meta.seguros) ? meta.seguros : []);
+            const otherCharges = Array.isArray(meta.otherCharges) ? meta.otherCharges : (Array.isArray(meta.otrosCobros) ? meta.otrosCobros : []);
+            return {
+                meta: {
+                    bankOrAccountName: meta.bankOrAccountName || meta.banco || meta.cuenta || '',
+                    totalDebt: Number(meta.totalDebt ?? meta.deudaTotal ?? 0) || 0,
+                    totalCreditLimit: Number(meta.totalCreditLimit ?? meta.cupoTotal ?? 0) || 0,
+                    cutoffDate: meta.cutoffDate || meta.fechaCorte || '',
+                    paymentDate: meta.paymentDate || meta.fechaPago || '',
+                    insurance: insurance.map(x => ({ name: x.name || x.nombre || '', amount: Number(x.amount ?? x.valor ?? 0) || 0 })),
+                    otherCharges: otherCharges.map(x => ({ name: x.name || x.nombre || '', amount: Number(x.amount ?? x.valor ?? 0) || 0 })),
+                    transactionCount: Number(meta.transactionCount ?? txs.length) || txs.length
+                },
+                transactions: txs.map((t, i) => ({
+                    receiptOrApproval: t.receiptOrApproval || t.numeroRecibo || t.aprobacion || '',
+                    description: t.description || t.descripcion || t.nombreCompra || '',
+                    purchaseValue: Number(t.purchaseValue ?? t.valorCompra ?? 0) || 0,
+                    interestPercent: Number(t.interestPercent ?? t.porcentajeInteres ?? 0) || 0,
+                    interestValueInInstallment: Number(t.interestValueInInstallment ?? t.valorInteresCuota ?? 0) || 0,
+                    installmentValue: Number(t.installmentValue ?? t.valorCuota ?? 0) || 0,
+                    paidInstallments: Number(t.paidInstallments ?? t.cuotasPagas ?? 0) || 0,
+                    remainingInstallments: Number(t.remainingInstallments ?? t.cuotasFaltantes ?? 0) || 0,
+                    _idx: i + 1
+                }))
+            };
         }
 
         function updateAIAuditorKeyStatus() {
@@ -5637,7 +5860,7 @@
             setupAutoBackup();
             const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
             currSelects.forEach(s => { const currentVal = s.value || state.activeCurrency; s.innerHTML = ''; if (s.id === 'global-currency') s.innerHTML += `<option value="GLOBAL">🌐</option>`; CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`); s.value = currentVal; });
-            const hb = $id('header-user-badge'); if(hb) hb.innerText = (userProfile && userProfile.name) ? userProfile.name : currentUser;
+            if (typeof updateNexusHeaderIdentity === 'function') updateNexusHeaderIdentity();
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
@@ -6577,6 +6800,9 @@
             if(id === 'taxes') renderTaxes(); 
             if(id === 'tasks') renderTasksTab(); 
             if(id === 'projects') renderProjectsTab();
+
+            const gearBtn = $id('header-settings-gear-btn');
+            if (gearBtn) gearBtn.classList.toggle('hidden', id === 'settings');
 
             if (!isSameTab && typeof saveState === 'function') saveState();
         }
@@ -8842,6 +9068,89 @@
         }
         function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
 
+        function exportDatabaseExcel() {
+            if (!currentFilteredTx || !currentFilteredTx.length) return alert('No hay datos filtrados para exportar.');
+            const curSel = $id('db-currency');
+            const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
+            const fAccEl = $id('db-filter-account');
+            const fAccValue = fAccEl ? fAccEl.value : 'all';
+            const rows = buildTxExcelRows(currentFilteredTx, targetCurr, fAccValue);
+            nexusDownloadCsv(rows, 'auditoria_nexus_' + new Date().toISOString().split('T')[0] + '.csv');
+        }
+
+        function getAccountHistoryTxs() {
+            if (!currentHistAccId) return [];
+            let txs = state.tx.filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
+            const now = new Date();
+            if (currentHistPeriod === '30d') {
+                const past30 = new Date(now.getTime() - 30 * 86400000);
+                txs = txs.filter(t => new Date(t.date) >= past30);
+            } else if (currentHistPeriod === 'month') {
+                txs = txs.filter(t => new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear());
+            } else if (currentHistPeriod === 'year') {
+                txs = txs.filter(t => new Date(t.date).getFullYear() === now.getFullYear());
+            }
+            return txs.sort((a, b) => new Date(b.date) - new Date(a.date));
+        }
+
+        function exportAccountExcel() {
+            const acc = state.accounts.find(a => a.id === currentHistAccId);
+            if (!acc) return alert('Abre el historial de una cuenta primero.');
+            const txs = getAccountHistoryTxs();
+            if (!txs.length) return alert('Sin movimientos en este periodo.');
+            const rows = buildTxExcelRows(txs, acc.currency, acc.id);
+            nexusDownloadCsv(rows, 'cuenta_' + (acc.name || 'nexus').replace(/\s+/g, '_') + '.csv');
+        }
+
+        function exportAccountPDF() {
+            const acc = state.accounts.find(a => a.id === currentHistAccId);
+            if (!acc) return alert('Abre el historial de una cuenta primero.');
+            const txs = getAccountHistoryTxs();
+            if (!txs.length) return alert('Sin movimientos en este periodo.');
+            exportTxListToPDF({
+                title: 'NEXUS AR · ' + acc.name,
+                subtitle: 'Extracto de cuenta · ' + getNexusDisplayName(),
+                txs, targetCurr: acc.currency, fAccValue: acc.id,
+                filename: 'cuenta_' + (acc.name || 'nexus').replace(/\s+/g, '_') + '.pdf'
+            });
+        }
+
+        function exportProjectExcel(projectId) {
+            const p = state.projects.find(x => x.id === projectId);
+            if (!p) return;
+            const txs = (state.tx || []).filter(t => t.projectId === p.id);
+            const header = ['Fecha', 'Concepto', 'Cuenta', 'Monto', 'Divisa', 'Tipo'];
+            const rows = [header];
+            txs.forEach(t => {
+                rows.push([
+                    new Date(t.date).toLocaleDateString('es-CO'),
+                    t.note || t.cat || '',
+                    state.accounts.find(a => a.id === t.accId)?.name || '',
+                    t.amount,
+                    t.currency,
+                    t.type
+                ]);
+            });
+            rows.push([]);
+            rows.push(['Proyecto', p.name]);
+            rows.push(['Presupuesto', p.budget, p.currency]);
+            rows.push(['Ejecutado', txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)]);
+            nexusDownloadCsv(rows, 'proyecto_' + p.name.replace(/\s+/g, '_') + '.csv');
+        }
+
+        function exportProjectPDF(projectId) {
+            const p = state.projects.find(x => x.id === projectId);
+            if (!p) return;
+            const txs = (state.tx || []).filter(t => t.projectId === p.id);
+            if (!txs.length) return alert('El proyecto no tiene transacciones vinculadas.');
+            exportTxListToPDF({
+                title: 'NEXUS AR · Proyecto ' + p.name,
+                subtitle: 'Presupuesto ' + fmt(p.budget, p.currency) + ' · ' + getNexusDisplayName(),
+                txs, targetCurr: p.currency, fAccValue: 'all',
+                filename: 'proyecto_' + p.name.replace(/\s+/g, '_') + '.pdf'
+            });
+        }
+
         // APEX FIX: Exportación de Auditoría a PDF con Resumen Inteligente (Diseño Extracto Bancario)
         function exportDatabasePDF() {
             if (!currentFilteredTx || currentFilteredTx.length === 0) {
@@ -10769,7 +11078,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             detailView.innerHTML = `
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-4"><button onclick="hideProjectDetail()" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text hover:bg-slate-50 transition-colors active:scale-90"><i class="fa-solid fa-arrow-left text-cyan-600"></i></button><h2 class="text-xl font-black uppercase text-cyan-600 tracking-tighter truncate">${p.name}</h2></div>
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 flex-wrap justify-end">
+                        <button type="button" onclick="exportProjectExcel('${p.id}')" class="bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl text-[9px] font-black uppercase border border-emerald-100"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
+                        <button type="button" onclick="exportProjectPDF('${p.id}')" class="bg-red-50 text-red-600 px-3 py-2 rounded-xl text-[9px] font-black uppercase border border-red-100"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
                         <button onclick="editProject('${p.id}')" type="button" class="w-10 h-10 bg-slate-100 text-slate-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-pen"></i></button>
                         <button onclick="triggerUIDelete('project', '${p.id}')" type="button" class="w-10 h-10 bg-red-50 text-red-500 rounded-full shadow-sm active:scale-90 transition-transform"><i class="fa-solid fa-trash"></i></button>
                     </div>
@@ -11692,11 +12003,24 @@ ${JSON.stringify(dataToAnalyze)}`;
         function updateSettingsProfileCard(profile) {
             const p = profile || userProfile;
             if (!p) return;
+            const display = getNexusDisplayName(p);
+            const nm = $id('settings-profile-name');
+            if (nm) {
+                nm.innerText = display;
+                if ((p.name || '').trim() && display !== (p.name || '').trim()) {
+                    nm.innerHTML = display + '<span class="block text-[10px] font-bold text-slate-400 mt-1">' + (p.name || '') + '</span>';
+                }
+            }
             const aliasEl = $id('settings-profile-alias');
             if (aliasEl) {
                 const alias = (p.alias || '').trim();
-                if (alias) { aliasEl.textContent = alias; aliasEl.classList.remove('hidden'); }
-                else { aliasEl.textContent = ''; aliasEl.classList.add('hidden'); }
+                if (alias) {
+                    aliasEl.textContent = 'Nombre Nexus AR: ' + alias;
+                    aliasEl.classList.remove('hidden');
+                } else {
+                    aliasEl.textContent = 'Configura tu nombre bajo Nexus AR en editar perfil';
+                    aliasEl.classList.remove('hidden');
+                }
             }
             const phoneEl = $id('settings-profile-phone');
             if (phoneEl) phoneEl.textContent = (p.phone || '').trim() || '—';
@@ -11759,7 +12083,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (userProfile) {
                 const av = $id('settings-profile-avatar');
                 if (av) av.innerHTML = userProfile.avatar ? `<img src="${userProfile.avatar}" referrerpolicy="no-referrer" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user"></i>`;
-                const nm = $id('settings-profile-name'); if(nm) nm.innerText = userProfile.name;
+                if (typeof updateSettingsProfileCard === 'function') updateSettingsProfileCard(userProfile);
                 const em = $id('settings-profile-email'); if(em) em.innerText = userProfile.email;
                 if (typeof updateSettingsProfileCard === 'function') updateSettingsProfileCard(userProfile);
                 const tp = $id('settings-profile-type'); 
@@ -11939,8 +12263,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             // Auto-sanar en caso de que existan módulos nuevos no guardados en el orden
             SYSTEM_MODULES.forEach(m => {
-                if(!order.includes(m.id)) order.push(m.id);
+                if (m.id !== 'home' && !order.includes(m.id)) order.push(m.id);
             });
+            order = order.filter(id => id !== 'home');
             state.settings.moduleOrder = order;
 
             let html = '';
@@ -11980,8 +12305,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             // Sanitize in case new modules were added but not in state
             SYSTEM_MODULES.forEach(m => {
-                if(!order.includes(m.id)) order.push(m.id);
+                if (m.id !== 'home' && !order.includes(m.id)) order.push(m.id);
             });
+            order = order.filter(id => id !== 'home');
             state.settings.moduleOrder = order;
 
             list.innerHTML = order.map((id, i) => {
@@ -12448,7 +12774,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                     const pinBanner = $id('nexus-pin-banner');
                     if (pinBanner) pinBanner.remove();
                 }
-                if ($id('header-user-badge')) $id('header-user-badge').innerText = p.name;
+                if (typeof updateNexusHeaderIdentity === 'function') updateNexusHeaderIdentity();
                 if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(p);
                 if (typeof renderSettingsTab === 'function') renderSettingsTab();
                 await maybeClearFounderSetupFlags();
@@ -13454,94 +13780,236 @@ ${JSON.stringify(dataToAnalyze)}`;
                 autoBackupInterval = setInterval(tickAutoBackup, 60000);
             }, msUntilNextBackupTime(state.settings.backupTime));
         }
-        // --- MÓDULO ESCÁNER IA ---
+        // --- MÓDULO ESCÁNER IA (extractos bancarios / tarjeta) ---
+        const NEXUS_SCANNER_SYSTEM = `Eres un auditor OCR financiero de Nexus AR. Extrae datos de extractos bancarios o de tarjeta de crédito (PDF o imagen).
+Responde SOLO con un JSON válido (sin markdown) con esta estructura exacta:
+{
+  "meta": {
+    "bankOrAccountName": "string",
+    "totalDebt": number,
+    "totalCreditLimit": number,
+    "cutoffDate": "YYYY-MM-DD o texto",
+    "paymentDate": "YYYY-MM-DD o texto",
+    "transactionCount": number,
+    "insurance": [{"name":"string","amount":number}],
+    "otherCharges": [{"name":"string","amount":number}]
+  },
+  "transactions": [{
+    "receiptOrApproval": "número recibo o aprobación",
+    "description": "descripción o nombre compra",
+    "purchaseValue": number,
+    "interestPercent": number,
+    "interestValueInInstallment": number,
+    "installmentValue": number,
+    "paidInstallments": number,
+    "remainingInstallments": number
+  }]
+}
+Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos visibles.`;
+
         function initScanner() {
+            lastScannerReport = null;
             const resCont = $id('scanner-results');
-            if(resCont) resCont.classList.add('hidden');
-            const list = $id('scanner-results-list');
-            if(list) list.innerHTML = '';
+            if (resCont) resCont.classList.add('hidden');
+            const meta = $id('scanner-meta-panel'); if (meta) meta.innerHTML = '';
+            const tbl = $id('scanner-tx-table-wrap'); if (tbl) tbl.innerHTML = '';
             const fileInput = $id('nexusFileScanner');
-            if(fileInput) fileInput.value = '';
+            if (fileInput) fileInput.value = '';
         }
 
-        function processScannerFile(event) {
+        function renderScannerReportUI(report) {
+            lastScannerReport = report;
+            const bC = state.settings.baseCurrency || 'COP';
+            const meta = report.meta;
+            const txs = report.transactions || [];
+            const cntEl = $id('scanner-tx-count');
+            if (cntEl) cntEl.textContent = 'Transacciones detectadas: ' + (meta.transactionCount || txs.length);
+
+            const metaPanel = $id('scanner-meta-panel');
+            if (metaPanel) {
+                let insRows = (meta.insurance || []).map(i => `<tr><td class="p-1 border-b">${i.name}</td><td class="p-1 border-b text-right font-black">${fmt(i.amount, bC)}</td></tr>`).join('');
+                let otherRows = (meta.otherCharges || []).map(i => `<tr><td class="p-1 border-b">${i.name}</td><td class="p-1 border-b text-right font-black">${fmt(i.amount, bC)}</td></tr>`).join('');
+                metaPanel.innerHTML = `
+                <table class="w-full text-[8px] font-bold"><tbody>
+                    <tr><td class="text-slate-400 uppercase p-1">Banco / Cuenta</td><td class="p-1 font-black">${meta.bankOrAccountName || '—'}</td></tr>
+                    <tr><td class="text-slate-400 uppercase p-1">Deuda total</td><td class="p-1 font-black">${fmt(meta.totalDebt || 0, bC)}</td></tr>
+                    <tr><td class="text-slate-400 uppercase p-1">Cupo total</td><td class="p-1 font-black">${fmt(meta.totalCreditLimit || 0, bC)}</td></tr>
+                    <tr><td class="text-slate-400 uppercase p-1">Fecha corte</td><td class="p-1">${meta.cutoffDate || '—'}</td></tr>
+                    <tr><td class="text-slate-400 uppercase p-1">Fecha pago</td><td class="p-1">${meta.paymentDate || '—'}</td></tr>
+                </tbody></table>
+                ${insRows ? '<p class="text-[7px] font-black uppercase text-slate-400 mt-2">Seguros</p><table class="w-full text-[8px]">' + insRows + '</table>' : ''}
+                ${otherRows ? '<p class="text-[7px] font-black uppercase text-slate-400 mt-2">Otros cobros</p><table class="w-full text-[8px]">' + otherRows + '</table>' : ''}`;
+            }
+
+            const wrap = $id('scanner-tx-table-wrap');
+            if (wrap) {
+                const head = `<thead class="bg-slate-100"><tr class="text-[7px] uppercase">
+                    <th class="p-2">#</th><th class="p-2">Recibo</th><th class="p-2">Descripción</th><th class="p-2">Valor</th>
+                    <th class="p-2">% Int.</th><th class="p-2">Int. cuota</th><th class="p-2">Cuota</th><th class="p-2">Pag.</th><th class="p-2">Falt.</th>
+                </tr></thead>`;
+                const body = txs.map((t, i) => `<tr class="border-t border-slate-100 text-[8px]">
+                    <td class="p-2">${i + 1}</td>
+                    <td class="p-2">${t.receiptOrApproval || '—'}</td>
+                    <td class="p-2 max-w-[120px] truncate">${t.description || '—'}</td>
+                    <td class="p-2 font-black">${fmt(t.purchaseValue || 0, bC)}</td>
+                    <td class="p-2">${t.interestPercent || 0}%</td>
+                    <td class="p-2">${fmt(t.interestValueInInstallment || 0, bC)}</td>
+                    <td class="p-2">${fmt(t.installmentValue || 0, bC)}</td>
+                    <td class="p-2 text-center">${t.paidInstallments || 0}</td>
+                    <td class="p-2 text-center">${t.remainingInstallments || 0}</td>
+                </tr>`).join('');
+                wrap.innerHTML = `<table class="w-full min-w-[640px]">${head}<tbody>${body || '<tr><td colspan="9" class="p-4 text-center text-slate-400">Sin filas</td></tr>'}</tbody></table>`;
+            }
+
+            const totalVal = $id('scanner-total-val');
+            const sum = txs.reduce((s, t) => s + (t.purchaseValue || 0), 0);
+            if (totalVal) {
+                totalVal.innerText = fmt(sum, bC);
+                totalVal.className = 'text-xl font-black tracking-tighter tabular-nums text-cyan-400';
+            }
+            const resCont = $id('scanner-results');
+            if (resCont) { resCont.classList.remove('hidden'); resCont.classList.add('animate-slideUp'); }
+        }
+
+        async function processScannerFile(event) {
             const file = event.target.files[0];
             if (!file) return;
-            
+            if (!getGeminiApiKey()) return alert('Configura tu API Key en Ajustes → Motor IA para leer extractos.');
+
             const btn = $id('btnTriggerScanner');
-            if(!btn) return;
+            if (!btn) return;
             const originalHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Procesando motor IA...';
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Leyendo extracto...';
             btn.disabled = true;
 
-            // Simulación Fricción Cero de procesamiento
-            setTimeout(() => {
+            try {
+                const inline = await fileToGeminiInlinePart(file);
+                const prompt = 'Extrae el extracto adjunto. Devuelve únicamente el JSON con meta y transactions según el esquema.';
+                const { text } = await callGeminiWithParts({
+                    parts: [inline, { text: prompt }],
+                    systemInstruction: NEXUS_SCANNER_SYSTEM
+                });
+                const raw = parseGeminiJsonBlock(text);
+                renderScannerReportUI(normalizeScannerReport(raw));
+            } catch (e) {
+                console.error('[NEXUS Scanner]', e);
+                alert('No se pudo leer el extracto: ' + (e.message || 'revisa API Key y formato del archivo'));
+            } finally {
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
-                
-                const resCont = $id('scanner-results');
-                const list = $id('scanner-results-list');
-                const totalVal = $id('scanner-total-val');
-                
-                if(resCont && list) {
-                    const mockData = [
-                        { date: new Date().toISOString().split('T')[0], desc: 'Nómina Quincenal Corp.', amount: 2500000, type: 'income' },
-                        { date: new Date().toISOString().split('T')[0], desc: 'Pago Tarjeta Crédito', amount: 450000, type: 'expense' },
-                        { date: new Date().toISOString().split('T')[0], desc: 'Suscripción Cloud', amount: 35000, type: 'expense' },
-                        { date: new Date().toISOString().split('T')[0], desc: 'Reembolso Cliente', amount: 150000, type: 'income' },
-                        { date: new Date().toISOString().split('T')[0], desc: 'Almuerzo Negocios', amount: 120500, type: 'expense' }
-                    ];
-                    
-                    let total = 0;
+                event.target.value = '';
+            }
+        }
 
-                    // APEX FIX: Análisis con Totalizador SSoT y Reglas Visuales Dinámicas (Rojo/Verde)
-                    list.innerHTML = mockData.map((item) => {
-                        const isIncome = item.type === 'income';
-                        const sign = isIncome ? '+' : '-';
-                        const colorClass = isIncome ? 'text-emerald-500' : 'text-red-500';
-                        const iconBg = isIncome ? 'bg-emerald-100 text-emerald-500' : 'bg-red-100 text-red-500';
-                        const iconClass = isIncome ? 'fa-arrow-up' : 'fa-arrow-down';
-                        
-                        if(isIncome) total += item.amount;
-                        else total -= item.amount;
+        function buildScannerExportRows() {
+            if (!lastScannerReport) return null;
+            const r = lastScannerReport;
+            const metaRows = [
+                ['RESUMEN EXTRACTO'],
+                ['Banco / Cuenta', r.meta.bankOrAccountName || ''],
+                ['Deuda total', r.meta.totalDebt || 0],
+                ['Cupo total', r.meta.totalCreditLimit || 0],
+                ['Fecha corte', r.meta.cutoffDate || ''],
+                ['Fecha pago', r.meta.paymentDate || ''],
+                ['Cantidad transacciones', r.meta.transactionCount || (r.transactions || []).length],
+                []
+            ];
+            (r.meta.insurance || []).forEach(i => metaRows.push(['Seguro', i.name, i.amount]));
+            (r.meta.otherCharges || []).forEach(i => metaRows.push(['Otro cobro', i.name, i.amount]));
+            metaRows.push([]);
+            metaRows.push(['#', 'Recibo/Aprob.', 'Descripción', 'Valor compra', '% Interés', 'Int. cuota', 'Valor cuota', 'Cuotas pagas', 'Cuotas faltantes']);
+            (r.transactions || []).forEach((t, i) => {
+                metaRows.push([
+                    i + 1, t.receiptOrApproval, t.description, t.purchaseValue,
+                    t.interestPercent, t.interestValueInInstallment, t.installmentValue,
+                    t.paidInstallments, t.remainingInstallments
+                ]);
+            });
+            return metaRows;
+        }
 
-                        return `
-                        <div class="bg-white p-4 rounded-[1.5rem] border border-slate-100 flex justify-between items-center shadow-sm mb-2">
-                            <div class="flex items-center gap-3 min-w-0 pr-2">
-                                <div class="w-10 h-10 rounded-full ${iconBg} flex items-center justify-center shrink-0"><i class="fa-solid ${iconClass} text-sm"></i></div>
-                                <div class="truncate">
-                                    <p class="text-[10px] font-black uppercase text-slate-700 truncate">${item.desc}</p>
-                                    <p class="text-[8px] font-bold text-slate-400 mt-0.5">${item.date}</p>
-                                </div>
-                            </div>
-                            <p class="text-sm font-black ${colorClass} shrink-0">${sign}${fmt(item.amount, state.settings.baseCurrency)}</p>
-                        </div>
-                        `;
-                    }).join('');
-                    
-                    if(totalVal) {
-                        totalVal.innerText = fmt(total, state.settings.baseCurrency);
-                        totalVal.className = `text-xl font-black tracking-tighter tabular-nums ${total >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
-                    }
-                    
-                    resCont.classList.remove('hidden');
-                    resCont.classList.add('animate-slideUp');
-                }
-            }, 1800);
+        function exportScannerExcel() {
+            const rows = buildScannerExportRows();
+            if (!rows) return alert('Primero importa un extracto en el escáner.');
+            nexusDownloadCsv(rows, 'extracto_nexus_' + new Date().toISOString().split('T')[0] + '.csv');
+        }
+
+        function exportScannerPDF() {
+            if (!lastScannerReport || !window.jspdf) return alert('No hay informe o falta el motor PDF.');
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape' });
+            const r = lastScannerReport;
+            doc.setFontSize(12);
+            doc.text('NEXUS AR · Informe de extracto', 14, 14);
+            doc.setFontSize(8);
+            doc.text(getNexusDisplayName() + ' · ' + new Date().toLocaleDateString('es-CO'), 14, 20);
+
+            const metaBody = [
+                ['Banco/Cuenta', r.meta.bankOrAccountName || ''],
+                ['Deuda total', String(r.meta.totalDebt || 0)],
+                ['Cupo', String(r.meta.totalCreditLimit || 0)],
+                ['Corte', r.meta.cutoffDate || ''],
+                ['Pago', r.meta.paymentDate || ''],
+                ['N° movimientos', String(r.meta.transactionCount || (r.transactions || []).length)]
+            ];
+            (r.meta.insurance || []).forEach(i => metaBody.push(['Seguro: ' + i.name, String(i.amount)]));
+            (r.meta.otherCharges || []).forEach(i => metaBody.push(['Cobro: ' + i.name, String(i.amount)]));
+
+            doc.autoTable({
+                startY: 26,
+                head: [['Campo', 'Valor']],
+                body: metaBody,
+                theme: 'plain',
+                styles: { fontSize: 7 },
+                tableWidth: 120
+            });
+
+            const txBody = (r.transactions || []).map((t, i) => [
+                i + 1, t.receiptOrApproval || '', t.description || '', String(t.purchaseValue || 0),
+                String(t.interestPercent || 0), String(t.interestValueInInstallment || 0),
+                String(t.installmentValue || 0), String(t.paidInstallments || 0), String(t.remainingInstallments || 0)
+            ]);
+
+            doc.autoTable({
+                startY: doc.lastAutoTable.finalY + 6,
+                head: [['#', 'Recibo', 'Descripción', 'Valor', '%Int', 'Int.cuota', 'Cuota', 'Pag.', 'Falt.']],
+                body: txBody,
+                theme: 'grid',
+                styles: { fontSize: 6 },
+                margin: { left: 14, right: 14 }
+            });
+            doc.save('extracto_nexus_' + new Date().toISOString().split('T')[0] + '.pdf');
         }
 
         function saveScannedData() {
-            const resCont = $id('scanner-results');
-            if(resCont) {
-                const origHtml = resCont.innerHTML;
-                resCont.innerHTML = `<div class="p-6 bg-emerald-50 border border-emerald-100 rounded-[2rem] text-center animate-slideUp"><i class="fa-solid fa-check text-emerald-500 text-3xl mb-3"></i><p class="text-[10px] text-emerald-700 font-black uppercase tracking-widest">Cifrado y Guardado en Bóveda</p></div>`;
-                
-                setTimeout(() => {
-                    resCont.innerHTML = origHtml;
-                    initScanner();
-                    switchTab('database');
-                }, 1500);
+            if (!lastScannerReport || !(lastScannerReport.transactions || []).length) {
+                return alert('No hay transacciones extraídas para importar.');
             }
+            const bC = state.settings.baseCurrency || 'COP';
+            const acc = (state.accounts || []).find(a => !a.isShared) || state.accounts[0];
+            if (!acc) return alert('Crea al menos una cuenta antes de importar.');
+            let imported = 0;
+            lastScannerReport.transactions.forEach(t => {
+                const amt = t.purchaseValue || t.installmentValue || 0;
+                if (amt <= 0) return;
+                const rawTx = {
+                    type: 'expense',
+                    amount: amt,
+                    cat: '[Extracto] ' + (lastScannerReport.meta.bankOrAccountName || 'Importado').substring(0, 40),
+                    accId: acc.id,
+                    date: new Date().toISOString(),
+                    note: (t.description || '') + (t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''),
+                    currency: acc.currency || bC
+                };
+                const tx = buildTransactionSchema({ ...rawTx, id: 'tx_scan_' + Date.now() + '_' + imported });
+                state.tx.push(tx);
+                if (acc.type === 'credit') acc.balance += amt; else acc.balance -= amt;
+                imported++;
+            });
+            saveState();
+            updateDashboard();
+            alert('✅ ' + imported + ' movimiento(s) importados a «' + acc.name + '». Revisa Auditoría.');
+            switchTab('database');
         }
         // --- RESET SUAVE: Solo registros (conserva cuentas y tareas) ---
         function initSoftReset() {
