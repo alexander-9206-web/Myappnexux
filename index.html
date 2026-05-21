@@ -3156,6 +3156,7 @@
         function showFirstSetupPinStep() {
             const u = _firstSetupFirebaseUser;
             if (!u) return;
+            _loginRoutePhase = 'first-setup';
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
             hideAllLoginPanels();
@@ -3330,7 +3331,9 @@
                 const raw = localStorage.getItem('nexus_profile_' + email);
                 if (!raw) return null;
                 const p = JSON.parse(raw);
-                return (p && p.email) ? p : null;
+                if (!p || typeof p !== 'object') return null;
+                if (!p.email) p.email = email;
+                return p;
             } catch (e) { return null; }
         }
 
@@ -3533,6 +3536,12 @@
                     return;
                 }
 
+                if (routeKind === 'founder-resume') {
+                    _loginRoutePhase = 'first-setup';
+                    showFirstSetupPinStep();
+                    return;
+                }
+
                 await enterFounderAppFlow(_firstSetupFirebaseUser);
             } catch (e) {
                 console.error('[NEXUS] routeAfterFirebaseAuth', e);
@@ -3548,8 +3557,12 @@
         }
 
         function showLoginPinStep(userEmail, userName, profile) {
-            loginSelectedEmail = userEmail;
-            userProfile = profile;
+            const vaultEmail = String(userEmail || '').trim().toLowerCase();
+            loginSelectedEmail = vaultEmail;
+            userProfile = profile || {};
+            if (!userProfile.email) userProfile.email = vaultEmail;
+            localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
+            _loginRoutePhase = 'pin';
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
             hideAllLoginPanels();
@@ -3611,7 +3624,7 @@
                 profile.isAdmin = false;
                 profile.role = 'user';
             }
-            localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile)));
+            localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile, userEmail)));
             ensureProfilePinHash(profile).catch(e => console.warn('[NEXUS] pin hash background', e));
             syncProfileToCloud(profile).catch(e => console.warn('[NEXUS] syncProfile background', e));
             if (typeof loadRootPinHashFromCloud === 'function') {
@@ -4376,9 +4389,11 @@
             return profile;
         }
 
-        function sanitizeProfileForStorage(profile) {
+        function sanitizeProfileForStorage(profile, emailHint) {
             const copy = { ...(profile || {}) };
             delete copy.pin;
+            const hint = (emailHint || copy.email || '').trim().toLowerCase();
+            if (hint) copy.email = hint;
             return copy;
         }
 
@@ -4520,17 +4535,22 @@
 
         // 1. Preparar la función receptora ANTES de llamar al nativo
         window.onBiometricResult = function(success) {
-            // Tolerancia de tipos para recibir respuestas limpias de Swift
-            if (success === true || success === "true" || success === 1) {
-                console.log("[APEX] Identidad confirmada por el contenedor nativo. Desbloqueando UI...");
-                if (activeBiometricCallback) {
-                    activeBiometricCallback();
+            const cb = activeBiometricCallback;
+            activeBiometricCallback = null;
+            const ok = success === true || success === 'true' || success === 1 || success === '1';
+            if (ok) {
+                console.log('[APEX] Identidad confirmada por el contenedor nativo. Desbloqueando UI…');
+                if (cb) {
+                    Promise.resolve(cb()).catch(e => {
+                        console.error('[APEX] post-biometric login', e);
+                        if (!sessionUnlocked) alert('Face ID correcto, pero no se pudo abrir la bóveda. Usa tu PIN de 4 dígitos.');
+                    });
+                } else if (!sessionUnlocked && loginSelectedEmail) {
+                    handleLoginExisting(true);
                 }
             } else {
-                console.warn("[APEX] FaceID fallido o cancelado.");
-                // Retirar las alertas invasivas para que el usuario simplemente ingrese el PIN si el FaceID falla
+                console.warn('[APEX] Face ID fallido o cancelado — usa el PIN.');
             }
-            activeBiometricCallback = null;
         };
 
         async function triggerBiometricAuth(successCallback, reasonMsg = 'Verificación biométrica Apex requerida') {
@@ -4669,12 +4689,17 @@
             },
             // APEX FIX: Persistencia de Sesión Activa a prueba de fallos (Capa 2)
             saveSession: async function(email) {
-                const db = await this.init();
-                return new Promise((resolve) => {
-                    const tx = db.transaction('states', 'readwrite');
-                    tx.objectStore('states').put({ userId: 'nexus_active_session', data: email });
-                    tx.oncomplete = () => resolve();
-                });
+                try {
+                    const db = await this.init();
+                    return new Promise((resolve, reject) => {
+                        const tx = db.transaction('states', 'readwrite');
+                        tx.onerror = () => reject(tx.error);
+                        tx.objectStore('states').put({ userId: 'nexus_active_session', data: email });
+                        tx.oncomplete = () => resolve();
+                    });
+                } catch (e) {
+                    console.warn('[NEXUS] IDB saveSession', e);
+                }
             },
             getSession: async function() {
                 const db = await this.init();
@@ -5835,26 +5860,23 @@
         }
 
         function selectUserForLogin(email, name) {
-            loginSelectedEmail = email;
+            const vaultEmail = String(email || '').trim().toLowerCase();
+            loginSelectedEmail = vaultEmail;
+            _loginRoutePhase = 'pin';
             $id('login-initial-choice').classList.add('hidden');
             $id('login-user-selection').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
             $id('login-pin-section').classList.remove('hidden');
-            $id('login-active-email').innerText = name + ' (' + email + ')';
+            $id('login-active-email').innerText = name + ' (' + vaultEmail + ')';
             
             const pinInput = $id('login-existing-pin');
             pinInput.value = '';
             
-            const profile = JSON.parse(localStorage.getItem(`nexus_profile_${email}`));
+            const profile = loadLocalProfile(vaultEmail);
             
-            // APEX FIX: Respeto absoluto de la configuración de biometría del usuario.
-            // Evita Crashes en iOS al NO forzar el FaceID si el usuario lo tiene desactivado,
-            // permitiendo que el teclado numérico (PIN) aparezca de forma segura y fluida.
             setTimeout(() => {
                 if (profile && profile.useBiometrics === true) {
-                    triggerBiometricAuth(() => {
-                        handleLoginExisting(true); 
-                    }, 'Autenticación automática de Nexus');
+                    triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
                 } else {
                     pinInput.focus();
                 }
@@ -5900,19 +5922,29 @@
 
         async function processLoginSuccess(email) {
             if (!email) return showLoginFlow();
-            currentUser = email;
+            const vaultEmail = String(email).trim().toLowerCase();
+            currentUser = vaultEmail;
             sessionUnlocked = true;
             showLoginRoutingLoading('Abriendo tu bóveda…');
             setLoginRoutingProgress(15, 'Cargando perfil…');
+            let shellReleased = false;
             try {
                 setLoginRoutingProgress(45, 'Preparando bóveda…');
                 await bootApp();
                 setLoginRoutingProgress(90, 'Sincronizando…');
-                localStorage.setItem('nexus_current_user', email);
-                await NexusIDB.saveSession(email);
-                document.cookie = 'nexus_current_user=' + email + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
-                setLoginRoutingProgress(100, 'Listo');
                 nexusReleaseAppShell();
+                shellReleased = true;
+                _loginRoutePhase = 'app';
+                setLoginRoutingProgress(100, 'Listo');
+                try {
+                    localStorage.setItem('nexus_current_user', vaultEmail);
+                    document.cookie = 'nexus_current_user=' + vaultEmail + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
+                    if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) {
+                        await NexusIDB.saveSession(vaultEmail);
+                    }
+                } catch (persistErr) {
+                    console.warn('[NEXUS] persist session (no bloquea acceso)', persistErr);
+                }
                 initCloud().then(async () => {
                     try {
                         await fetchCloudState();
@@ -5922,9 +5954,13 @@
                 }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
             } catch (e) {
                 console.error('[NEXUS] processLoginSuccess', e);
-                clearStaleSession();
-                showLoginFlow();
-                throw e;
+                if (!shellReleased) {
+                    clearStaleSession();
+                    showLoginFlow();
+                    alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
+                } else {
+                    console.warn('[NEXUS] post-login parcial', e);
+                }
             } finally {
                 hideLoginRoutingLoading();
             }
@@ -5932,12 +5968,15 @@
 
         async function handleLoginExisting(bypassPin = false) {
             const pin = $id('login-existing-pin').value.trim();
-            if(!loginSelectedEmail || (!bypassPin && pin.length !== 4)) return alert("Ingresa un PIN de 4 dígitos.");
+            const vaultEmail = loginSelectedEmail ? String(loginSelectedEmail).trim().toLowerCase() : '';
+            if (!vaultEmail || (!bypassPin && pin.length !== 4)) return alert('Ingresa un PIN de 4 dígitos.');
+            loginSelectedEmail = vaultEmail;
             
-            let profile = await getProfileForVault(loginSelectedEmail);
+            let profile = await getProfileForVault(vaultEmail);
             if (!profile) return alert('No se encontró el perfil de este usuario.');
 
             profile = await ensureProfilePinHash(profile);
+            if (!profile.email) profile.email = vaultEmail;
             let pinOk = bypassPin || await verifyUserPin(pin, profile);
 
             // Primera vez: guardar el PIN ingresado en login
@@ -5952,12 +5991,12 @@
                 userProfile = profile;
                 userProfile.lastSeen = Date.now();
                 delete userProfile.needsPinSetup;
-                localStorage.setItem(`nexus_profile_${loginSelectedEmail}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
+                localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
                 syncProfileToCloud(userProfile).catch(e => console.warn('[NEXUS] syncProfile login', e));
                 if (profileHasPin(userProfile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 else sessionStorage.removeItem('nexus_pin_banner_ok');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
-                await processLoginSuccess(loginSelectedEmail);
+                await processLoginSuccess(vaultEmail);
             } else {
                 alert('PIN incorrecto.');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
@@ -6139,9 +6178,18 @@
 
         async function bootApp() {
             if (!sessionUnlocked || !currentUser) throw new Error('Sesión no autenticada');
-            const localP = loadLocalProfile(currentUser);
-            if (!localP) throw new Error('Perfil local no encontrado');
+            let localP = loadLocalProfile(currentUser);
+            if (!localP && typeof getProfileForVault === 'function') {
+                try {
+                    localP = await getProfileForVault(currentUser);
+                    if (localP) {
+                        localStorage.setItem('nexus_profile_' + currentUser, JSON.stringify(sanitizeProfileForStorage(localP, currentUser)));
+                    }
+                } catch (e) { console.warn('[NEXUS] bootApp profile recover', e); }
+            }
+            if (!localP) throw new Error('Perfil local no encontrado. Vuelve a entrar con Google o crea el usuario.');
             userProfile = await ensureProfilePinHash(localP);
+            if (!userProfile.email) userProfile.email = currentUser;
             if (window.db) {
                 try {
                     const cloudP = await getProfileForVault(currentUser);
