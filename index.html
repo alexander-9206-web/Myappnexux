@@ -3079,6 +3079,7 @@
 
             try {
                 if (!window.db || !fbUser) await initCloud();
+                await ensureFirestoreGoogleSession(auth.email, auth.uid);
                 const boot = await getBootstrapInfo();
                 if (!boot || !boot.initialized) {
                     setLoginRoutingProgress(45, 'Creando bootstrap…');
@@ -3162,7 +3163,7 @@
                 _loginRoutePhase = 'error';
                 hideLoginRoutingLoading();
                 showInitialLoginChoice();
-                alert('No se pudo activar el administrador: ' + (e.message || 'revisa la conexión'));
+                alert('No se pudo activar el administrador: ' + nexusFormatFirebaseError(e));
             }
         }
 
@@ -3395,6 +3396,7 @@
                 }
                 fbUser = fbAuthUser;
                 await initCloud();
+                await ensureFirestoreGoogleSession(email, fbAuthUser.uid);
 
                 const routeKind = await runLoginRoutingWithProgress('Esperando respuesta de Firebase…', async () => {
                     const initialized = await isSystemInitialized();
@@ -3539,7 +3541,7 @@
                 }, { merge: false });
                 return { ok: true };
             } catch (e) {
-                return { ok: false, error: e.message || 'Firebase' };
+                return { ok: false, error: nexusFormatFirebaseError(e) };
             }
         }
 
@@ -4335,8 +4337,49 @@
                 });
             });
         }
+        function nexusFormatFirebaseError(e) {
+            const msg = (e && (e.message || e.code)) ? String(e.message || e.code) : String(e || 'Firebase');
+            if (/permission|insufficient|PERMISSION_DENIED/i.test(msg)) {
+                return 'Permisos insuficientes en Firebase. Debes entrar con Google (no sesión anónima) y publicar firestore.rules en la consola.';
+            }
+            return msg;
+        }
+
+        /** Firestore exige auth con correo para bootstrap fundador; evita quedar en anónimo tras Google. */
+        async function ensureFirestoreGoogleSession(email, uid) {
+            if (!email || !email.includes('@')) {
+                throw new Error('Se requiere cuenta Google con correo.');
+            }
+            await initCloud();
+            const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = getAuth(window.__nexusFirebaseApp);
+            const wantEmail = email.trim().toLowerCase();
+            let u = auth.currentUser;
+            if ((!u || u.isAnonymous) && fbUser && !fbUser.isAnonymous && fbUser.email) {
+                u = fbUser;
+            }
+            if (!u || u.isAnonymous) {
+                throw new Error('Firebase sigue en sesión anónima. Vuelve a pulsar Continuar con Google.');
+            }
+            const em = (u.email || '').trim().toLowerCase();
+            if (!em || em !== wantEmail) {
+                throw new Error('El correo de Firebase (' + (em || 'sin correo') + ') no coincide con ' + wantEmail + '. Usa Google de nuevo.');
+            }
+            if (uid && u.uid !== uid) {
+                throw new Error('La sesión Firebase no coincide. Cierra la app y entra otra vez con Google.');
+            }
+            try { await u.getIdToken(true); } catch (e) { console.warn('[NEXUS] token refresh', e); }
+            fbUser = u;
+            return u;
+        }
+
         async function initCloud() {
             if (window.db) {
+                try {
+                    const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    const u = getAuth(window.__nexusFirebaseApp).currentUser;
+                    if (u) fbUser = u;
+                } catch (e) { /* noop */ }
                 updateCloudBadge(true, false);
                 return true;
             }
@@ -4377,27 +4420,46 @@
                     .then(({ getAnalytics }) => getAnalytics(app)).catch(() => {});
 
                 return new Promise(async (resolve) => {
-                    // APEX FIX: Restauración de Autenticación Anónima (Para usuarios de Bóveda Local / PIN)
+                    let settled = false;
+                    const finish = (ok) => {
+                        if (settled) return;
+                        settled = true;
+                        updateCloudBadge(!!ok, false);
+                        resolve(!!ok);
+                    };
+
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) fbUser = user;
+                    });
+
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
+                        } else if (!auth.currentUser) {
                             await signInAnonymously(auth);
+                        } else {
+                            fbUser = auth.currentUser;
                         }
-                    } catch(e) {
+                    } catch (e) {
                         console.warn("[APEX] Auth initialization fallback", e);
                     }
 
-                    onAuthStateChanged(auth, (user) => {
-                        fbUser = user;
-                        if(user) {
-                            updateCloudBadge(true, false);
-                            resolve(true);
-                        } else {
-                            updateCloudBadge(false);
-                            resolve(false);
-                        }
-                    });
+                    if (auth.currentUser) {
+                        fbUser = auth.currentUser;
+                        finish(true);
+                    } else {
+                        const unsub = onAuthStateChanged(auth, (user) => {
+                            if (user) {
+                                fbUser = user;
+                                try { unsub(); } catch (e) {}
+                                finish(true);
+                            }
+                        });
+                        setTimeout(() => {
+                            try { unsub(); } catch (e) {}
+                            finish(!!auth.currentUser);
+                        }, 8000);
+                    }
                 });
             } catch(e) {
                 console.warn("[APEX SYS] Error de red. Trabajando en modo Local-First.", e);
@@ -4782,11 +4844,7 @@
 
             try {
                 if (!window.db || !fbUser) await initCloud();
-                if (!fbUser || fbUser.uid !== auth.uid) {
-                    _loginRoutePhase = 'error';
-                    alert('La sesión Firebase no coincide. Vuelve a conectar con Google.');
-                    return;
-                }
+                await ensureFirestoreGoogleSession(auth.email, auth.uid);
 
                 const boot = await nexusRetryAsync(() => getBootstrapInfo(), 3, 300);
                 if (boot && boot.initialized && !isBootstrapFounder(boot, auth.email, auth.uid)) {
@@ -4850,8 +4908,8 @@
                 await finishFounderLoginEntry(auth.email);
             } catch (e) {
                 console.error('[NEXUS] completeFirstSetup', e);
-                if (st) st.textContent = 'Error de conexión';
-                alert('Error al activar administrador: ' + (e.message || 'revisa Firebase'));
+                if (st) st.textContent = nexusFormatFirebaseError(e);
+                alert('Error al activar administrador: ' + nexusFormatFirebaseError(e));
             } finally {
                 _firstSetupBusy = false;
                 setFirstSetupButtonBusy(false);
