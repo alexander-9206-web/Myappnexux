@@ -3774,7 +3774,6 @@
             if (GEMINI_DEPRECATED_MODELS.includes(s.aiModels.gemini)) s.aiModels.gemini = GEMINI_DEFAULT_MODEL;
             s.geminiApiKey = (s.aiApiKeys.gemini || '').trim();
             s.geminiModel = s.aiModels.gemini || GEMINI_DEFAULT_MODEL;
-            if (typeof syncAiKeysToLocalCache === 'function') syncAiKeysToLocalCache();
         }
 
         const NEXUS_KPI_INSIGHTS = {
@@ -3840,15 +3839,22 @@
             } catch (e) { /* ignore */ }
         }
 
+        let _syncAiKeysBusy = false;
         function syncAiKeysToLocalCache() {
-            normalizeAiSettings();
-            ['gemini', 'openai', 'deepseek'].forEach(p => {
-                const k = (state.settings.aiApiKeys[p] || '').trim();
-                if (k) nexusAiKeySessionCache[p] = k;
-            });
+            if (_syncAiKeysBusy || !state || !state.settings) return;
+            _syncAiKeysBusy = true;
             try {
-                sessionStorage.setItem('nexus_ai_keys_' + (currentUser || 'anon'), JSON.stringify(nexusAiKeySessionCache));
-            } catch (e) { /* ignore */ }
+                normalizeAiSettings();
+                ['gemini', 'openai', 'deepseek'].forEach(p => {
+                    const k = (state.settings.aiApiKeys[p] || '').trim();
+                    if (k) nexusAiKeySessionCache[p] = k;
+                });
+                try {
+                    sessionStorage.setItem('nexus_ai_keys_' + (currentUser || 'anon'), JSON.stringify(nexusAiKeySessionCache));
+                } catch (e) { /* ignore */ }
+            } finally {
+                _syncAiKeysBusy = false;
+            }
         }
 
         function getAiApiKey(forProvider) {
