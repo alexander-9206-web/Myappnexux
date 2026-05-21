@@ -3075,7 +3075,9 @@
         let currentUser = null, userProfile = {}, state = {}, charts = {};
         let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency';
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
-        let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, autoBackupTimeout = null, LIVE_RATES = EXCHANGE_RATES; 
+        let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, autoBackupTimeout = null, LIVE_RATES = EXCHANGE_RATES;
+        let saveStateDebounceTimer = null, cloudUiRefreshTimer = null, p2pAttachDebounceTimer = null, p2pListenersSessionReady = false;
+        let liveRatesLastFetch = 0; 
         let isRootAdminUnlocked = false;
         let _firstSetupFirebaseUser = null;
         let _loginRoutePhase = null;
@@ -4727,6 +4729,54 @@
         let syncTimeout = null;
         let syncPending = false; // APEX FIX: Flag de cola segura
 
+        function nexusDetachAllP2PListeners() {
+            p2pListenersSessionReady = false;
+            clearTimeout(p2pAttachDebounceTimer);
+            p2pAttachDebounceTimer = null;
+            const detachMap = (map) => {
+                if (!map) return;
+                for (const rId in map) {
+                    try { map[rId](); } catch (e) { console.warn('[NEXUS] detach P2P', e); }
+                }
+            };
+            if (window.sharedUnsubscribers) {
+                detachMap(window.sharedUnsubscribers);
+                window.sharedUnsubscribers = {};
+            }
+            if (window.sharedTaskUnsubscribers) {
+                detachMap(window.sharedTaskUnsubscribers);
+                window.sharedTaskUnsubscribers = {};
+            }
+            if (window.sharedProjectUnsubscribers) {
+                detachMap(window.sharedProjectUnsubscribers);
+                window.sharedProjectUnsubscribers = {};
+            }
+        }
+
+        function scheduleP2PListenersAttach(force) {
+            if (!sessionUnlocked || !window.db) return;
+            if (p2pListenersSessionReady && !force) return;
+            clearTimeout(p2pAttachDebounceTimer);
+            p2pAttachDebounceTimer = setTimeout(() => {
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+                if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
+                if (typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
+                p2pListenersSessionReady = true;
+            }, force ? 0 : 150);
+        }
+
+        function scheduleCloudUiRefresh() {
+            clearTimeout(cloudUiRefreshTimer);
+            cloudUiRefreshTimer = setTimeout(() => {
+                if (!sessionUnlocked) return;
+                applyThemeCSS();
+                updateCurrencyLabels();
+                updateModuleVisibility();
+                updateDashboard();
+                if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+            }, 220);
+        }
+
         let p2pRenderTimeout = null; // APEX FIX: Timer para debounce de UI
         let lastCloudSyncHash = {}; // APEX FIX: Caché de firmas para Optimización Extrema de Escrituras en Firebase
 
@@ -5267,13 +5317,18 @@
                     // Esto te permite abrir la app en cualquier celular/PC y ver tus datos intactos.
                     const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
                     
-                    if (unsubscribeSnapshot) unsubscribeSnapshot();
+                    if (unsubscribeSnapshot) {
+                        unsubscribeSnapshot();
+                        unsubscribeSnapshot = null;
+                    }
+                    p2pListenersSessionReady = false;
                     
                     let isFirstLoad = true; // APEX FIX: Candado atómico para primer render
                     
                     // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
                     unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
                         let hasChanges = false;
+                        let coreTouched = false;
                         let incomingTxByYear = {};
                         
                         snapshot.docChanges().forEach((change) => {
@@ -5282,11 +5337,11 @@
                                 const data = change.doc.data();
                                 
                                 if (change.doc.id === 'core') {
+                                    coreTouched = true;
                                     // Preservamos las transacciones locales y fusionamos el resto de variables
                                     const currentTx = state.tx || [];
                                     state = { ...state, ...data };
                                     state.tx = currentTx;
-                                    if (typeof normalizeAiSettings === 'function') normalizeAiSettings();
                                     if (typeof syncAiKeysToLocalCache === 'function') syncAiKeysToLocalCache();
                                 } else if (change.doc.id.startsWith('tx_')) {
                                     // Capturamos las transacciones agrupadas por año
@@ -5295,6 +5350,8 @@
                                 }
                             }
                         });
+
+                        const shouldAttachP2p = isFirstLoad || coreTouched;
 
                         if (hasChanges) {
                             // Reconstruimos el array de transacciones sin duplicar datos
@@ -5321,14 +5378,7 @@
                             if(currentUser) {
                                 NexusIDB.saveState(currentUser, state).then(() => {
                                     if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
-                                    if (sessionUnlocked) { 
-                                        applyThemeCSS();
-                                        updateCurrencyLabels();
-                                        updateModuleVisibility();
-                                        updateDashboard(); 
-                                        if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
-                                    }
-                                    // Liberar promesa solo tras renderizar la data descargada
+                                    if (sessionUnlocked) scheduleCloudUiRefresh();
                                     if(isFirstLoad) { isFirstLoad = false; resolve(); }
                                 });
                             }
@@ -5337,12 +5387,7 @@
                             if(isFirstLoad) { isFirstLoad = false; resolve(); }
                         }
                         
-                        // APEX FIX: Desplazamiento atómico. 
-                        // Conectar radares P2P Inmediatamente DESPUÉS de que el snapshot descargue el 'core' 
-                        // Esto garantiza que el sistema ya conoce los IDs de las cuentas compartidas antes de escanear
-                        attachP2PListener();
-                        attachTaskP2PListener();
-                        attachProjectP2PListener();
+                        if (shouldAttachP2p) scheduleP2PListenersAttach(!!coreTouched);
 
                         updateCloudBadge(true, false);
                     }, (error) => {
@@ -5570,7 +5615,7 @@
                     
                     // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
                     if (sessionUnlocked) {
-                        if (fbUser && window.db) fetchCloudState(); 
+                        if (fbUser && window.db && !unsubscribeSnapshot) fetchCloudState();
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
                 } else if (document.visibilityState === "hidden") {
@@ -6144,42 +6189,48 @@
                 const lockScreen = $id('session-lock-screen');
                 if (lockScreen) {
                     lockScreen.classList.add('opacity-0', 'pointer-events-none');
-                    setTimeout(async () => {
+                    setTimeout(() => {
                         lockScreen.classList.add('hidden');
                         lockScreen.classList.remove('opacity-0', 'pointer-events-none');
                         if ($id('session-pin-input')) $id('session-pin-input').value = '';
-                        await bootApp();
+                        if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
                     }, 300);
-                } else await bootApp();
+                } else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
             } else {
                 alert('PIN incorrecto.');
                 if ($id('session-pin-input')) $id('session-pin-input').value = '';
             }
         }
 
-        function setupInactivityLock() {
-            const resetTimer = () => {
-                localStorage.setItem('nexus_last_active', Date.now()); // APEX FIX: Rastrear milisegundo del último toque/interacción
-                clearTimeout(inactivityTimer);
-                if (sessionUnlocked && state.settings && state.settings.requirePin) {
-                    inactivityTimer = setTimeout(() => {
-                        sessionUnlocked = false; const lock = $id('session-lock-screen');
-                        if(lock) { 
-                            lock.classList.add('opacity-0'); 
-                            lock.classList.remove('hidden'); 
-                            requestAnimationFrame(() => lock.classList.remove('opacity-0')); 
-                            const ln = $id('lock-name'); 
-                            if(userProfile && ln) ln.innerText = userProfile.name; 
-                            
-                            // APEX FIX: Auto-disparo de biometría al bloquearse por inactividad
-                            if (userProfile && userProfile.useBiometrics) {
-                                triggerBiometricAuth(() => { unlockSession(true); }, 'Verifica tu identidad para volver a la bóveda.');
-                            }
+        function nexusResetInactivityTimer() {
+            localStorage.setItem('nexus_last_active', Date.now());
+            clearTimeout(inactivityTimer);
+            if (sessionUnlocked && state && state.settings && state.settings.requirePin) {
+                inactivityTimer = setTimeout(() => {
+                    sessionUnlocked = false;
+                    const lock = $id('session-lock-screen');
+                    if (lock) {
+                        lock.classList.add('opacity-0');
+                        lock.classList.remove('hidden');
+                        requestAnimationFrame(() => lock.classList.remove('opacity-0'));
+                        const ln = $id('lock-name');
+                        if (userProfile && ln) ln.innerText = userProfile.name;
+                        if (userProfile && userProfile.useBiometrics) {
+                            triggerBiometricAuth(() => { unlockSession(true); }, 'Verifica tu identidad para volver a la bóveda.');
                         }
-                    }, 300000); 
-                }
-            };
-            ['touchstart', 'click', 'keypress', 'scroll'].forEach(evt => { document.removeEventListener(evt, resetTimer); document.addEventListener(evt, resetTimer, {passive: true}); }); resetTimer();
+                    }
+                }, 300000);
+            }
+        }
+
+        function setupInactivityLock() {
+            if (!window.__nexusInactivityBound) {
+                window.__nexusInactivityBound = true;
+                ['touchstart', 'click', 'keypress', 'scroll'].forEach(evt => {
+                    document.addEventListener(evt, nexusResetInactivityTimer, { passive: true });
+                });
+            }
+            nexusResetInactivityTimer();
         }
 
         async function bootApp() {
@@ -6263,7 +6314,6 @@
                 state.catParents.global = state.catParents.global.filter(p => !PURGE_PARENTS.includes(p));
             }
             sanitizeUserCategoriesInState();
-            if (typeof normalizeAiSettings === 'function') normalizeAiSettings();
             if (typeof loadAiKeySessionCache === 'function') loadAiKeySessionCache();
             if (typeof syncAiKeysToLocalCache === 'function') syncAiKeysToLocalCache();
 
@@ -6300,13 +6350,21 @@
             sessionUnlocked = false;
             document.documentElement.classList.add('nexus-auth-pending'); 
             
-            if(unsubscribeSnapshot) unsubscribeSnapshot();
-            if(window.sharedUnsubscribers) {
-                for (const rId in window.sharedUnsubscribers) {
-                    window.sharedUnsubscribers[rId]();
-                }
-                window.sharedUnsubscribers = {};
+            clearTimeout(saveStateDebounceTimer);
+            clearTimeout(cloudUiRefreshTimer);
+            clearTimeout(syncTimeout);
+            clearTimeout(p2pAttachDebounceTimer);
+            clearTimeout(inactivityTimer);
+            if (autoBackupInterval) { clearInterval(autoBackupInterval); autoBackupInterval = null; }
+            if (autoBackupTimeout) { clearTimeout(autoBackupTimeout); autoBackupTimeout = null; }
+            if (taskReminderEngineInterval) { clearInterval(taskReminderEngineInterval); taskReminderEngineInterval = null; }
+            if (typeof p2pRenderTimeout !== 'undefined' && p2pRenderTimeout) clearTimeout(p2pRenderTimeout);
+
+            if (unsubscribeSnapshot) {
+                try { unsubscribeSnapshot(); } catch (e) { console.warn('[NEXUS] unsubscribe snapshot', e); }
+                unsubscribeSnapshot = null;
             }
+            nexusDetachAllP2PListeners();
             
             // Destrucción absoluta de anclas de sesión
             localStorage.removeItem('nexus_current_user'); 
@@ -6395,12 +6453,15 @@
         }
         
         function saveState() { 
-            if(currentUser && sessionUnlocked && state) {
+            if (!currentUser || !sessionUnlocked || !state) return;
+            clearTimeout(saveStateDebounceTimer);
+            saveStateDebounceTimer = setTimeout(() => {
+                if (!currentUser || !sessionUnlocked || !state) return;
                 if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
                 NexusIDB.saveState(currentUser, state).then(() => {
                     if (typeof triggerCloudSync === 'function') triggerCloudSync();
-                });
-            } 
+                }).catch(e => console.warn('[NEXUS] saveState IDB', e));
+            }, 400);
         }
         
         function fmt(val, forceCurrency = null) { const c = forceCurrency || (state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : (state.activeCurrency || 'COP')); const hideDec = state.settings && state.settings.hideDecimals; const f = (['COP', 'JPY'].includes(c) || hideDec) ? 0 : 2; return new Intl.NumberFormat('es-CO', { style:'currency', currency: c, minimumFractionDigits: f, maximumFractionDigits: f }).format(val); }
@@ -6421,10 +6482,18 @@
         }
 
         async function fetchLiveRates() {
+            const now = Date.now();
+            if (liveRatesLastFetch && (now - liveRatesLastFetch) < 30 * 60 * 1000) return;
             try {
-                const res = await fetch('https://open.er-api.com/v6/latest/USD'); const data = await res.json();
-                if (data && data.rates) { LIVE_RATES = data.rates; updateCurrencyLabels(); if (['home', 'analysis', 'report', 'finances', 'budget'].includes(state.activeTab)) updateDashboard(); }
-            } catch (e) { console.error("Error API. Offline fallback."); }
+                const res = await fetch('https://open.er-api.com/v6/latest/USD');
+                const data = await res.json();
+                if (data && data.rates) {
+                    LIVE_RATES = data.rates;
+                    liveRatesLastFetch = now;
+                    updateCurrencyLabels();
+                    if (['home', 'analysis', 'report', 'finances', 'budget'].includes(state.activeTab)) updateDashboard();
+                }
+            } catch (e) { console.error('Error API. Offline fallback.'); }
         }
 
         function convertCurrency(amount, fromCode, toCode) { if (!amount) return 0; if(fromCode === toCode) return amount; return (amount / (LIVE_RATES[fromCode] || 1)) * (LIVE_RATES[toCode] || 1); }
