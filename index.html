@@ -3706,8 +3706,13 @@
         const apiKey = "";
         const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
         const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash';
-        const GEMINI_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-        const GEMINI_DEPRECATED_MODELS = ['gemini-2.5-flash-preview-09-2025', 'gemini-2.5-flash-preview-04-17', 'gemini-2.5-pro-preview-03-25'];
+        const GEMINI_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
+        const GEMINI_RETIRED_MODELS = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-pro', 'gemini-pro-vision'];
+        const GEMINI_DEPRECATED_MODELS = [
+            'gemini-2.5-flash-preview-09-2025', 'gemini-2.5-flash-preview-04-17', 'gemini-2.5-pro-preview-03-25',
+            ...GEMINI_RETIRED_MODELS
+        ];
+        const SCANNER_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash-lite'];
         const AI_PROVIDER_CATALOG = {
             gemini: {
                 label: 'Google Gemini',
@@ -3716,10 +3721,9 @@
                 keyPlaceholder: 'AIzaSy...',
                 defaultModel: 'gemini-2.0-flash',
                 models: [
-                    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (recomendado)' },
+                    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (recomendado · escáner)' },
+                    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
                     { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
-                    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-                    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
                     { id: '__custom__', label: 'Otro modelo Gemini (manual)' }
                 ],
                 supportsVision: true
@@ -3773,9 +3777,23 @@
                     s.aiModels.gemini = s.geminiModel;
                 }
             }
-            if (GEMINI_DEPRECATED_MODELS.includes(s.aiModels.gemini)) s.aiModels.gemini = GEMINI_DEFAULT_MODEL;
+            s.aiModels.gemini = resolveGeminiModelId(s.aiModels.gemini);
+            if (s.aiModels.geminiCustom) s.aiModels.geminiCustom = resolveGeminiModelId(s.aiModels.geminiCustom);
             s.geminiApiKey = (s.aiApiKeys.gemini || '').trim();
             s.geminiModel = s.aiModels.gemini || GEMINI_DEFAULT_MODEL;
+        }
+
+        function resolveGeminiModelId(modelId) {
+            const m = String(modelId || '').trim();
+            if (!m || m === '__custom__') return m || GEMINI_DEFAULT_MODEL;
+            if (GEMINI_RETIRED_MODELS.includes(m) || GEMINI_DEPRECATED_MODELS.includes(m)) return GEMINI_DEFAULT_MODEL;
+            return m;
+        }
+
+        function isRetryableGeminiModelError(status, errMsg) {
+            const msg = String(errMsg || '');
+            if (status === 404) return true;
+            return /not found|not supported|does not exist|no longer available|deprecated|invalid model|unavailable|for api version/i.test(msg);
         }
 
         const NEXUS_KPI_INSIGHTS = {
@@ -4020,29 +4038,48 @@
             const p = getAiProvider();
             if (p !== 'gemini') return;
             const current = (state.settings.aiModels.gemini || '').trim();
-            if (!current || current === '__custom__' && !state.settings.aiModels.geminiCustom) {
+            if (!current || (current === '__custom__' && !state.settings.aiModels.geminiCustom)) {
                 state.settings.aiModels.gemini = GEMINI_DEFAULT_MODEL;
-            } else if (GEMINI_DEPRECATED_MODELS.includes(current)) {
-                state.settings.aiModels.gemini = GEMINI_DEFAULT_MODEL;
+            } else if (current !== '__custom__') {
+                state.settings.aiModels.gemini = resolveGeminiModelId(current);
+            } else if (state.settings.aiModels.geminiCustom) {
+                state.settings.aiModels.geminiCustom = resolveGeminiModelId(state.settings.aiModels.geminiCustom);
             }
         }
 
-        function getGeminiModelCandidates() {
+        function getGeminiModelCandidates(forVision) {
             normalizeAiSettings();
-            const preferred = getEffectiveAiModel('gemini');
+            const preferred = resolveGeminiModelId(getEffectiveAiModel('gemini'));
+            const pool = forVision ? SCANNER_GEMINI_MODELS : GEMINI_FALLBACK_MODELS;
             const list = [preferred];
-            if (preferred !== GEMINI_DEFAULT_MODEL && !list.includes(GEMINI_DEFAULT_MODEL)) list.push(GEMINI_DEFAULT_MODEL);
-            GEMINI_FALLBACK_MODELS.forEach(m => { if (m !== preferred && !list.includes(m)) list.push(m); });
+            if (!list.includes(GEMINI_DEFAULT_MODEL)) list.push(GEMINI_DEFAULT_MODEL);
+            pool.forEach(m => { if (!list.includes(m)) list.push(m); });
             return list;
         }
 
-        async function callOpenAICompatible({ baseUrl, apiKey, model, prompt, systemInstruction, visionParts }) {
+        function partsToOpenAIVision(parts) {
+            const out = [];
+            (parts || []).forEach(p => {
+                if (p.text) out.push({ type: 'text', text: p.text });
+                const blob = p.inlineData || p.inline_data;
+                if (blob && blob.data) {
+                    const mime = blob.mimeType || blob.mime_type || 'application/octet-stream';
+                    out.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${blob.data}` } });
+                }
+            });
+            return out;
+        }
+
+        async function callOpenAICompatible({ baseUrl, apiKey, model, prompt, systemInstruction, visionParts, userContent }) {
             const messages = [];
             if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
-            if (visionParts && visionParts.length) {
+            if (userContent && userContent.length) {
+                messages.push({ role: 'user', content: userContent });
+            } else if (visionParts && visionParts.length) {
                 const content = [{ type: 'text', text: prompt || 'Analiza el documento adjunto.' }];
                 visionParts.forEach(vp => {
-                    if (vp.inline_data) {
+                    if (vp.type === 'image_url') content.push(vp);
+                    else if (vp.inline_data) {
                         content.push({ type: 'image_url', image_url: { url: `data:${vp.inline_data.mime_type};base64,${vp.inline_data.data}` } });
                     }
                 });
@@ -4082,28 +4119,38 @@
         }
 
         async function callNexusWithParts({ parts, systemInstruction, prompt }) {
-            const provider = getAiProvider();
-            const key = getAiApiKey(provider);
-            if (!key) throw new Error('API_KEY_MISSING');
-            const cat = AI_PROVIDER_CATALOG[provider];
-            if (cat.supportsVision && provider === 'gemini') {
-                return callGeminiWithParts({ parts, systemInstruction });
-            }
-            if (cat.supportsVision && (provider === 'openai')) {
-                const visionParts = parts.filter(p => p.inline_data);
-                const textPart = parts.find(p => p.text);
-                return callOpenAICompatible({
-                    baseUrl: 'https://api.openai.com/v1/chat/completions',
-                    apiKey: key,
-                    model: getEffectiveAiModel('openai'),
-                    prompt: (textPart && textPart.text) || prompt || 'Extrae los datos del documento.',
-                    systemInstruction,
-                    visionParts
-                });
-            }
             const geminiKey = getAiApiKey('gemini');
-            if (geminiKey) return callGeminiWithParts({ parts, systemInstruction });
-            throw new Error('SCANNER_VISION: Usa Gemini o OpenAI (gpt-4o) para leer PDF/imágenes.');
+            const openaiKey = getAiApiKey('openai');
+            if (!geminiKey && !openaiKey) throw new Error('API_KEY_MISSING');
+
+            if (geminiKey) {
+                try {
+                    return await callGeminiWithParts({ parts, systemInstruction });
+                } catch (geminiErr) {
+                    if (!openaiKey || (geminiErr.message && geminiErr.message.startsWith('API_KEY_ERROR'))) throw geminiErr;
+                    console.warn('[NEXUS] Escáner: fallback OpenAI tras Gemini', geminiErr.message);
+                }
+            }
+
+            const oaModel = resolveOpenAIVisionModel(getEffectiveAiModel('openai'));
+            const userContent = partsToOpenAIVision(parts);
+            if (!userContent.some(c => c.type === 'text')) {
+                userContent.unshift({ type: 'text', text: prompt || 'Extrae los datos del documento adjunto.' });
+            }
+            return callOpenAICompatible({
+                baseUrl: 'https://api.openai.com/v1/chat/completions',
+                apiKey: openaiKey,
+                model: oaModel,
+                prompt: prompt || 'Extrae los datos del documento adjunto.',
+                systemInstruction,
+                userContent
+            });
+        }
+
+        function resolveOpenAIVisionModel(modelId) {
+            const m = String(modelId || '').trim();
+            if (m === 'gpt-4o' || m === 'gpt-4o-mini' || m === 'gpt-4-turbo') return m;
+            return 'gpt-4o';
         }
 
         function assertFinancialAIQuery(userQuestion) {
@@ -4122,7 +4169,7 @@
             if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
 
             let lastError = null;
-            for (const model of getGeminiModelCandidates()) {
+            for (const model of getGeminiModelCandidates(false)) {
                 const url = `${GEMINI_API_BASE}${model}:generateContent?key=${encodeURIComponent(key)}`;
                 try {
                     const response = await fetch(url, {
@@ -4133,12 +4180,10 @@
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok) {
                         const errMsg = data?.error?.message || `HTTP ${response.status}`;
-                        if (response.status === 404 || /not found|not supported|does not exist/i.test(errMsg)) {
+                        if (/api key|permission|invalid.*key/i.test(errMsg)) throw new Error('API_KEY_ERROR: ' + errMsg);
+                        if (isRetryableGeminiModelError(response.status, errMsg)) {
                             lastError = new Error(errMsg);
                             continue;
-                        }
-                        if (response.status === 400 || response.status === 403) {
-                            if (/api key|permission|invalid/i.test(errMsg)) throw new Error('API_KEY_ERROR: ' + errMsg);
                         }
                         throw new Error(errMsg);
                     }
@@ -4295,25 +4340,52 @@
         async function callGeminiWithParts({ parts, systemInstruction }) {
             const key = getGeminiApiKey();
             if (!key) throw new Error('API_KEY_MISSING');
-            const payload = { contents: [{ parts }] };
+            const geminiParts = (parts || []).map(p => {
+                if (p.inlineData) return p;
+                if (p.inline_data) {
+                    return { inlineData: { mimeType: p.inline_data.mime_type || 'application/octet-stream', data: p.inline_data.data } };
+                }
+                return p;
+            });
+            const payload = { contents: [{ parts: geminiParts }] };
             if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
             let lastError = null;
-            for (const model of getGeminiModelCandidates()) {
+            for (const model of getGeminiModelCandidates(true)) {
                 const url = `${GEMINI_API_BASE}${model}:generateContent?key=${encodeURIComponent(key)}`;
                 try {
                     const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok) {
                         const errMsg = data?.error?.message || `HTTP ${response.status}`;
-                        if (response.status === 404 || /not found|not supported/i.test(errMsg)) { lastError = new Error(errMsg); continue; }
+                        if (/api key|permission|invalid.*key/i.test(errMsg)) throw new Error('API_KEY_ERROR: ' + errMsg);
+                        if (isRetryableGeminiModelError(response.status, errMsg)) {
+                            lastError = new Error(errMsg);
+                            continue;
+                        }
+                        throw new Error(errMsg);
+                    }
+                    if (data.error) {
+                        const errMsg = data.error.message || 'Error Gemini';
+                        if (isRetryableGeminiModelError(0, errMsg)) { lastError = new Error(errMsg); continue; }
                         throw new Error(errMsg);
                     }
                     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (!text) { lastError = new Error('Respuesta vacía'); continue; }
+                    if (!text) { lastError = new Error('Respuesta vacía del modelo'); continue; }
+                    if (state && state.settings && state.settings.aiModels) {
+                        const prev = state.settings.aiModels.gemini;
+                        if (prev !== model && (GEMINI_RETIRED_MODELS.includes(prev) || !SCANNER_GEMINI_MODELS.includes(prev))) {
+                            state.settings.aiModels.gemini = model;
+                            normalizeAiSettings();
+                            saveState();
+                        }
+                    }
                     return { text, modelUsed: model };
-                } catch (e) { lastError = e; }
+                } catch (e) {
+                    if (e.message && e.message.startsWith('API_KEY_ERROR')) throw e;
+                    lastError = e;
+                }
             }
-            throw lastError || new Error('Gemini no respondió');
+            throw lastError || new Error('Ningún modelo Gemini con visión respondió. Usa Gemini 2.0 Flash en Ajustes → Motor IA.');
         }
 
         function parseGeminiJsonBlock(text) {
@@ -14330,6 +14402,7 @@ Responde SOLO con un JSON válido (sin markdown) con esta estructura exacta:
 Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos visibles.`;
 
         function initScanner() {
+            if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
             lastScannerReport = null;
             const resCont = $id('scanner-results');
             if (resCont) resCont.classList.add('hidden');
@@ -14396,6 +14469,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         async function processScannerFile(event) {
             const file = event.target.files[0];
             if (!file) return;
+            if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
             if (!getAiApiKey('gemini') && !getAiApiKey('openai')) return alert('Configura API Key de Gemini u OpenAI en Ajustes → Motor IA (Guardar en Firebase) para leer extractos.');
 
             const btn = $id('btnTriggerScanner');
@@ -14416,7 +14490,11 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 renderScannerReportUI(normalizeScannerReport(raw));
             } catch (e) {
                 console.error('[NEXUS Scanner]', e);
-                alert('No se pudo leer el extracto: ' + (e.message || 'revisa API Key y formato del archivo'));
+                let msg = e.message || 'revisa API Key y formato del archivo';
+                if (e.message === 'API_KEY_MISSING') msg = 'Configura API Key de Gemini u OpenAI en Ajustes → Motor IA.';
+                else if (e.message && e.message.startsWith('API_KEY_ERROR')) msg = 'API Key inválida. Genera una nueva en Google AI Studio.';
+                else if (/not found|not supported|gemini-1\.5/i.test(msg)) msg = 'Modelo Gemini obsoleto. En Ajustes elige «Gemini 2.0 Flash» y guarda.';
+                alert('No se pudo leer el extracto: ' + msg);
             } finally {
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
