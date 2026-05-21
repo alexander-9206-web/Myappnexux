@@ -5523,24 +5523,6 @@
             }
         }
         
-        // APEX FIX: Puente Nativo para actualización de Widgets en iOS
-        function actualizarWidgetiOS(patrimonio, pagosPendientes, estadoAlerta) {
-            // Verificamos que estamos corriendo dentro del contenedor nativo de iOS
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.updateWidget) {
-                
-                // Disparamos el payload JSON hacia Swift
-                window.webkit.messageHandlers.updateWidget.postMessage({
-                    patrimonio: patrimonio,          // Ej: "$12,450.00"
-                    pagos_pendientes: pagosPendientes, // Ej: "3 facturas"
-                    alerta: estadoAlerta             // Ej: "ACTIVO", "ALERTA", "CRÍTICO"
-                });
-                
-                console.log("[APEX] Señal de actualización enviada al Widget de iOS.");
-            } else {
-                // Silenciado en web estándar para evitar spam en consola
-            }
-        }
-        
         function saveState() { 
             if(currentUser && sessionUnlocked && state) {
                 if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
@@ -6605,21 +6587,6 @@
                 scoreModalVal.className = `text-4xl font-black tabular-nums tracking-tighter transition-colors duration-500 ${dynamicScore >= 700 ? 'text-emerald-600' : (dynamicScore >= 500 ? 'text-amber-500' : 'text-red-600')}`;
                 scoreModalVal.parentElement.className = `w-32 h-32 mx-auto rounded-full border-8 flex items-center justify-center shadow-inner transition-colors duration-500 ${dynamicScore >= 700 ? 'border-emerald-400 bg-emerald-50' : (dynamicScore >= 500 ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50')}`;
             }
-
-            // APEX FIX: Auto-Cálculo y Sincronización con el Widget Nativo de iOS
-            let pendingWidgetCount = 0;
-            const nowWidgetStr = new Date().toISOString().split('T')[0];
-            // Sumar deudas activas, compras afterpay vigentes y tareas del día
-            (state.loans || []).forEach(l => { if ((l.paidQuotas || 0) < l.term) pendingWidgetCount++; });
-            state.tx.filter(t => t.type === 'afterpay').forEach(t => { if ((t.apPaid || 0) < (t.apQuotas || 4)) pendingWidgetCount++; });
-            pendingWidgetCount += (state.tasks || []).filter(t => !t.completed && t.date === nowWidgetStr).length;
-            
-            // Semántica de Alerta basada en el Score de Salud
-            let widgetAlerta = "ACTIVO";
-            if (dynamicScore < 500) widgetAlerta = "CRÍTICO";
-            else if (dynamicScore < 700) widgetAlerta = "ALERTA";
-            
-            actualizarWidgetiOS(fmt(uNW, bC), `${pendingWidgetCount} pendiente${pendingWidgetCount !== 1 ? 's' : ''}`, widgetAlerta);
 
             // APEX FIX: Restaurar estado visual del acordeón de Patrimonio Global
             if (state.ui && state.ui['global_wealth_view'] === false) {
