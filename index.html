@@ -818,27 +818,32 @@
                         <label class="text-[10px] font-black text-slate-400 ml-2 block mt-2">Día Pago Afterpay</label><select id="set-ap-day" class="form-input text-center mt-1" onchange="updateSettings()"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option></select>
                     </div>
 
-                    <!-- APEX FIX: MÓDULO DE INTELIGENCIA ARTIFICIAL -->
-                    <div class="pt-4 border-t border-slate-100 mt-2">
-                        <h4 class="text-[10px] font-black uppercase text-indigo-500 mb-3"><i class="fa-solid fa-microchip mr-1"></i> Motor IA (Google Gemini)</h4>
+                    <!-- Motor IA multi-proveedor (claves en Firebase vía core) -->
+                    <div class="pt-4 border-t border-slate-100 mt-2" id="ai-motor-settings-block">
+                        <h4 class="text-[10px] font-black uppercase text-indigo-500 mb-3"><i class="fa-solid fa-microchip mr-1"></i> Motor IA</h4>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
-                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">API Key Propia (Opcional)</label>
-                                <input type="password" id="set-gemini-key" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900" placeholder="AIzaSy..." onchange="updateSettings()">
+                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Proveedor</label>
+                                <select id="set-ai-provider" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="onAiProviderChange()">
+                                    <option value="gemini">Google Gemini (recomendado)</option>
+                                    <option value="openai">OpenAI — ChatGPT</option>
+                                    <option value="deepseek">DeepSeek</option>
+                                </select>
                             </div>
                             <div>
-                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Modelo Predictivo</label>
-                                <select id="set-gemini-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="syncGeminiModelUI(); updateSettings()">
-                                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recomendado)</option>
-                                    <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Rápido)</option>
-                                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                                    <option value="__custom__">Otro modelo (manual)</option>
-                                </select>
-                                <input type="text" id="set-gemini-model-custom" class="form-input text-xs mt-2 bg-white border-indigo-100 font-mono hidden" placeholder="ej: gemini-2.5-pro o gemini-2.0-flash-001" onchange="updateSettings()">
+                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Modelo</label>
+                                <select id="set-ai-model" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-bold" onchange="syncAiModelUI(); persistAiSettings(false)"></select>
+                                <input type="text" id="set-ai-model-custom" class="form-input text-xs mt-2 bg-white border-indigo-100 font-mono hidden" placeholder="ID de modelo manual" onchange="persistAiSettings(false)">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">API Key del proveedor activo</label>
+                                <input type="password" id="set-ai-key" class="form-input text-xs mt-1 bg-indigo-50/30 border-indigo-100 text-indigo-900 font-mono" placeholder="Pega tu clave y pulsa Guardar" autocomplete="off" oninput="onAiKeyInput()">
+                                <p id="ai-key-saved-hint" class="text-[8px] font-bold text-emerald-600 mt-1 ml-2 hidden"><i class="fa-solid fa-circle-check mr-1"></i> Clave guardada en Firebase</p>
                             </div>
                         </div>
-                        <p class="text-[8px] text-slate-500 mt-2 font-bold leading-tight ml-2">Soporta cualquier ID de modelo publicado en la API v1beta. El auditor solo responde temas financieros. Clave gratuita en <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-indigo-500 underline active:opacity-50">Google AI Studio</a>.</p>
+                        <p id="ai-provider-hint" class="text-[8px] text-slate-500 mt-2 font-bold leading-relaxed ml-2"></p>
+                        <button type="button" onclick="persistAiSettings(true)" class="mt-3 w-full bg-indigo-600 text-white py-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95"><i class="fa-solid fa-floppy-disk mr-1"></i> Guardar motor IA en Firebase</button>
+                        <p id="ai-save-status" class="text-[8px] font-bold text-center mt-2 text-slate-400"></p>
                     </div>
 
                     <div class="pt-4 border-t border-slate-100">
@@ -3664,62 +3669,309 @@
         const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash';
         const GEMINI_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
         const GEMINI_DEPRECATED_MODELS = ['gemini-2.5-flash-preview-09-2025', 'gemini-2.5-flash-preview-04-17', 'gemini-2.5-pro-preview-03-25'];
+        const AI_PROVIDER_CATALOG = {
+            gemini: {
+                label: 'Google Gemini',
+                hint: 'Recomendado en Nexus AR: gratis en AI Studio, multimodal (escáner PDF/imagen) y rápido.',
+                keyUrl: 'https://aistudio.google.com/app/apikey',
+                keyPlaceholder: 'AIzaSy...',
+                defaultModel: 'gemini-2.0-flash',
+                models: [
+                    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (recomendado)' },
+                    { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
+                    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+                    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+                    { id: '__custom__', label: 'Otro modelo Gemini (manual)' }
+                ],
+                supportsVision: true
+            },
+            openai: {
+                label: 'OpenAI (ChatGPT)',
+                hint: 'Muy bueno en análisis de texto; gpt-4o-mini es eficiente en costo. Escáner: usa gpt-4o.',
+                keyUrl: 'https://platform.openai.com/api-keys',
+                keyPlaceholder: 'sk-...',
+                defaultModel: 'gpt-4o-mini',
+                models: [
+                    { id: 'gpt-4o-mini', label: 'GPT-4o mini (eficiente)' },
+                    { id: 'gpt-4o', label: 'GPT-4o (preciso + visión)' },
+                    { id: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+                    { id: '__custom__', label: 'Otro modelo OpenAI' }
+                ],
+                supportsVision: true
+            },
+            deepseek: {
+                label: 'DeepSeek',
+                hint: 'Económico para auditoría de texto; el escáner de imágenes funciona mejor con Gemini u OpenAI.',
+                keyUrl: 'https://platform.deepseek.com/api_keys',
+                keyPlaceholder: 'sk-...',
+                defaultModel: 'deepseek-chat',
+                models: [
+                    { id: 'deepseek-chat', label: 'DeepSeek Chat (eficiente)' },
+                    { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+                    { id: '__custom__', label: 'Otro modelo DeepSeek' }
+                ],
+                supportsVision: false
+            }
+        };
         const NEXUS_AI_FINANCIAL_SYSTEM = 'Eres el auditor IA exclusivo de Nexus AR Finance. SOLO respondes sobre finanzas personales o empresariales: gastos, ingresos, deudas, préstamos, presupuestos, ahorro, liquidez, patrimonio, impuestos, flujo de caja, metas y proyectos con impacto económico. Si la pregunta no es financiera, recházala en una línea indicando que solo atiendes temas de dinero y finanzas. No des consejos médicos, legales no tributarios, políticos, románticos ni de programación general. Usa markdown básico (**negritas**, listas).';
         const NEXUS_AI_OFF_TOPIC_RE = /\b(receta|poema|chiste|amor|política|religión|deporte sin dinero|programar html|hack|crack|película|música|horóscopo|salud sin costo|psicolog)\b/i;
         let lastNexusScoreBreakdown = null;
 
-        function getGeminiApiKey() {
-            const fromSettings = (state && state.settings && state.settings.geminiApiKey) ? state.settings.geminiApiKey.trim() : '';
-            if (fromSettings) return fromSettings;
-            if (typeof window.__GEMINI_API_KEY__ === 'string' && window.__GEMINI_API_KEY__.trim()) return window.__GEMINI_API_KEY__.trim();
-            return (apiKey || '').trim();
-        }
-
-        function getEffectiveGeminiModel() {
-            if (!state.settings) state.settings = {};
-            const sel = ($id('set-gemini-model') && $id('set-gemini-model').value) || state.settings.geminiModel || '';
-            if (sel === '__custom__') {
-                const custom = (($id('set-gemini-model-custom') && $id('set-gemini-model-custom').value) || state.settings.geminiModelCustom || '').trim();
-                return custom || GEMINI_DEFAULT_MODEL;
+        function normalizeAiSettings() {
+            if (!state || !state.settings) return;
+            const s = state.settings;
+            if (!s.aiApiKeys || typeof s.aiApiKeys !== 'object') s.aiApiKeys = { gemini: '', openai: '', deepseek: '' };
+            if (!s.aiModels || typeof s.aiModels !== 'object') {
+                s.aiModels = { gemini: GEMINI_DEFAULT_MODEL, openai: 'gpt-4o-mini', deepseek: 'deepseek-chat', geminiCustom: '', openaiCustom: '', deepseekCustom: '' };
             }
-            return (sel || state.settings.geminiModel || GEMINI_DEFAULT_MODEL).trim();
+            if (!s.aiProvider || !AI_PROVIDER_CATALOG[s.aiProvider]) s.aiProvider = 'gemini';
+            if (s.geminiApiKey && !s.aiApiKeys.gemini) s.aiApiKeys.gemini = String(s.geminiApiKey).trim();
+            if (s.geminiModel) {
+                if (s.geminiModel === '__custom__' && s.geminiModelCustom) {
+                    s.aiModels.gemini = '__custom__';
+                    s.aiModels.geminiCustom = s.geminiModelCustom;
+                } else if (s.geminiModel !== '__custom__') {
+                    s.aiModels.gemini = s.geminiModel;
+                }
+            }
+            if (GEMINI_DEPRECATED_MODELS.includes(s.aiModels.gemini)) s.aiModels.gemini = GEMINI_DEFAULT_MODEL;
+            s.geminiApiKey = (s.aiApiKeys.gemini || '').trim();
+            s.geminiModel = s.aiModels.gemini || GEMINI_DEFAULT_MODEL;
         }
 
-        function syncGeminiModelUI() {
-            const sel = $id('set-gemini-model');
-            const customEl = $id('set-gemini-model-custom');
+        function getAiProvider() {
+            normalizeAiSettings();
+            const p = (state.settings && state.settings.aiProvider) || 'gemini';
+            return AI_PROVIDER_CATALOG[p] ? p : 'gemini';
+        }
+
+        function getAiApiKey(forProvider) {
+            normalizeAiSettings();
+            const p = forProvider || getAiProvider();
+            const fromVault = (state.settings.aiApiKeys[p] || '').trim();
+            if (fromVault) return fromVault;
+            if (p === 'gemini') {
+                if (typeof window.__GEMINI_API_KEY__ === 'string' && window.__GEMINI_API_KEY__.trim()) return window.__GEMINI_API_KEY__.trim();
+                return (apiKey || '').trim();
+            }
+            return '';
+        }
+
+        function getGeminiApiKey() { return getAiApiKey('gemini'); }
+
+        function getEffectiveAiModel(provider) {
+            normalizeAiSettings();
+            const p = provider || getAiProvider();
+            const cat = AI_PROVIDER_CATALOG[p];
+            const sel = ($id('set-ai-model') && $id('set-ai-model').value) || state.settings.aiModels[p] || cat.defaultModel;
+            if (sel === '__custom__') {
+                const customKey = p + 'Custom';
+                const custom = (($id('set-ai-model-custom') && $id('set-ai-model-custom').value) || state.settings.aiModels[customKey] || '').trim();
+                return custom || cat.defaultModel;
+            }
+            return (sel || cat.defaultModel).trim();
+        }
+
+        function getEffectiveGeminiModel() { return getEffectiveAiModel('gemini'); }
+
+        function syncAiModelUI() {
+            const sel = $id('set-ai-model');
+            const customEl = $id('set-ai-model-custom');
             if (!sel || !customEl) return;
             const isCustom = sel.value === '__custom__';
             customEl.classList.toggle('hidden', !isCustom);
-            if (isCustom && state.settings && state.settings.geminiModelCustom) {
-                customEl.value = state.settings.geminiModelCustom;
+            if (isCustom && state.settings) {
+                const p = getAiProvider();
+                const customKey = p + 'Custom';
+                if (state.settings.aiModels[customKey]) customEl.value = state.settings.aiModels[customKey];
             }
         }
 
-        function normalizeGeminiModel() {
-            if (!state.settings) state.settings = {};
-            const sel = ($id('set-gemini-model') && $id('set-gemini-model').value) || '';
-            if (sel === '__custom__') {
-                const custom = getEffectiveGeminiModel();
-                if (custom) state.settings.geminiModelCustom = custom;
-                state.settings.geminiModel = '__custom__';
-                return;
+        function populateAiModelSelect(provider) {
+            const sel = $id('set-ai-model');
+            if (!sel) return;
+            const cat = AI_PROVIDER_CATALOG[provider];
+            sel.innerHTML = cat.models.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+            const saved = state.settings.aiModels[provider] || cat.defaultModel;
+            if (saved === '__custom__' || !cat.models.some(m => m.id === saved)) {
+                sel.value = '__custom__';
+                const customEl = $id('set-ai-model-custom');
+                if (customEl) customEl.value = state.settings.aiModels[provider + 'Custom'] || '';
+            } else {
+                sel.value = saved;
             }
-            const current = (state.settings.geminiModel || '').trim();
-            if (!current || current === '__custom__') {
-                state.settings.geminiModel = GEMINI_DEFAULT_MODEL;
+            syncAiModelUI();
+        }
+
+        function updateAiProviderHint() {
+            const hint = $id('ai-provider-hint');
+            if (!hint) return;
+            const p = getAiProvider();
+            const cat = AI_PROVIDER_CATALOG[p];
+            hint.innerHTML = cat.hint + ' Clave en <a href="' + cat.keyUrl + '" target="_blank" rel="noopener" class="text-indigo-500 underline">' + cat.label + '</a>. El auditor solo responde temas financieros.';
+        }
+
+        function renderAiSettingsUI() {
+            normalizeAiSettings();
+            const provEl = $id('set-ai-provider');
+            if (provEl) provEl.value = state.settings.aiProvider || 'gemini';
+            populateAiModelSelect(getAiProvider());
+            const keyEl = $id('set-ai-key');
+            const savedHint = $id('ai-key-saved-hint');
+            const p = getAiProvider();
+            const stored = getAiApiKey(p);
+            if (keyEl) {
+                keyEl.value = '';
+                if (stored) {
+                    keyEl.placeholder = 'Clave guardada ····' + stored.slice(-4) + ' (escribe solo para cambiar)';
+                    keyEl.dataset.nexusHasKey = '1';
+                    if (savedHint) savedHint.classList.remove('hidden');
+                } else {
+                    keyEl.placeholder = AI_PROVIDER_CATALOG[p].keyPlaceholder;
+                    delete keyEl.dataset.nexusHasKey;
+                    if (savedHint) savedHint.classList.add('hidden');
+                }
+            }
+            updateAiProviderHint();
+        }
+
+        function onAiProviderChange() {
+            const provEl = $id('set-ai-provider');
+            if (provEl) state.settings.aiProvider = provEl.value;
+            renderAiSettingsUI();
+            persistAiSettings(false);
+        }
+
+        function onAiKeyInput() {
+            const st = $id('ai-save-status');
+            if (st) st.textContent = 'Pulsa «Guardar motor IA» para sincronizar con Firebase';
+        }
+
+        function persistAiSettings(showFeedback) {
+            if (!state.settings) state.settings = {};
+            normalizeAiSettings();
+            const provEl = $id('set-ai-provider');
+            if (provEl) state.settings.aiProvider = provEl.value;
+            const provider = getAiProvider();
+            const keyEl = $id('set-ai-key');
+            const newKey = keyEl ? keyEl.value.trim() : '';
+            if (newKey) {
+                state.settings.aiApiKeys[provider] = newKey;
+                keyEl.value = '';
+                keyEl.dataset.nexusHasKey = '1';
+            }
+            const modelSel = $id('set-ai-model');
+            const customEl = $id('set-ai-model-custom');
+            if (modelSel) {
+                if (modelSel.value === '__custom__' && customEl) {
+                    state.settings.aiModels[provider] = '__custom__';
+                    state.settings.aiModels[provider + 'Custom'] = customEl.value.trim();
+                } else {
+                    state.settings.aiModels[provider] = modelSel.value;
+                }
+            }
+            normalizeAiSettings();
+            saveState();
+            renderAiSettingsUI();
+            if (typeof updateAIAuditorKeyStatus === 'function') updateAIAuditorKeyStatus();
+            const st = $id('ai-save-status');
+            if (st && showFeedback) {
+                st.textContent = 'Guardado en Firebase y bóveda local ✓';
+                st.className = 'text-[8px] font-bold text-center mt-2 text-emerald-600';
+            }
+        }
+
+        function syncGeminiModelUI() { syncAiModelUI(); }
+
+        function normalizeGeminiModel() {
+            normalizeAiSettings();
+            const p = getAiProvider();
+            if (p !== 'gemini') return;
+            const current = (state.settings.aiModels.gemini || '').trim();
+            if (!current || current === '__custom__' && !state.settings.aiModels.geminiCustom) {
+                state.settings.aiModels.gemini = GEMINI_DEFAULT_MODEL;
             } else if (GEMINI_DEPRECATED_MODELS.includes(current)) {
-                state.settings.geminiModel = GEMINI_DEFAULT_MODEL;
+                state.settings.aiModels.gemini = GEMINI_DEFAULT_MODEL;
             }
         }
 
         function getGeminiModelCandidates() {
-            normalizeGeminiModel();
-            const preferred = getEffectiveGeminiModel();
+            normalizeAiSettings();
+            const preferred = getEffectiveAiModel('gemini');
             const list = [preferred];
             if (preferred !== GEMINI_DEFAULT_MODEL && !list.includes(GEMINI_DEFAULT_MODEL)) list.push(GEMINI_DEFAULT_MODEL);
             GEMINI_FALLBACK_MODELS.forEach(m => { if (m !== preferred && !list.includes(m)) list.push(m); });
             return list;
+        }
+
+        async function callOpenAICompatible({ baseUrl, apiKey, model, prompt, systemInstruction, visionParts }) {
+            const messages = [];
+            if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
+            if (visionParts && visionParts.length) {
+                const content = [{ type: 'text', text: prompt || 'Analiza el documento adjunto.' }];
+                visionParts.forEach(vp => {
+                    if (vp.inline_data) {
+                        content.push({ type: 'image_url', image_url: { url: `data:${vp.inline_data.mime_type};base64,${vp.inline_data.data}` } });
+                    }
+                });
+                messages.push({ role: 'user', content });
+            } else {
+                messages.push({ role: 'user', content: prompt });
+            }
+            const response = await fetch(baseUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+                body: JSON.stringify({ model, messages, temperature: 0.2 })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const errMsg = data?.error?.message || `HTTP ${response.status}`;
+                if (/api key|invalid|unauthorized|authentication/i.test(errMsg)) throw new Error('API_KEY_ERROR: ' + errMsg);
+                throw new Error(errMsg);
+            }
+            const text = data.choices?.[0]?.message?.content;
+            if (!text) throw new Error('Respuesta vacía del modelo');
+            return { text, modelUsed: model };
+        }
+
+        async function callNexusAI({ prompt, systemInstruction }) {
+            const provider = getAiProvider();
+            const key = getAiApiKey(provider);
+            if (!key) throw new Error('API_KEY_MISSING');
+            if (provider === 'gemini') return callGeminiGenerate({ prompt, systemInstruction });
+            const model = getEffectiveAiModel(provider);
+            if (provider === 'openai') {
+                return callOpenAICompatible({ baseUrl: 'https://api.openai.com/v1/chat/completions', apiKey: key, model, prompt, systemInstruction });
+            }
+            if (provider === 'deepseek') {
+                return callOpenAICompatible({ baseUrl: 'https://api.deepseek.com/chat/completions', apiKey: key, model, prompt, systemInstruction });
+            }
+            throw new Error('Proveedor IA no soportado');
+        }
+
+        async function callNexusWithParts({ parts, systemInstruction, prompt }) {
+            const provider = getAiProvider();
+            const key = getAiApiKey(provider);
+            if (!key) throw new Error('API_KEY_MISSING');
+            const cat = AI_PROVIDER_CATALOG[provider];
+            if (cat.supportsVision && provider === 'gemini') {
+                return callGeminiWithParts({ parts, systemInstruction });
+            }
+            if (cat.supportsVision && (provider === 'openai')) {
+                const visionParts = parts.filter(p => p.inline_data);
+                const textPart = parts.find(p => p.text);
+                return callOpenAICompatible({
+                    baseUrl: 'https://api.openai.com/v1/chat/completions',
+                    apiKey: key,
+                    model: getEffectiveAiModel('openai'),
+                    prompt: (textPart && textPart.text) || prompt || 'Extrae los datos del documento.',
+                    systemInstruction,
+                    visionParts
+                });
+            }
+            const geminiKey = getAiApiKey('gemini');
+            if (geminiKey) return callGeminiWithParts({ parts, systemInstruction });
+            throw new Error('SCANNER_VISION: Usa Gemini o OpenAI (gpt-4o) para leer PDF/imágenes.');
         }
 
         function assertFinancialAIQuery(userQuestion) {
@@ -3973,17 +4225,18 @@
         function updateAIAuditorKeyStatus() {
             const box = $id('ai-key-status');
             if (!box) return;
-            const key = getGeminiApiKey();
-            normalizeGeminiModel();
+            const key = getAiApiKey();
             if (key) {
                 box.classList.add('hidden');
                 box.innerHTML = '';
                 return;
             }
+            const p = getAiProvider();
+            const cat = AI_PROVIDER_CATALOG[p];
             box.classList.remove('hidden');
             box.innerHTML = `<div class="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                <p class="text-[9px] font-black text-amber-800 uppercase tracking-widest"><i class="fa-solid fa-key mr-1"></i> API Key requerida</p>
-                <p class="text-[8px] text-amber-700 font-bold mt-1 leading-relaxed">Ve a <b>Configuración → Motor IA</b>, pega tu clave gratuita de <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" class="underline">Google AI Studio</a> y guarda.</p>
+                <p class="text-[9px] font-black text-amber-800 uppercase tracking-widest"><i class="fa-solid fa-key mr-1"></i> API Key requerida (${cat.label})</p>
+                <p class="text-[8px] text-amber-700 font-bold mt-1 leading-relaxed">Ve a <b>Configuración → Motor IA</b>, elige proveedor, pega tu clave y pulsa <b>Guardar motor IA en Firebase</b>.</p>
                 <button type="button" onclick="closeAIAuditor(); switchTab('settings');" class="mt-2 w-full bg-amber-500 text-white py-2 rounded-lg text-[9px] font-black uppercase active:scale-95">Ir a Configuración</button>
             </div>`;
         }
@@ -4891,6 +5144,7 @@
                                     const currentTx = state.tx || [];
                                     state = { ...state, ...data };
                                     state.tx = currentTx;
+                                    if (typeof normalizeAiSettings === 'function') normalizeAiSettings();
                                 } else if (change.doc.id.startsWith('tx_')) {
                                     // Capturamos las transacciones agrupadas por año
                                     const year = change.doc.id.split('_')[1];
@@ -5843,7 +6097,7 @@
                 state.catParents.global = state.catParents.global.filter(p => !PURGE_PARENTS.includes(p));
             }
             sanitizeUserCategoriesInState();
-            if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
+            if (typeof normalizeAiSettings === 'function') normalizeAiSettings();
 
             if (!state.taskVaults) state.taskVaults = [];
             if (!state.projectVaults) state.projectVaults = [];
@@ -9434,18 +9688,19 @@
                 throw e;
             }
 
-            if (!getGeminiApiKey()) {
+            if (!getAiApiKey()) {
                 if (typeof updateAIAuditorKeyStatus === 'function') updateAIAuditorKeyStatus();
-                return alert("Configura tu API Key en Configuración → Motor IA (Google AI Studio).");
+                return alert("Configura tu API Key en Configuración → Motor IA y pulsa «Guardar motor IA en Firebase».");
             }
 
+            const aiProvLabel = AI_PROVIDER_CATALOG[getAiProvider()].label;
             const btn = $id('btn-ask-ai');
             const origBtnText = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Generando Insights...';
             btn.disabled = true;
             
             $id('ai-response-container').classList.remove('hidden');
-            $id('ai-response-text').innerHTML = '<p class="text-[10px] text-indigo-500 font-bold uppercase tracking-widest animate-pulse text-center py-4"><i class="fa-solid fa-satellite-dish mr-2"></i>Conectando con Google Gemini...</p>';
+            $id('ai-response-text').innerHTML = '<p class="text-[10px] text-indigo-500 font-bold uppercase tracking-widest animate-pulse text-center py-4"><i class="fa-solid fa-satellite-dish mr-2"></i>Conectando con ' + aiProvLabel + '...</p>';
 
             const dataToAnalyze = currentFilteredTx.slice(0, 400).map(t => ({
                 fecha: (t.date || '').split('T')[0],
@@ -9464,7 +9719,7 @@ DATOS CONTABLES (${dataToAnalyze.length} registros):
 ${JSON.stringify(dataToAnalyze)}`;
 
             try {
-                const { text, modelUsed } = await callGeminiGenerate({
+                const { text, modelUsed } = await callNexusAI({
                     prompt,
                     systemInstruction: NEXUS_AI_FINANCIAL_SYSTEM
                 });
@@ -9479,16 +9734,17 @@ ${JSON.stringify(dataToAnalyze)}`;
             } catch (error) {
                 console.error("[APEX IA Error]", error);
                 
-                let errorMsg = "Error al consultar Gemini.";
+                const provLabel = AI_PROVIDER_CATALOG[getAiProvider()].label;
+                let errorMsg = "Error al consultar " + provLabel + ".";
                 let subMsg = "Revisa tu conexión e intenta de nuevo.";
                 
                 if (error.message === 'API_KEY_MISSING') {
                     errorMsg = "API KEY NO CONFIGURADA";
-                    subMsg = "Ve a Configuración → Motor IA y pega tu clave de Google AI Studio (gratuita).";
+                    subMsg = "Ve a Configuración → Motor IA, pega la clave del proveedor activo y pulsa «Guardar motor IA en Firebase».";
                     if (typeof updateAIAuditorKeyStatus === 'function') updateAIAuditorKeyStatus();
                 } else if (error.message && error.message.startsWith('API_KEY_ERROR')) {
                     errorMsg = "API KEY INVÁLIDA";
-                    subMsg = "Verifica la clave en Google AI Studio. Debe empezar por AIza...";
+                    subMsg = "Verifica la clave del proveedor " + provLabel + " en su panel oficial.";
                 } else if (error.message && error.message.startsWith('NETWORK_ERROR')) {
                     errorMsg = "SIN CONEXIÓN";
                     subMsg = error.message.replace('NETWORK_ERROR: ', '');
@@ -12044,22 +12300,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
             const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
             
-            // APEX FIX: Inicializar módulos de IA y Seguridad
-            const gkEl = $id('set-gemini-key'); if(gkEl) gkEl.value = state.settings.geminiApiKey || '';
-            normalizeGeminiModel();
-            const gmEl = $id('set-gemini-model');
-            const gmcEl = $id('set-gemini-model-custom');
-            normalizeGeminiModel();
-            if (gmEl) {
-                const m = state.settings.geminiModel || GEMINI_DEFAULT_MODEL;
-                if (m === '__custom__' || (state.settings.geminiModelCustom && !['gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-flash','gemini-1.5-pro'].includes(m))) {
-                    gmEl.value = '__custom__';
-                    if (gmcEl) gmcEl.value = state.settings.geminiModelCustom || '';
-                } else {
-                    gmEl.value = m;
-                }
-            }
-            if (typeof syncGeminiModelUI === 'function') syncGeminiModelUI();
+            if (typeof renderAiSettingsUI === 'function') renderAiSettingsUI();
 
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
             const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
@@ -12549,20 +12790,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hdEl = $id('set-hide-decimals'); if(hdEl) state.settings.hideDecimals = hdEl.checked;
             const wvEl = $id('set-wealth-view'); if(wvEl) state.settings.wealthView = wvEl.value;
             
-            // APEX FIX: Guardado de preferencias de Inteligencia Artificial
-            const gkEl = $id('set-gemini-key'); if(gkEl) state.settings.geminiApiKey = gkEl.value.trim();
-            const gmEl = $id('set-gemini-model');
-            const gmcEl = $id('set-gemini-model-custom');
-            if (gmEl) {
-                if (gmEl.value === '__custom__' && gmcEl) {
-                    state.settings.geminiModel = '__custom__';
-                    state.settings.geminiModelCustom = gmcEl.value.trim();
-                } else {
-                    state.settings.geminiModel = gmEl.value;
-                }
-            }
-            normalizeGeminiModel();
-            if (typeof syncGeminiModelUI === 'function') syncGeminiModelUI();
+            /* Claves IA: solo vía persistAiSettings() — evita borrar password vacío al cambiar otros ajustes */
 
             const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked;
             const btEl = $id('set-backup-time'); if(btEl) state.settings.backupTime = btEl.value || '23:00';
@@ -12929,7 +13157,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                     hideDecimals: prevSettings.hideDecimals,
                     wealthView: prevSettings.wealthView,
                     geminiApiKey: prevSettings.geminiApiKey,
-                    geminiModel: prevSettings.geminiModel
+                    geminiModel: prevSettings.geminiModel,
+                    aiProvider: prevSettings.aiProvider || 'gemini',
+                    aiApiKeys: prevSettings.aiApiKeys ? { ...prevSettings.aiApiKeys } : { gemini: prevSettings.geminiApiKey || '', openai: '', deepseek: '' },
+                    aiModels: prevSettings.aiModels ? { ...prevSettings.aiModels } : { gemini: prevSettings.geminiModel || GEMINI_DEFAULT_MODEL, openai: 'gpt-4o-mini', deepseek: 'deepseek-chat' }
                 },
                 context: 'day', activeTab: 'home',
                 periodFilter: { type: 'all', cat: 'all' },
@@ -13874,7 +14105,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         async function processScannerFile(event) {
             const file = event.target.files[0];
             if (!file) return;
-            if (!getGeminiApiKey()) return alert('Configura tu API Key en Ajustes → Motor IA para leer extractos.');
+            if (!getAiApiKey('gemini') && !getAiApiKey('openai')) return alert('Configura API Key de Gemini u OpenAI en Ajustes → Motor IA (Guardar en Firebase) para leer extractos.');
 
             const btn = $id('btnTriggerScanner');
             if (!btn) return;
@@ -13885,9 +14116,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             try {
                 const inline = await fileToGeminiInlinePart(file);
                 const prompt = 'Extrae el extracto adjunto. Devuelve únicamente el JSON con meta y transactions según el esquema.';
-                const { text } = await callGeminiWithParts({
+                const { text } = await callNexusWithParts({
                     parts: [inline, { text: prompt }],
-                    systemInstruction: NEXUS_SCANNER_SYSTEM
+                    systemInstruction: NEXUS_SCANNER_SYSTEM,
+                    prompt
                 });
                 const raw = parseGeminiJsonBlock(text);
                 renderScannerReportUI(normalizeScannerReport(raw));
