@@ -4211,12 +4211,19 @@
             } catch (e) {
                 console.error('[NEXUS] routeAfterFirebaseAuth', e);
                 _loginRoutePhase = 'error';
-                alert('Error al continuar: ' + (e.message || 'revisa la conexión'));
+                const msg = e.message || 'revisa la conexión';
+                if (!/sesión no autenticada/i.test(msg)) {
+                    alert('Error al continuar: ' + msg);
+                } else {
+                    alert('No se pudo abrir la bóveda tras Google. Cierra la app, ábrela de nuevo y pulsa Continuar con Google una vez más.');
+                }
             } finally {
                 if (_loginRoutePhase === 'error') {
                     hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
+                } else if (_loginRoutePhase === 'app') {
+                    hideLoginRoutingLoading();
                 }
             }
         }
@@ -4318,7 +4325,7 @@
             userProfile = profile;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, userEmail)));
             beginLoginRoutingUI('Abriendo tu bóveda…');
-            await processLoginSuccess(userEmail, { googleLinked: true });
+            await processLoginSuccess(userEmail, { googleLinked: true, fastEntry: true });
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -8037,7 +8044,11 @@
                 window.__nexusUserTriggeredGoogleLogin = false;
                 if (_loginRoutePhase === 'error') {
                     resetGoogleLoginButton();
+                    hideLoginRoutingLoading();
                     showInitialLoginChoice();
+                } else if (_loginRoutePhase === 'app') {
+                    hideLoginRoutingLoading();
+                    resetGoogleLoginButton();
                 } else {
                     resetGoogleLoginButton();
                 }
@@ -8154,7 +8165,7 @@
         }
 
         async function bootApp() {
-            if (!sessionUnlocked || !currentUser) throw new Error('Sesión no autenticada');
+            if (!currentUser) throw new Error('Sesión no autenticada');
             let localP = loadLocalProfile(currentUser);
             if (!localP && typeof getProfileForVault === 'function') {
                 try {
