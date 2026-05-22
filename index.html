@@ -3969,7 +3969,7 @@
 
                 await sessionPromise;
                 currentUser = email;
-                sessionUnlocked = true;
+                sessionUnlocked = false;
 
                 const routeKind = await runLoginRoutingWithProgress('Validando acceso con Google…', async () => {
                     const initialized = await isSystemInitialized();
@@ -6800,8 +6800,10 @@
                     
                     // APEX FIX: Registrar el peso en memoria del usuario en su perfil público para telemetría global
                     const coreState = { ...state };
-                    delete coreState.tx; 
-                    const cleanCore = JSON.parse(JSON.stringify(coreState));
+                    delete coreState.tx;
+                    const cleanCore = typeof nexusSanitizeCoreForUpload === 'function'
+                        ? nexusSanitizeCoreForUpload(coreState)
+                        : JSON.parse(JSON.stringify(coreState));
 
                     const txByYear = {};
                     (state.tx || []).forEach(t => {
@@ -7065,8 +7067,8 @@
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
                 } else if (document.visibilityState === "hidden") {
-                    // APEX FIX: Registrar el milisegundo exacto al bloquear el teléfono o cambiar de app
                     localStorage.setItem('nexus_last_active', Date.now());
+                    if (nexusIsRequirePinEnabled() && sessionUnlocked) nexusLockSession();
                 }
             });
 
@@ -7424,7 +7426,7 @@
             const options = opts || {};
             const vaultEmail = String(email).trim().toLowerCase();
             currentUser = vaultEmail;
-            sessionUnlocked = true;
+            sessionUnlocked = false;
             let shellReleased = false;
             const fastEntry = !!options.fastEntry;
 
@@ -7748,21 +7750,84 @@
             await handleNativeGoogleAuthPayload({ idToken, email, name, photoUrl });
         };
 
+        function nexusIsRequirePinEnabled() {
+            return !!(state && state.settings && state.settings.requirePin === true);
+        }
+
+        function nexusNormalizePinSettings() {
+            if (!state) return;
+            if (!state.settings) state.settings = {};
+            if (state.settings.requirePin !== true) state.settings.requirePin = false;
+            if (state.settings.autoBackup !== true) state.settings.autoBackup = false;
+        }
+
+        function nexusShowSessionLock() {
+            const lock = $id('session-lock-screen');
+            if (!lock) return;
+            const ln = $id('lock-name');
+            if (ln) ln.innerText = (userProfile && userProfile.name) ? userProfile.name : (currentUser || '');
+            lock.classList.remove('hidden', 'pointer-events-none');
+            requestAnimationFrame(() => lock.classList.remove('opacity-0'));
+            const pinIn = $id('session-pin-input');
+            if (pinIn) pinIn.value = '';
+        }
+
+        function nexusHideSessionLock() {
+            const lock = $id('session-lock-screen');
+            if (!lock) return;
+            lock.classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                lock.classList.add('hidden');
+                lock.classList.remove('opacity-0', 'pointer-events-none');
+            }, 300);
+        }
+
+        function nexusLockSession() {
+            if (!currentUser || !nexusIsRequirePinEnabled()) return;
+            sessionUnlocked = false;
+            nexusShowSessionLock();
+            if (userProfile && userProfile.useBiometrics) {
+                setTimeout(() => {
+                    triggerBiometricAuth(() => { unlockSession(true); }, 'Verifica tu identidad para volver a la bóveda.');
+                }, 250);
+            }
+        }
+
+        function nexusApplyRequirePinAfterBoot() {
+            nexusNormalizePinSettings();
+            const bypass = sessionStorage.getItem('nexus_admin_bypass');
+            if (bypass) sessionStorage.removeItem('nexus_admin_bypass');
+            if (!nexusIsRequirePinEnabled() || bypass) {
+                sessionUnlocked = true;
+                nexusHideSessionLock();
+                return;
+            }
+            if (!userProfile || !profileHasPin(userProfile)) {
+                state.settings.requirePin = false;
+                const chk = $id('set-require-pin');
+                if (chk) chk.checked = false;
+                sessionUnlocked = true;
+                nexusHideSessionLock();
+                return;
+            }
+            sessionUnlocked = false;
+            nexusShowSessionLock();
+            if (userProfile.useBiometrics) {
+                setTimeout(() => {
+                    triggerBiometricAuth(() => { unlockSession(true); }, 'Verifica tu identidad para volver a la bóveda.');
+                }, 350);
+            }
+        }
+
         async function unlockSession(bypassPin = false) {
             const input = ($id('session-pin-input')?.value || '').trim();
             const ok = bypassPin || await verifyUserPin(input, userProfile);
             if (ok) {
                 sessionUnlocked = true;
-                const lockScreen = $id('session-lock-screen');
-                if (lockScreen) {
-                    lockScreen.classList.add('opacity-0', 'pointer-events-none');
-                    setTimeout(() => {
-                        lockScreen.classList.add('hidden');
-                        lockScreen.classList.remove('opacity-0', 'pointer-events-none');
-                        if ($id('session-pin-input')) $id('session-pin-input').value = '';
-                        if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
-                    }, 300);
-                } else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                nexusHideSessionLock();
+                if ($id('session-pin-input')) $id('session-pin-input').value = '';
+                nexusResetInactivityTimer();
+                if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
             } else {
                 alert('PIN incorrecto.');
                 if ($id('session-pin-input')) $id('session-pin-input').value = '';
@@ -7772,21 +7837,8 @@
         function nexusResetInactivityTimer() {
             localStorage.setItem('nexus_last_active', Date.now());
             clearTimeout(inactivityTimer);
-            if (sessionUnlocked && state && state.settings && state.settings.requirePin) {
-                inactivityTimer = setTimeout(() => {
-                    sessionUnlocked = false;
-                    const lock = $id('session-lock-screen');
-                    if (lock) {
-                        lock.classList.add('opacity-0');
-                        lock.classList.remove('hidden');
-                        requestAnimationFrame(() => lock.classList.remove('opacity-0'));
-                        const ln = $id('lock-name');
-                        if (userProfile && ln) ln.innerText = userProfile.name;
-                        if (userProfile && userProfile.useBiometrics) {
-                            triggerBiometricAuth(() => { unlockSession(true); }, 'Verifica tu identidad para volver a la bóveda.');
-                        }
-                    }
-                }, 300000);
+            if (sessionUnlocked && nexusIsRequirePinEnabled()) {
+                inactivityTimer = setTimeout(() => nexusLockSession(), 300000);
             }
         }
 
@@ -7843,15 +7895,7 @@
                 }
             }
 
-            // APEX FIX: Bypass Administrativo P2P
-            const bypass = sessionStorage.getItem('nexus_admin_bypass');
-            const reqPin = savedState && savedState.settings ? savedState.settings.requirePin : false;
-            if(!sessionUnlocked && reqPin && !bypass) {
-                const lock = $id('session-lock-screen');
-                if(lock) { lock.classList.add('opacity-0'); lock.classList.remove('hidden'); requestAnimationFrame(() => lock.classList.remove('opacity-0')); const ln = $id('lock-name'); if(ln) ln.innerText = (userProfile && userProfile.name) ? userProfile.name : currentUser; } return;
-            }
-            if(bypass) sessionStorage.removeItem('nexus_admin_bypass');
-            sessionUnlocked = true; 
+            sessionUnlocked = false;
 
             // DEFAULT DATA INJECTION 
             const demoAccounts = [];
@@ -7859,9 +7903,10 @@
             const demoTx = [];
 
             // APEX FIX: activeCurrency predeterminado a GLOBAL
-            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
+            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false, autoBackup: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
             state = savedState || defaultDemoData;
+            nexusNormalizePinSettings();
             nexusEnsureSyncMeta();
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
@@ -7898,15 +7943,17 @@
                 sessionStorage.setItem('nexus_session_active', 'true');
             }
 
-            setupInactivityLock(); 
+            setupInactivityLock();
             setupAutoBackup();
             const currSelects = $qAll('#global-currency, #set-base-currency, #fa-currency');
             currSelects.forEach(s => { const currentVal = s.value || state.activeCurrency; s.innerHTML = ''; if (s.id === 'global-currency') s.innerHTML += `<option value="GLOBAL">🌐</option>`; CURRENCIES.forEach(c => s.innerHTML += `<option value="${c}">${c}</option>`); s.value = currentVal; });
             if (typeof updateNexusHeaderIdentity === 'function') updateNexusHeaderIdentity();
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
-            const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin;
+            const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin === true;
+            nexusApplyRequirePinAfterBoot();
             initNexus();
+            if (!sessionUnlocked) return;
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
             if (!sessionStorage.getItem('nexus_web_auto_update') && typeof checkScheduledWebUpdate === 'function') checkScheduledWebUpdate();
@@ -14373,11 +14420,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             if (typeof renderAiSettingsUI === 'function') renderAiSettingsUI();
 
-            const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = !!state.settings.requirePin;
+            const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin === true;
             const chkBio = $id('set-use-biometrics'); if(chkBio && userProfile) chkBio.checked = !!userProfile.useBiometrics;
             if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(userProfile);
 
-            const abEl = $id('set-auto-backup'); if(abEl) abEl.checked = !!state.settings.autoBackup;
+            const abEl = $id('set-auto-backup'); if(abEl) abEl.checked = state.settings.autoBackup === true;
             const btEl = $id('set-backup-time'); if(btEl) btEl.value = state.settings.backupTime || '23:59';
             const bfEl = $id('set-backup-folder'); if(bfEl) bfEl.value = state.settings.backupFolder || '';
             if (typeof setupAutoBackup === 'function') setupAutoBackup();
@@ -14855,7 +14902,14 @@ ${JSON.stringify(dataToAnalyze)}`;
             const apCurrEl = $id('set-ap-currency'); if(apCurrEl) state.settings.apCurrency = apCurrEl.value;
             const apDayParsed = parseInt($id('set-ap-day').value);
             state.settings.apPayDay = !isNaN(apDayParsed) ? apDayParsed : 5;
-            state.settings.requirePin = $id('set-require-pin').checked;
+            const wantRequirePin = $id('set-require-pin').checked;
+            if (wantRequirePin && userProfile && !profileHasPin(userProfile)) {
+                alert('Configura un PIN de 4 dígitos (botón «Cambiar PIN») antes de activar el bloqueo automático.');
+                state.settings.requirePin = false;
+                $id('set-require-pin').checked = false;
+            } else {
+                state.settings.requirePin = wantRequirePin;
+            }
             const tpEl = $id('set-theme-preset'); if(tpEl) state.settings.themePreset = tpEl.value;
             const fsEl = $id('set-font-style'); if(fsEl) state.settings.fontStyle = fsEl.value;
             const tsEl = $id('set-text-size'); if(tsEl) state.settings.textSize = tsEl.value;
@@ -14864,7 +14918,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             /* Claves IA: solo vía persistAiSettings() — evita borrar password vacío al cambiar otros ajustes */
 
-            const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked;
+            const abEl = $id('set-auto-backup'); if(abEl) state.settings.autoBackup = abEl.checked === true;
             const btEl = $id('set-backup-time'); if(btEl) state.settings.backupTime = btEl.value || '23:00';
             const bfEl = $id('set-backup-folder'); if(bfEl) state.settings.backupFolder = bfEl.value;
             if (!state.settings.backupTime) state.settings.backupTime = '23:00';
@@ -14881,7 +14935,16 @@ ${JSON.stringify(dataToAnalyze)}`;
                 };
             }
             
-            applyThemeCSS(); saveState(); updateDashboard();
+            applyThemeCSS();
+            saveState();
+            updateDashboard();
+            if (state.settings.requirePin === true) nexusLockSession();
+            else {
+                sessionUnlocked = true;
+                nexusHideSessionLock();
+                clearTimeout(inactivityTimer);
+                nexusResetInactivityTimer();
+            }
             if(state.activeTab === 'afterpay') renderAfterpay();
             if(state.activeTab === 'calendar') renderCalendar();
             if(state.activeTab === 'database') renderDatabase();
@@ -15329,8 +15392,8 @@ ${JSON.stringify(dataToAnalyze)}`;
                     apLimit: prevSettings.apLimit || 5000000,
                     apPayDay: prevSettings.apPayDay !== undefined ? prevSettings.apPayDay : 5,
                     baseCurrency: prevSettings.baseCurrency || 'COP',
-                    requirePin: prevSettings.requirePin || false,
-                    autoBackup: prevSettings.autoBackup,
+                    requirePin: prevSettings.requirePin === true,
+                    autoBackup: prevSettings.autoBackup === true,
                     backupTime: prevSettings.backupTime || '23:00',
                     backupFolder: prevSettings.backupFolder || '',
                     themePreset: prevSettings.themePreset,
@@ -15854,7 +15917,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             const sections = imported && imported._nexusBackup && Array.isArray(imported._nexusBackup.sections)
                 ? imported._nexusBackup.sections : null;
             if (sections && sections.length) {
-                sections.forEach(id => { if (sel[id] !== undefined) sel[id] = true; });
+                sections.forEach(id => {
+                    if (sel[id] !== undefined && sectionHasData(imported, id)) sel[id] = true;
+                });
                 return sel;
             }
             NEXUS_BACKUP_SECTIONS.forEach(s => {
@@ -15867,10 +15932,85 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (!currentUser) throw new Error('Debes iniciar sesión antes de importar una copia.');
             if (!state) throw new Error('La bóveda no está inicializada. Abre la app e inicia sesión primero.');
             if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
+            if (typeof nexusTouchLocalState === 'function') nexusTouchLocalState('backup-import');
             await NexusIDB.saveState(currentUser, state);
             try {
                 localStorage.setItem('nexus_db_' + currentUser, JSON.stringify(state));
             } catch (e) { console.warn('[NEXUS] localStorage backup mirror', e); }
+        }
+
+        function nexusSanitizeCoreForUpload(core) {
+            const c = JSON.parse(JSON.stringify(core || {}));
+            delete c.tx;
+            delete c._nexusBackup;
+            return c;
+        }
+
+        /** Copias en Firebase: documento nuevo por copia (nunca sobrescribe backup_* anteriores). */
+        async function nexusAppendCloudBackup(backupPayload) {
+            if (!window.db || !currentUser || !fbUser || !backupPayload) return;
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const savedAt = Date.now();
+                const backupId = 'backup_' + savedAt;
+                const meta = backupPayload._nexusBackup || {};
+                const ref = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', backupId);
+                await setDoc(ref, {
+                    kind: 'nexus_backup_v2',
+                    savedAt,
+                    exportedAt: meta.exportedAt || new Date(savedAt).toISOString(),
+                    vault: currentUser,
+                    sections: Array.isArray(meta.sections) ? meta.sections : [],
+                    data: backupPayload
+                });
+                console.log('[NEXUS] Copia archivada en nube:', backupId);
+            } catch (e) {
+                console.warn('[NEXUS] nexusAppendCloudBackup', e);
+            }
+        }
+
+        function nexusRefreshModulesAfterBackupImport(selection) {
+            if (!selection || !state) return;
+            if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
+            if (typeof populateTaskVaultSelects === 'function') populateTaskVaultSelects();
+            if (typeof populateProjectVaultSelect === 'function') populateProjectVaultSelect();
+            if (typeof populateFilters === 'function') populateFilters();
+            if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
+            if (selection.prefs) {
+                if (typeof renderSettingsTab === 'function') renderSettingsTab();
+                if (typeof applyThemeCSS === 'function') applyThemeCSS();
+                if (typeof updateCurrencyLabels === 'function') updateCurrencyLabels();
+                if (typeof setupAutoBackup === 'function') setupAutoBackup();
+                if (typeof updateAutoBackupStatus === 'function') updateAutoBackupStatus();
+                const chkPin = $id('set-require-pin');
+                if (chkPin) chkPin.checked = state.settings.requirePin === true;
+            }
+            if (selection.accounts && typeof renderAccountsTab === 'function') renderAccountsTab();
+            if (selection.accounts && typeof renderAccounts === 'function') renderAccounts();
+            if (selection.loans && typeof renderLoansList === 'function') renderLoansList();
+            if (selection.tx) {
+                if (typeof renderDatabase === 'function') renderDatabase();
+                if (typeof renderAnalysis === 'function') renderAnalysis();
+                if (typeof renderReport === 'function') renderReport();
+                if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
+                if (typeof renderCalendar === 'function') renderCalendar();
+                if (state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay();
+            }
+            if (selection.categories && typeof updateCatManageView === 'function') updateCatManageView();
+            if (selection.tasks && typeof renderTasksTab === 'function') renderTasksTab();
+            if (selection.goals && typeof renderBudgetTab === 'function') renderBudgetTab();
+            if (selection.projects && typeof renderProjectsTab === 'function') renderProjectsTab();
+            if (selection.budgets && typeof renderBudgetTab === 'function') renderBudgetTab();
+            if (selection.pse && typeof renderPSELinks === 'function') renderPSELinks();
+            if (selection.taxes && typeof renderTaxes === 'function') renderTaxes();
+            if (selection.accounts || selection.tx) {
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+            }
+            if (selection.tasks && typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
+            if (selection.projects && typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
+            if (selection.tasks && typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
         }
 
         function renderBackupSectionsList(mode, importData) {
@@ -16004,6 +16144,9 @@ ${JSON.stringify(dataToAnalyze)}`;
                 runSilentAutoBackup(jsonStr, fileName);
                 return;
             }
+            if (fbUser && window.db) {
+                nexusAppendCloudBackup(payload).catch(e => console.warn('[NEXUS] copia nube manual', e));
+            }
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.exportFileHandler) {
                 window.webkit.messageHandlers.exportFileHandler.postMessage({ filename: fileName, content: jsonStr });
                 return;
@@ -16061,6 +16204,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 }
 
                 if (state._nexusBackup) delete state._nexusBackup;
+                if (typeof nexusNormalizePinSettings === 'function') nexusNormalizePinSettings();
 
                 if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
                     unsubscribeSnapshot();
@@ -16082,35 +16226,12 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (!state.loans) state.loans = [];
 
                 await forcePersistVaultState();
+                nexusRefreshModulesAfterBackupImport(selection);
                 if (typeof triggerCloudSync === 'function') {
                     lastCloudSyncHash = {};
                     if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
                     triggerCloudSync();
-                    setTimeout(() => { if (typeof fetchCloudState === 'function') fetchCloudState(); }, 2000);
                 }
-                const gc = document.getElementById('global-currency');
-                if (gc) gc.value = state.activeCurrency;
-                applyThemeCSS();
-                updateCurrencyLabels();
-                populateFilters();
-                if (typeof populateDbAccountFilter === 'function') populateDbAccountFilter();
-                if (typeof renderAccounts === 'function') renderAccounts();
-                if (typeof renderAccountsTab === 'function') renderAccountsTab();
-                if (typeof renderLoansList === 'function') renderLoansList();
-                if (typeof renderAfterpay === 'function') renderAfterpay();
-                if (typeof renderDatabase === 'function') renderDatabase();
-                if (typeof renderAnalysis === 'function') renderAnalysis();
-                if (typeof renderReport === 'function') renderReport();
-                if (typeof renderFinancesUnified === 'function') renderFinancesUnified();
-                if (typeof renderBudgetTab === 'function') renderBudgetTab();
-                if (typeof renderCalendar === 'function') renderCalendar();
-                if (typeof renderTasksTab === 'function') renderTasksTab();
-                if (typeof renderProjectsTab === 'function') renderProjectsTab();
-                if (typeof renderPSELinks === 'function') renderPSELinks();
-                if (typeof attachP2PListener === 'function') attachP2PListener();
-                if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
-                if (typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
-                updateDashboard();
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
                 const importedLabels = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.label).join(', ');
                 alert('✅ Copia importada (' + importedLabels + ').');
@@ -16166,7 +16287,8 @@ ${JSON.stringify(dataToAnalyze)}`;
         function runSilentAutoBackup(jsonStr, fileName) {
             if (!currentUser) return;
             try {
-                const payload = { state: JSON.parse(jsonStr), savedAt: Date.now(), user: currentUser, fileName: fileName };
+                const backupData = JSON.parse(jsonStr);
+                const payload = { state: backupData, savedAt: Date.now(), user: currentUser, fileName: fileName };
                 localStorage.setItem(getAutoBackupStorageKey(), JSON.stringify(payload));
                 localStorage.setItem('nexus_autobackup_latest_' + currentUser, JSON.stringify(payload));
                 const keys = [];
@@ -16176,6 +16298,9 @@ ${JSON.stringify(dataToAnalyze)}`;
                 }
                 keys.sort().slice(0, -14).forEach(k => localStorage.removeItem(k));
                 updateAutoBackupStatus();
+                if (fbUser && window.db && state.settings && state.settings.autoBackup) {
+                    nexusAppendCloudBackup(backupData).catch(e => console.warn('[NEXUS] copia nube auto', e));
+                }
             } catch (e) { console.warn('[APEX] Auto-backup silencioso:', e); }
         }
 
