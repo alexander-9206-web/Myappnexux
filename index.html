@@ -2752,12 +2752,19 @@
         
         function executeEditParentCat(currentParent, newName) {
             if(newName && newName !== currentParent) {
+                if (nexusIsLegacyCategoryLabel(newName)) {
+                    return alert('Ese nombre pertenece al catálogo antiguo (Varios, Afterpay, etc.). Elige otro.');
+                }
                 const type = $id('f-type').value;
-                if(state.catParents.global) {
+                if(!state.catParents) state.catParents = { global: [] };
+                if(!state.catParents.global) state.catParents.global = [];
+                if(!state.categories) state.categories = { global: [] };
+                if(!state.categories.global) state.categories.global = [];
+                {
                     const idx = state.catParents.global.indexOf(currentParent);
                     if(idx > -1) state.catParents.global[idx] = newName;
                 }
-                if(state.categories.global) {
+                {
                     state.categories.global = state.categories.global.map(c => {
                        const m = c.match(/\[(.*?)\]\s*(.*)/);
                        if (m && m[1] === currentParent) return `[${newName}] ${m[2]||''}`.trim();
@@ -7965,7 +7972,7 @@
                 state.categories.global = [...new Set([...(state.categories.income||[]), ...(state.categories.expense||[]), ...(state.categories.transfer||[])])];
             }
             if (state.catParents && !state.catParents.global) {
-            if(!state.catParents.global) state.catParents.global = [...new Set([...(state.catParents.income||[]), ...(state.catParents.expense||[]), ...(state.catParents.transfer||[])])];
+                state.catParents.global = [...new Set([...(state.catParents.income||[]), ...(state.catParents.expense||[]), ...(state.catParents.transfer||[])])];
             }
 
             // APEX FIX: Purga de Categorías Nativas para dejar únicamente las manuales
@@ -11604,7 +11611,7 @@
                 const r = t.renderType || t.type;
                 if (typeFilter === 'expense' && r !== 'expense') return;
                 if (typeFilter === 'income' && r !== 'income') return;
-                if (t.cat) set.add(t.cat);
+                if (t.cat && !nexusIsLegacyCategoryLabel(t.cat)) set.add(t.cat);
             });
             return [...set].sort((a, b) => String(a).localeCompare(String(b), 'es'));
         }
@@ -15766,24 +15773,21 @@ ${JSON.stringify(dataToAnalyze)}`;
 
         function confirmDeleteCategory(name, type, parent = '') {
             // APEX FIX: Eliminación condicional por jerarquía integrada a la UI sin alertas
+            if (!state.catParents) state.catParents = { global: [] };
+            if (!state.catParents.global) state.catParents.global = [];
+            if (!state.categories) state.categories = { global: [] };
+            if (!state.categories.global) state.categories.global = [];
             if (type === 'parent') {
-                if(state.catParents.global) {
-                    state.catParents.global = state.catParents.global.filter(p => p !== name);
-                }
-                if(state.categories.global) {
-                    state.categories.global = state.categories.global.filter(c => {
-                        const m = c.match(/\[(.*?)\]\s*(.*)/);
-                        if (m && m[1] === name) return false;
-                        if (c === name) return false;
-                        return true;
-                    });
-                }
+                state.catParents.global = state.catParents.global.filter(p => p !== name);
+                state.categories.global = state.categories.global.filter(c => {
+                    const m = c.match(/\[(.*?)\]\s*(.*)/);
+                    if (m && m[1] === name) return false;
+                    if (c === name) return false;
+                    return true;
+                });
             } else if (type === 'sub') {
                 const fullCat = `[${parent}] ${name}`;
-                
-                if(state.categories.global) {
-                    state.categories.global = state.categories.global.filter(c => c !== fullCat);
-                }
+                state.categories.global = state.categories.global.filter(c => c !== fullCat);
             }
             saveState(); updateCatManageView(); updateDbCatFilter();
         }
@@ -16052,6 +16056,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay();
             }
             if (selection.categories && typeof updateCatManageView === 'function') updateCatManageView();
+            if ((selection.categories || selection.tx) && typeof updateDbCatFilter === 'function') updateDbCatFilter();
             if (selection.tasks && typeof renderTasksTab === 'function') renderTasksTab();
             if (selection.goals && typeof renderBudgetTab === 'function') renderBudgetTab();
             if (selection.projects && typeof renderProjectsTab === 'function') renderProjectsTab();
