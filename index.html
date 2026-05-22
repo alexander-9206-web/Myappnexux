@@ -3213,9 +3213,61 @@
             return n;
         }
 
+        function isSystemInitializedLocal() {
+            if (localStorage.getItem('nexus_system_initialized') === '1') return true;
+            return countLocalProfiles() > 0;
+        }
+
+        function nexusFirestoreOp(promise, timeoutMs = 5000) {
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('NEXUS_TIMEOUT')), timeoutMs))
+            ]);
+        }
+
+        async function resolveLoginRouteKind(email, uid) {
+            if (isSystemInitializedLocal()) {
+                try {
+                    if (await founderNeedsPinSetup(email, uid)) return 'founder-resume';
+                } catch (e) { console.warn('[NEXUS] founderNeedsPinSetup local', e); }
+                return 'client';
+            }
+            try {
+                const initialized = await isSystemInitialized();
+                if (!initialized) return 'founder-new';
+                if (await founderNeedsPinSetup(email, uid)) return 'founder-resume';
+                return 'client';
+            } catch (e) {
+                console.warn('[NEXUS] resolveLoginRouteKind', e);
+                return countLocalProfiles() > 0 ? 'client' : 'founder-new';
+            }
+        }
+
+        async function nexusTryResumeLocalSession() {
+            if (sessionUnlocked && currentUser) return true;
+            let email = (localStorage.getItem('nexus_current_user') || '').trim().toLowerCase();
+            if (!email && typeof NexusIDB !== 'undefined' && NexusIDB.getSession) {
+                try { email = (await NexusIDB.getSession() || '').trim().toLowerCase(); } catch (e) {}
+            }
+            if (!email) return false;
+            let profile = loadLocalProfile(email);
+            if (!profile) {
+                try { profile = await getProfileForVault(email); } catch (e) {}
+            }
+            if (!profile) return false;
+            userProfile = await ensureProfilePinHash(profile);
+            loginSelectedEmail = email;
+            if (profileHasPin(userProfile)) {
+                showLoginPinStep(email, userProfile.name || email, userProfile);
+                return true;
+            }
+            await processLoginSuccess(email);
+            return true;
+        }
+
         async function getBootstrapInfo() {
             try {
-                if (!window.db) await initCloud();
+                if (!window.db) await initCloud({ loginMode: true });
                 if (!window.db) return null;
                 const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const snap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'bootstrap'));
@@ -3249,18 +3301,24 @@
         }
 
         async function isSystemInitialized() {
+            if (isSystemInitializedLocal()) return true;
             try {
-                if (!window.db) await initCloud();
-                if (!window.db) return countLocalProfiles() > 0;
-                const boot = await getBootstrapInfo();
-                if (boot && boot.initialized) return true;
+                if (!window.db) await initCloud({ loginMode: true });
+                if (!window.db) return false;
+                const boot = await nexusFirestoreOp(getBootstrapInfo(), 4000).catch(() => null);
+                if (boot && boot.initialized) {
+                    localStorage.setItem('nexus_system_initialized', '1');
+                    return true;
+                }
                 const { collection, getDocs, limit, query } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), limit(1));
-                const snap = await getDocs(q);
-                return !snap.empty;
+                const snap = await nexusFirestoreOp(getDocs(q), 4000);
+                const ok = !snap.empty;
+                if (ok) localStorage.setItem('nexus_system_initialized', '1');
+                return ok;
             } catch (e) {
                 console.warn('[NEXUS] isSystemInitialized', e);
-                return countLocalProfiles() > 0;
+                return isSystemInitializedLocal();
             }
         }
 
@@ -3312,17 +3370,29 @@
             setLoginRoutingProgress(20, 'Registrando sistema…');
 
             try {
-                if (!window.db || !fbUser) await initCloud();
-                await ensureFirestoreGoogleSession(auth.email, auth.uid);
-                const boot = await getBootstrapInfo();
+                const cloudOk = await initCloud({ loginMode: true });
+                await ensureFirestoreGoogleSessionSoft(auth.email, auth.uid, fbUser);
+                let boot = cloudOk ? await getBootstrapInfo().catch(() => null) : null;
                 if (!boot || !boot.initialized) {
                     setLoginRoutingProgress(45, 'Creando bootstrap…');
-                    const bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 4, 450);
+                    let bootRes = { ok: false };
+                    if (window.db) {
+                        bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 3, 450);
+                    }
                     if (!bootRes.ok) {
-                        hideLoginRoutingLoading();
-                        alert(bootRes.error || 'No se pudo inicializar el sistema.');
-                        showInitialLoginChoice();
-                        return;
+                        if (isSystemInitializedLocal()) {
+                            console.warn('[NEXUS] bootstrap cloud omitido — modo local');
+                        } else if (!cloudOk) {
+                            hideLoginRoutingLoading();
+                            alert('Sin conexión a Firebase. Conéctate a internet para crear el administrador fundador la primera vez.');
+                            showInitialLoginChoice();
+                            return;
+                        } else {
+                            hideLoginRoutingLoading();
+                            alert(bootRes.error || 'No se pudo inicializar el sistema.');
+                            showInitialLoginChoice();
+                            return;
+                        }
                     }
                 } else if (!isBootstrapFounder(boot, auth.email, auth.uid)) {
                     hideLoginRoutingLoading();
@@ -3330,6 +3400,7 @@
                     showInitialLoginChoice();
                     return;
                 }
+                localStorage.setItem('nexus_system_initialized', '1');
 
                 setLoginRoutingProgress(65, 'Preparando bóveda admin…');
                 let profile = await getProfileForVault(auth.email);
@@ -3491,15 +3562,17 @@
 
         function showColdStartLogin() {
             nexusRequireAuthScreen();
-            initCloud().then(async () => {
+            fetchLoginUsers(false);
+            showInitialLoginChoice();
+            nexusTryResumeLocalSession().catch(e => console.warn('[NEXUS] resume session', e));
+            initCloud({ loginMode: true }).then(async () => {
                 if (sessionStorage.getItem('nexus_auth_redirect_pending') === '1') {
                     const handled = await nexusHandleGoogleRedirectResult();
                     if (handled) return;
                 }
                 await refreshFounderLoginHint();
+                if (!sessionUnlocked) fetchLoginUsers(true);
             }).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
-            fetchLoginUsers(false);
-            showInitialLoginChoice();
         }
 
         function showLoginFlow() {
@@ -3554,7 +3627,7 @@
 
         function beginLoginRoutingUI(message) {
             hideFirstTimeSetup();
-            showLoginRoutingLoading(message || 'Conectando con Firebase…');
+            showLoginRoutingLoading(message || 'Verificando acceso…');
         }
 
         /** Barra 2–3 s con % mientras Firebase responde (usuario normal o verificación fundador). */
@@ -3621,31 +3694,30 @@
             }
         }
 
-        /** Tras Google/Firebase: si ya hay usuarios → cliente normal; si no → administrador fundador. */
+        /** Tras Google: Firebase solo verifica si hay usuarios/bóvedas; la app abre aunque la red falle. */
         async function routeAfterFirebaseAuth(fbAuthUser, displayName, photoURL) {
             _loginRoutePhase = null;
+            const email = (fbAuthUser?.email || '').trim().toLowerCase();
             try {
                 if (!fbAuthUser) {
                     _loginRoutePhase = 'error';
-                    alert('No se obtuvo sesión de Firebase.');
+                    alert('No se obtuvo sesión de Google.');
                     return;
                 }
-                const email = (fbAuthUser.email || '').trim().toLowerCase();
                 if (!email || !email.includes('@')) {
                     _loginRoutePhase = 'error';
                     alert('Tu cuenta debe tener correo (usa Google en Firebase Auth).');
                     return;
                 }
                 fbUser = fbAuthUser;
-                await initCloud();
-                await ensureFirestoreGoogleSession(email, fbAuthUser.uid);
+                const cloudOk = await initCloud({ loginMode: true });
+                await ensureFirestoreGoogleSessionSoft(email, fbAuthUser.uid, fbAuthUser);
 
-                const routeKind = await runLoginRoutingWithProgress('Esperando respuesta de Firebase…', async () => {
-                    const initialized = await isSystemInitialized();
-                    if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) return 'founder-resume';
-                    if (initialized) return 'client';
-                    return 'founder-new';
-                }, 2800);
+                const routeKind = await runLoginRoutingWithProgress(
+                    cloudOk ? 'Consultando usuarios en la nube…' : 'Sin red — usando bóvedas locales…',
+                    () => resolveLoginRouteKind(email, fbAuthUser.uid),
+                    cloudOk ? 900 : 350
+                );
 
                 _firstSetupFirebaseUser = {
                     email,
@@ -3669,8 +3741,18 @@
                 await enterFounderAppFlow(_firstSetupFirebaseUser);
             } catch (e) {
                 console.error('[NEXUS] routeAfterFirebaseAuth', e);
+                const localP = loadLocalProfile(email);
+                if (localP && fbAuthUser) {
+                    try {
+                        await continueNormalClientLogin(fbAuthUser, displayName, photoURL);
+                        return;
+                    } catch (e2) { console.warn('[NEXUS] fallback client login', e2); }
+                }
                 _loginRoutePhase = 'error';
-                alert('Error al continuar: ' + (e.message || 'revisa la conexión'));
+                hideLoginRoutingLoading();
+                resetGoogleLoginButton();
+                showInitialLoginChoice();
+                alert('No se pudo continuar: ' + (e.message || 'revisa la conexión') + '\n\nPuedes entrar con PIN si ya tienes bóveda en este dispositivo.');
             } finally {
                 if (_loginRoutePhase === 'error') {
                     hideLoginRoutingLoading();
@@ -4766,7 +4848,10 @@
             if (window.db) {
                 try {
                     const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                    const snap = await getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email));
+                    const snap = await nexusFirestoreOp(
+                        getDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', email)),
+                        5000
+                    );
                     if (snap.exists()) {
                         const cloudData = snap.data();
                         p = await ensureProfilePinHash({
@@ -4777,7 +4862,7 @@
                         });
                         localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(p)));
                     }
-                } catch (e) {}
+                } catch (e) { console.warn('[NEXUS] getProfileForVault cloud', e); }
             }
             return p;
         }
@@ -5269,7 +5354,10 @@
                 const R = out[id];
                 if (!R || sharedTxTimestamp(L) >= sharedTxTimestamp(R)) out[id] = L;
             });
-            return out;
+            const orderedIds = Object.keys(out).sort((a, b) => sharedTxTimestamp(out[a]) - sharedTxTimestamp(out[b]));
+            const sorted = {};
+            orderedIds.forEach(id => { sorted[id] = out[id]; });
+            return sorted;
         }
 
         function mapRemoteTxToLocalIds(netTx) {
@@ -5610,7 +5698,7 @@
             if (!email || !email.includes('@')) {
                 throw new Error('Se requiere cuenta Google con correo.');
             }
-            await initCloud();
+            await initCloud({ loginMode: true });
             const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
             const auth = getAuth(window.__nexusFirebaseApp);
             const wantEmail = email.trim().toLowerCase();
@@ -5633,7 +5721,27 @@
             return u;
         }
 
-        async function initCloud() {
+        /** En login: no bloquea la UI si Firebase Auth falla; la bóveda local sigue disponible. */
+        async function ensureFirestoreGoogleSessionSoft(email, uid, googleUser) {
+            const gu = googleUser || fbUser;
+            if (gu && !gu.isAnonymous && (gu.email || '').trim().toLowerCase() === (email || '').trim().toLowerCase()) {
+                fbUser = gu;
+                try { await gu.getIdToken(true); } catch (e) { console.warn('[NEXUS] token refresh soft', e); }
+                return gu;
+            }
+            if (!window.db) return gu || null;
+            try {
+                return await ensureFirestoreGoogleSession(email, uid);
+            } catch (e) {
+                console.warn('[NEXUS] ensureFirestoreGoogleSession soft-fail', e);
+                if (gu && gu.email) { fbUser = gu; return gu; }
+                return null;
+            }
+        }
+
+        async function initCloud(opts) {
+            const loginMode = !!(opts && opts.loginMode);
+            const timeoutMs = (opts && opts.timeoutMs) || (loginMode ? 4500 : 8000);
             if (window.db) {
                 try {
                     const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
@@ -5717,8 +5825,8 @@
                         });
                         setTimeout(() => {
                             try { unsub(); } catch (e) {}
-                            finish(!!auth.currentUser);
-                        }, 8000);
+                            finish(!!window.db);
+                        }, timeoutMs);
                     }
                 });
             } catch(e) {
@@ -6275,7 +6383,8 @@
                     
                 } catch(e) { 
                     console.warn("[APEX] Fallo leyendo usuarios en login", e); 
-                    if(usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-red-500 font-bold py-4">Error de conexión a la red.</p>';
+                    if(usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-amber-400 font-bold py-4">Sin conexión a la nube. Usa bóvedas locales o Continuar con Google.</p>';
+                    else renderList();
                 }
             }
         }
@@ -6283,7 +6392,9 @@
         // APEX FIX: Lógica de navegación del bloque de Login
         async function openCreateVaultFlow() {
             try {
-                if (!window.db) await initCloud();
+                if (!isSystemInitializedLocal()) {
+                    initCloud({ loginMode: true }).catch(() => {});
+                }
                 if (!(await isSystemInitialized())) {
                     const hint = $id('login-founder-hint');
                     if (hint) hint.classList.remove('hidden');
@@ -6299,7 +6410,7 @@
         function showInitialLoginChoice() {
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
-            nexusRequireAuthScreen();
+            if (!sessionUnlocked) nexusRequireAuthScreen();
             hideFirstTimeSetup();
             hideAllLoginPanels();
             const hdr = $id('login-identity-header');
@@ -6427,8 +6538,9 @@
                 }
                 initCloud().then(async () => {
                     try {
-                        await fetchCloudState();
                         if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                        await fetchCloudState();
+                        if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
                         if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                     } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
                 }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
@@ -6484,9 +6596,11 @@
         }
 
         async function handleLoginNew() {
-            await initCloud();
-            if (!(await isSystemInitialized())) {
-                return alert('El sistema aún no tiene administrador. El primer acceso debe ser con Google (cuenta fundadora).');
+            if (!isSystemInitializedLocal()) {
+                initCloud({ loginMode: true }).catch(() => {});
+                if (!(await isSystemInitialized())) {
+                    return alert('El sistema aún no tiene administrador. El primer acceso debe ser con Google (cuenta fundadora).');
+                }
             }
             const email = $id('login-new-email').value.trim().toLowerCase();
             const name = $id('login-new-name').value.trim();
