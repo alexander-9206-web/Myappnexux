@@ -3931,22 +3931,148 @@
             if (typeof syncAiKeysToLocalCache === 'function') syncAiKeysToLocalCache();
         }
 
-        function mergeCoreSettingsFromCloud(prevSettings, cloudData) {
+
+        // ============================================================================
+        // --- MOTOR DE SINCRONIZACIÓN NEXUS (LWW + prioridad offline) ---
+        // ============================================================================
+        function nexusEnsureSyncMeta() {
+            if (!state || typeof state !== 'object') return;
+            if (!state._nexusSync || typeof state._nexusSync !== 'object') {
+                state._nexusSync = { localRevision: 0, lastLocalSave: 0, dirty: false, lastCloudRevision: 0, lastCloudPull: 0, lastCloudPush: 0 };
+            }
+        }
+
+        function nexusTouchLocalState(reason) {
+            if (!currentUser || !state) return;
+            nexusEnsureSyncMeta();
+            state._nexusSync.localRevision = (state._nexusSync.localRevision || 0) + 1;
+            state._nexusSync.lastLocalSave = Date.now();
+            state._nexusSync.dirty = true;
+            if (reason) state._nexusSync.lastTouchReason = reason;
+        }
+
+        function nexusTxTimestamp(tx) {
+            if (!tx) return 0;
+            const raw = tx.updatedAt ?? tx.modifiedAt;
+            if (raw != null) {
+                const n = typeof raw === 'number' ? raw : Date.parse(raw);
+                if (!Number.isNaN(n)) return n;
+            }
+            if (tx.date) {
+                const d = Date.parse(tx.date);
+                if (!Number.isNaN(d)) return d;
+            }
+            return 0;
+        }
+
+        function nexusStampTxList(list) {
+            const now = Date.now();
+            return (list || []).map(t => {
+                if (!t || typeof t !== 'object') return t;
+                if (t.updatedAt != null) return t;
+                return { ...t, updatedAt: now };
+            });
+        }
+
+        function nexusMergeTxArrays(localArr, remoteArr, preferLocalOnTie) {
+            const map = new Map();
+            (localArr || []).forEach(t => { if (t && t.id) map.set(t.id, t); });
+            (remoteArr || []).forEach(rt => {
+                if (!rt || !rt.id) return;
+                const loc = map.get(rt.id);
+                if (!loc) { map.set(rt.id, rt); return; }
+                const lts = nexusTxTimestamp(loc);
+                const rts = nexusTxTimestamp(rt);
+                if (rts > lts) map.set(rt.id, rt);
+                else if (rts < lts) map.set(rt.id, loc);
+                else map.set(rt.id, preferLocalOnTie ? loc : rt);
+            });
+            return Array.from(map.values());
+        }
+
+        function nexusGroupTxByYear(txList) {
+            const byYear = {};
+            (txList || []).forEach(t => {
+                const y = new Date(t.date).getFullYear() || new Date().getFullYear();
+                if (!byYear[y]) byYear[y] = [];
+                byYear[y].push(t);
+            });
+            return byYear;
+        }
+
+        function nexusRebuildTxFromYearMaps(localByYear, remoteByYear) {
+            const years = new Set([...Object.keys(localByYear || {}), ...Object.keys(remoteByYear || {})]);
+            let merged = [];
+            years.forEach(y => {
+                merged = merged.concat(nexusMergeTxArrays(localByYear[y] || [], remoteByYear[y] || [], true));
+            });
+            return merged;
+        }
+
+        function nexusShouldKeepLocalCore(cloudData) {
+            nexusEnsureSyncMeta();
+            const localRev = state._nexusSync.localRevision || 0;
+            const cloudRev = (cloudData && cloudData._nexusSync && cloudData._nexusSync.revision) || cloudData?.revision || 0;
+            if (state._nexusSync.dirty && localRev >= cloudRev) return true;
+            const localAt = state._nexusSync.lastLocalSave || 0;
+            const cloudAt = (cloudData && cloudData._nexusSync && cloudData._nexusSync.updatedAt) || cloudData?.updatedAt || 0;
+            const cloudMs = typeof cloudAt === 'number' ? cloudAt : Date.parse(cloudAt) || 0;
+            return state._nexusSync.dirty && localAt > cloudMs;
+        }
+
+        function nexusApplyCloudCoreDoc(cloudData) {
+            if (!cloudData || typeof cloudData !== 'object') return;
+            nexusEnsureSyncMeta();
+            const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
+            const currentTx = state.tx || [];
+            if (nexusShouldKeepLocalCore(cloudData)) {
+                mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: true });
+                state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
+                state._nexusSync.lastCloudPull = Date.now();
+                return;
+            }
+            const payload = { ...cloudData };
+            delete payload.tx;
+            state = { ...state, ...payload };
+            state.tx = currentTx;
+            state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
+            state._nexusSync.lastCloudPull = Date.now();
+            mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: false });
+        }
+
+        function mergeCoreSettingsFromCloud(prevSettings, cloudData, opts) {
+            const options = opts || {};
             const prev = prevSettings ? JSON.parse(JSON.stringify(prevSettings)) : {};
+            if (options.forceKeepLocal) {
+                state.settings = prev;
+                hydrateAiKeysFromAllSources();
+                return;
+            }
             const cloudSt = (cloudData && cloudData.settings) ? cloudData.settings : {};
-            state.settings = { ...prev, ...cloudSt };
+            const localRev = state._nexusSync?.localRevision || 0;
+            const cloudRev = cloudData?._nexusSync?.revision || 0;
+            const preferLocal = state._nexusSync?.dirty && localRev >= cloudRev;
+            if (preferLocal) {
+                state.settings = { ...cloudSt, ...prev };
+            } else {
+                state.settings = { ...prev, ...cloudSt };
+            }
             if (!state.settings.aiApiKeys || typeof state.settings.aiApiKeys !== 'object') {
                 state.settings.aiApiKeys = { gemini: '', openai: '', deepseek: '' };
             }
-            if (prev.aiApiKeys) {
-                ['gemini', 'openai', 'deepseek'].forEach(p => {
-                    const localK = (prev.aiApiKeys[p] || '').trim();
-                    const cloudK = (cloudSt.aiApiKeys && cloudSt.aiApiKeys[p] || '').trim();
+            ['gemini', 'openai', 'deepseek'].forEach(p => {
+                const localK = (prev.aiApiKeys && prev.aiApiKeys[p] || '').trim();
+                const cloudK = (cloudSt.aiApiKeys && cloudSt.aiApiKeys[p] || '').trim();
+                if (preferLocal) {
+                    state.settings.aiApiKeys[p] = localK || cloudK || (state.settings.aiApiKeys[p] || '');
+                } else {
                     state.settings.aiApiKeys[p] = cloudK || localK || (state.settings.aiApiKeys[p] || '');
-                });
-            }
+                }
+            });
             if (prev.aiModels && cloudSt.aiModels) {
-                state.settings.aiModels = { ...prev.aiModels, ...cloudSt.aiModels };
+                state.settings.aiModels = preferLocal
+                    ? { ...cloudSt.aiModels, ...prev.aiModels }
+                    : { ...prev.aiModels, ...cloudSt.aiModels };
             } else if (prev.aiModels) {
                 state.settings.aiModels = { ...prev.aiModels };
             }
@@ -5490,64 +5616,47 @@
                     
                     // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
                     unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
+                        if (isSyncing) {
+                            updateCloudBadge(true, true);
+                            return;
+                        }
                         let hasChanges = false;
                         let coreTouched = false;
                         let incomingTxByYear = {};
                         
                         snapshot.docChanges().forEach((change) => {
-                            if (!change.doc.metadata.hasPendingWrites) {
-                                hasChanges = true;
-                                const data = change.doc.data();
-                                
-                                if (change.doc.id === 'core') {
-                                    coreTouched = true;
-                                    const currentTx = state.tx || [];
-                                    const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
-                                    state = { ...state, ...data };
-                                    state.tx = currentTx;
-                                    mergeCoreSettingsFromCloud(prevSettings, data);
-                                } else if (change.doc.id.startsWith('tx_')) {
-                                    // Capturamos las transacciones agrupadas por año
-                                    const year = change.doc.id.split('_')[1];
-                                    incomingTxByYear[year] = data.tx || [];
-                                }
+                            if (change.doc.metadata.hasPendingWrites) return;
+                            hasChanges = true;
+                            const data = change.doc.data();
+                            
+                            if (change.doc.id === 'core') {
+                                coreTouched = true;
+                                nexusApplyCloudCoreDoc(data);
+                            } else if (change.doc.id.startsWith('tx_')) {
+                                const year = change.doc.id.split('_')[1];
+                                incomingTxByYear[year] = data.tx || [];
                             }
                         });
 
                         const shouldAttachP2p = isFirstLoad || coreTouched;
 
                         if (hasChanges) {
-                            // Reconstruimos el array de transacciones sin duplicar datos
+                            const localTxByYear = nexusGroupTxByYear(state.tx || []);
                             if (Object.keys(incomingTxByYear).length > 0) {
-                                let newTxArray = [];
-                                const localTxByYear = {};
-                                
-                                (state.tx || []).forEach(t => {
-                                    const y = new Date(t.date).getFullYear() || new Date().getFullYear();
-                                    if(!localTxByYear[y]) localTxByYear[y] = [];
-                                    localTxByYear[y].push(t);
-                                });
-                                
-                                for (const y in incomingTxByYear) {
-                                    localTxByYear[y] = incomingTxByYear[y];
-                                }
-                                
-                                for (const y in localTxByYear) {
-                                    newTxArray = newTxArray.concat(localTxByYear[y]);
-                                }
-                                state.tx = newTxArray;
+                                state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
                             }
 
-                            if(currentUser) {
+                            if (currentUser) {
                                 NexusIDB.saveState(currentUser, state).then(() => {
                                     if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
                                     if (sessionUnlocked) scheduleCloudUiRefresh();
-                                    if(isFirstLoad) { isFirstLoad = false; resolve(); }
+                                    if (isFirstLoad) { isFirstLoad = false; resolve(); }
                                 });
                             }
-                            console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
-                        } else {
-                            if(isFirstLoad) { isFirstLoad = false; resolve(); }
+                            console.log('[APEX SYS] Firestore fusionado (LWW, prioridad offline).');
+                        } else if (isFirstLoad) {
+                            isFirstLoad = false;
+                            resolve();
                         }
                         
                         if (shouldAttachP2p) scheduleP2PListenersAttach(!!coreTouched);
@@ -5604,20 +5713,34 @@
                     batch.set(userRef, { vaultSize: currentSizeBytes, lastSyncSize: Date.now(), vaultNodes: vaultNodes, email: currentUser, name: (userProfile && userProfile.name) ? userProfile.name : currentUser }, { merge: true });
                     writesCount++;
                     
+                    nexusEnsureSyncMeta();
+                    const pushRev = state._nexusSync.localRevision || Date.now();
+                    const pushAt = Date.now();
+                    cleanCore._nexusSync = { revision: pushRev, updatedAt: pushAt, source: 'client' };
+                    cleanCore.updatedAt = pushAt;
+                    const stampedTxByYear = {};
+                    for (const year in txByYear) {
+                        stampedTxByYear[year] = nexusStampTxList(txByYear[year]);
+                    }
+
                     const coreStr = JSON.stringify(cleanCore);
                     if (lastCloudSyncHash['core'] !== coreStr) {
                         const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
-                        batch.set(coreRef, cleanCore);
+                        batch.set(coreRef, cleanCore, { merge: true });
                         lastCloudSyncHash['core'] = coreStr;
                         writesCount++;
                     }
 
-                    // APEX OPTIMIZATION: Dirty Checking por AÑO de historial (Evita subir todo si solo afectas 1 mes)
-                    for (const year in txByYear) {
-                        const txStr = JSON.stringify(txByYear[year]);
+                    for (const year in stampedTxByYear) {
+                        const payload = {
+                            tx: stampedTxByYear[year],
+                            updatedAt: pushAt,
+                            _nexusSync: { revision: pushRev, updatedAt: pushAt, source: 'client' }
+                        };
+                        const txStr = JSON.stringify(payload);
                         if (lastCloudSyncHash['tx_' + year] !== txStr) {
                             const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
-                            batch.set(txRef, { tx: txByYear[year] });
+                            batch.set(txRef, payload, { merge: true });
                             lastCloudSyncHash['tx_' + year] = txStr;
                             writesCount++;
                         }
@@ -5734,9 +5857,14 @@
                     // APEX OPTIMIZATION: Ejecución Condicional de Batch
                     if (writesCount > 0) {
                         await batch.commit();
-                        console.log(`[APEX SYS] Snapshot guardado en Nube. Reducción de carga: ${writesCount} operaciones.`);
+                        nexusEnsureSyncMeta();
+                        state._nexusSync.dirty = false;
+                        state._nexusSync.lastPushedRevision = pushRev;
+                        state._nexusSync.lastCloudPush = pushAt;
+                        state._nexusSync.lastCloudRevision = pushRev;
+                        console.log(`[APEX SYS] Snapshot guardado en Nube (${writesCount} ops, rev ${pushRev}).`);
                     } else {
-                        console.log(`[APEX SYS] Carga Omitida: Base de datos ya sincronizada sin cambios reales.`);
+                        console.log(`[APEX SYS] Carga omitida: sin cambios respecto al último envío.`);
                     }
                 } catch (e) {
                     console.error("[APEX SYS] Fricción en subida de red a Firestore.", e);
@@ -5754,6 +5882,17 @@
         function deleteCloudTx(id) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
+
+        window.addEventListener('online', () => {
+            if (!sessionUnlocked || !currentUser) return;
+            console.log('[APEX SYS] Conexión restaurada → subiendo cambios locales primero');
+            nexusTouchLocalState('online');
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+        });
+        window.addEventListener('offline', () => {
+            console.warn('[APEX SYS] Sin conexión: cambios guardados en local');
+            updateCloudBadge(false, false);
+        });
 
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
@@ -6456,6 +6595,7 @@
             const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
             state = savedState || defaultDemoData;
+            nexusEnsureSyncMeta();
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
             if(!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
@@ -6617,6 +6757,7 @@
         
         function saveState() { 
             if (!currentUser || !sessionUnlocked || !state) return;
+            nexusTouchLocalState('save');
             clearTimeout(saveStateDebounceTimer);
             saveStateDebounceTimer = setTimeout(() => {
                 if (!currentUser || !sessionUnlocked || !state) return;
