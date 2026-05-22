@@ -31,8 +31,8 @@
         input, textarea, select { -webkit-user-select: auto !important; user-select: auto !important; -webkit-touch-callout: default !important; }
         
         .theme-bg { background-color: var(--app-bg) !important; } .theme-card { background-color: var(--card-bg) !important; transition: background-color 0.3s ease; } .theme-text { color: var(--app-text) !important; transition: color 0.3s ease; } .theme-val-inc { color: var(--val-inc) !important; transition: color 0.3s ease; } .theme-val-exp { color: var(--val-exp) !important; transition: color 0.3s ease; }
-        .tab-content { display: none; } .tab-content.active { display: block; animation: slideIn 0.3s cubic-bezier(0, 0, 0.2, 1); } .tab-content.active.slide-back { animation: slideBack 0.3s cubic-bezier(0, 0, 0.2, 1); }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } } @keyframes slideBack { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } } @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } } @keyframes slideUpNumpad { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .tab-content { display: none; } .tab-content.active { display: block; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } } @keyframes slideUpNumpad { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .wealth-card { background: var(--nexus-black); color: #ffffff; border-radius: 1.5rem; padding: 1.25rem; position: relative; overflow: hidden; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2); }
         .glass-btn { background: var(--card-bg); border: 1px solid rgba(0,0,0,0.05); border-radius: 20px; padding: 16px 8px; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 8px; } .glass-btn:active { transform: scale(0.95); opacity: 0.8; }
         .v-btn { transition: all 0.2s; border-bottom: 3px solid transparent; font-size: 10px; font-weight: 900; text-transform: uppercase; color: #94a3b8; } .v-btn.active { color: var(--app-text); border-bottom-color: var(--app-text); } .is-red-mode .v-btn.active { color: var(--val-exp); border-bottom-color: var(--val-exp); }
@@ -2901,7 +2901,7 @@
             toggleNewUserForm: 'Formulario nueva bóveda local',
             openIosSystemNotificationSettings: 'Ajustes de notificaciones iOS',
             clearApplicationBadge: 'Limpiar badge del icono',
-            installNexusNativeNavigation: 'Historial atrás nativo iOS',
+            installNexusNativeNavigation: 'Navegación estática (sin gesto atrás/adelante)',
             nexusApplyFunctionTitles: 'Aplicar tooltips a botones (catálogo)'
         };
 
@@ -3720,7 +3720,7 @@
                     if (nexusLoginSessionActive()) return;
                     if (!handled) {
                         hideLoginRoutingLoading();
-                        initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+                        initCloud({ skipAnonymous: true }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
                         fetchLoginUsers(false);
                         showInitialLoginChoice();
                     }
@@ -3729,7 +3729,7 @@
                     if (nexusLoginSessionActive()) return;
                     sessionStorage.removeItem('nexus_google_redirect_pending');
                     hideLoginRoutingLoading();
-                    initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+                    initCloud({ skipAnonymous: true }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
                     fetchLoginUsers(false);
                     showInitialLoginChoice();
                 });
@@ -6148,12 +6148,8 @@
             if (await bindUser(silentUser)) return { cloud: true, needsGoogle: false };
 
             if (isNexusNativeContainer() && window.webkit?.messageHandlers?.native_google_login) {
-                try {
-                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({ action: 'restore_session', email }));
-                } catch (e) { console.warn('[NEXUS] native restore_session', e); }
-                await new Promise(r => setTimeout(r, 1500));
-                u = auth.currentUser;
-                if (await bindUser(u)) return { cloud: true, needsGoogle: false };
+                const restored = await nexusRestoreNativeGoogleSession(email);
+                if (restored && await bindUser(auth.currentUser)) return { cloud: true, needsGoogle: false };
             }
 
             nexusRefreshCloudBadge(false);
@@ -7273,8 +7269,10 @@
                 const sortedUsers = Array.from(usersMap.values()).sort((a,b) => (b.lastSeen || 0) - (a.lastSeen || 0));
 
                 sortedUsers.forEach(p => {
+                    const safeEmail = escapeJsAttr(p.email);
+                    const safeName = escapeJsAttr(p.name);
                     const cloudBadge = p.isCloud ? '<i class="fa-solid fa-cloud text-blue-400 ml-1"></i>' : '<i class="fa-solid fa-hard-drive text-slate-400 ml-1"></i>';
-                    html += `<div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
+                    html += `<div onclick="selectUserForLogin('${safeEmail}', '${safeName}')" class="user-item flex justify-between items-center p-3 rounded-2xl bg-slate-900 border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors mb-2">
                         <div class="flex items-center gap-3 overflow-hidden">
                             <div class="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>
                             <div class="truncate"><p class="text-[10px] font-black uppercase text-slate-200 truncate">${p.name} ${cloudBadge}</p><p class="text-[8px] font-bold text-slate-500 mt-0.5 truncate">${p.email}</p></div>
@@ -7294,9 +7292,11 @@
                 // APEX FIX: Inyectar Avatares de Inicio Rápido Múltiples (Reemplaza el cuadro gigante)
                 let recentHtml = '';
                 sortedUsers.slice(0, 4).forEach(p => {
-                    const avatarContent = p.avatar ? `<img src="${p.avatar}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[18px]"></i>`;
+                    const safeEmail = escapeJsAttr(p.email);
+                    const safeName = escapeJsAttr(p.name);
+                    const avatarContent = p.avatar ? `<img src="${escapeJsAttr(p.avatar)}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-[18px]"></i>`;
                     recentHtml += `
-                    <div onclick="selectUserForLogin('${p.email}', '${p.name}')" class="flex flex-col items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 transition-all w-16 shrink-0">
+                    <div onclick="selectUserForLogin('${safeEmail}', '${safeName}')" class="flex flex-col items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 transition-all w-16 shrink-0">
                         <div class="w-14 h-14 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center overflow-hidden border-2 border-indigo-500/50 shadow-md">${avatarContent}</div>
                         <p class="text-[8px] font-black text-slate-300 w-full truncate text-center uppercase tracking-widest">${p.name.split(' ')[0]}</p>
                     </div>`;
@@ -7413,31 +7413,54 @@
             });
         }
 
-        function selectUserForLogin(email, name) {
+        async function selectUserForLogin(email, name) {
             const vaultEmail = String(email || '').trim().toLowerCase();
+            if (!vaultEmail || !vaultEmail.includes('@')) return alert('Correo de bóveda inválido.');
             loginSelectedEmail = vaultEmail;
+            let profile = loadLocalProfile(vaultEmail) || await getProfileForVault(vaultEmail);
+            if (!profile) profile = { email: vaultEmail, name: name || vaultEmail.split('@')[0], lastSeen: Date.now() };
+            userProfile = profile;
+            if (!userProfile.email) userProfile.email = vaultEmail;
+
+            if (profile.isGoogle) {
+                showLoginRoutingLoading('Verificando tu cuenta Google…');
+                try {
+                    await initCloud({ skipAnonymous: true });
+                    const bind = await nexusBindFirebaseToVaultEmail(vaultEmail, profile);
+                    hideLoginRoutingLoading();
+                    if (bind.cloud && !profileHasPin(profile)) {
+                        userProfile.lastSeen = Date.now();
+                        localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
+                        await processLoginSuccess(vaultEmail, { googleLinked: true });
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[NEXUS] selectUserForLogin Google', e);
+                    hideLoginRoutingLoading();
+                }
+            } else {
+                initCloud({ skipAnonymous: true }).catch(() => {});
+            }
+
             _loginRoutePhase = 'pin';
             $id('login-initial-choice').classList.add('hidden');
             $id('login-user-selection').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
             $id('login-pin-section').classList.remove('hidden');
-            $id('login-active-email').innerText = name + ' (' + vaultEmail + ')';
-            
+            $id('login-active-email').innerText = (name || profile.name || vaultEmail) + ' (' + vaultEmail + ')';
+
             const pinInput = $id('login-existing-pin');
             pinInput.value = '';
-            
-            const profile = loadLocalProfile(vaultEmail);
-            initCloud({ skipAnonymous: true }).catch(() => {});
 
             setTimeout(() => {
                 if (profile && profile.useBiometrics === true) {
                     triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
-                } else {
+                } else if (pinInput) {
                     pinInput.focus();
                 }
             }, 100);
 
-            pinInput.onkeypress = (e) => { if(e.key === 'Enter') handleLoginExisting(); };
+            if (pinInput) pinInput.onkeypress = (e) => { if (e.key === 'Enter') handleLoginExisting(); };
         }
 
         function retryLoginBiometrics() {
@@ -7583,7 +7606,7 @@
                 if (profileHasPin(userProfile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 else sessionStorage.removeItem('nexus_pin_banner_ok');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
-                await processLoginSuccess(vaultEmail);
+                await processLoginSuccess(vaultEmail, { googleLinked: nexusFirebaseMatchesVault(fbUser, vaultEmail) });
             } else {
                 alert('PIN incorrecto.');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
@@ -7757,6 +7780,67 @@
         window.isNexusNativeContainer = isNexusNativeContainer;
         window.isNexusWebBrowser = isNexusWebBrowser;
 
+        async function nexusApplyNativeGoogleCredential(payload, expectedEmail) {
+            const idToken = payload?.idToken || payload?.token || '';
+            const email = (payload?.email || '').trim().toLowerCase();
+            const want = (expectedEmail || email || '').trim().toLowerCase();
+            if (!idToken || !want) return false;
+            await initCloud({ skipAnonymous: true });
+            const { getAuth, GoogleAuthProvider, signInWithCredential, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = getAuth(window.__nexusFirebaseApp);
+            await nexusSignOutAnonymousIfNeeded(auth, signOut);
+            const result = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+            if (!nexusFirebaseMatchesVault(result.user, want)) {
+                try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut mismatch restore', e); }
+                return false;
+            }
+            fbUser = result.user;
+            try { await fbUser.getIdToken(true); } catch (e) { console.warn('[NEXUS] token restore', e); }
+            localStorage.setItem('nexus_firebase_email', want);
+            return true;
+        }
+
+        function nexusRestoreNativeGoogleSession(vaultEmail) {
+            const email = normalizeMemberEmail(vaultEmail);
+            if (!email || !isNexusNativeContainer() || !window.webkit?.messageHandlers?.native_google_login) {
+                return Promise.resolve(false);
+            }
+            return new Promise((resolve) => {
+                let settled = false;
+                const finish = (ok) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    window.__nexusNativeRestoreResolver = null;
+                    resolve(!!ok);
+                };
+                window.__nexusNativeRestoreResolver = finish;
+                try {
+                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({ action: 'restore_session', email }));
+                } catch (e) {
+                    console.warn('[NEXUS] native restore_session post', e);
+                    finish(false);
+                    return;
+                }
+                const timer = setTimeout(() => finish(false), 12000);
+            });
+        }
+
+        window.onNativeGoogleRestoreResult = async function(payload) {
+            const resolver = window.__nexusNativeRestoreResolver;
+            const vaultEmail = normalizeMemberEmail(payload?.email || loginSelectedEmail || currentUser);
+            try {
+                const ok = await nexusApplyNativeGoogleCredential(payload, vaultEmail);
+                if (resolver) resolver(ok);
+                else if (ok && vaultEmail && loginSelectedEmail === vaultEmail && _loginRoutePhase === 'pin') {
+                    nexusRefreshCloudBadge(false);
+                }
+            } catch (e) {
+                console.warn('[NEXUS] onNativeGoogleRestoreResult', e);
+                if (resolver) resolver(false);
+            }
+        };
+
         async function handleNativeGoogleAuthPayload(payload) {
             if (!isNexusNativeContainer()) {
                 console.warn('[NEXUS] receiveNativeAuthPayload ignorado: canal', nexusGetAuthChannel());
@@ -7774,13 +7858,12 @@
                 return;
             }
             try {
-                await initCloud({ skipAnonymous: true });
-                const { getAuth, GoogleAuthProvider, signInWithCredential, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                const auth = getAuth(window.__nexusFirebaseApp);
-                await nexusSignOutAnonymousIfNeeded(auth, signOut);
-                const credential = GoogleAuthProvider.credential(idToken);
-                const result = await signInWithCredential(auth, credential);
-                fbUser = result.user;
+                const ok = await nexusApplyNativeGoogleCredential({ idToken, email, name, photoUrl }, email);
+                if (!ok) {
+                    _loginRoutePhase = 'error';
+                    alert('No se pudo validar tu cuenta Google. Usa «Continuar con Google» de nuevo.');
+                    return;
+                }
                 await routeAfterFirebaseAuth(fbUser, name || fbUser.displayName || 'Usuario Google', photoUrl || fbUser.photoURL);
             } catch (error) {
                 console.error('[NEXUS] native Google credential', { code: error?.code, message: error?.message });
@@ -8376,41 +8459,14 @@
             reader.readAsDataURL(file);
         }
 
+        /** Navegación estática: sin pila history ni gesto atrás/adelante por pestaña (UI tipo app nativa). */
         function installNexusNativeNavigation() {
             if (window.__nexusNavInstalled) return;
             window.__nexusNavInstalled = true;
-            window.__nexusTabStack = [(state && state.activeTab) || 'home'];
-            window.__nexusNavLock = false;
-            const nativeSwitch = window.switchTab;
-            window.switchTab = function(id) {
-                id = id || 'home';
-                const prev = state && state.activeTab;
-                const out = nativeSwitch.apply(this, arguments);
-                if (!window.__nexusNavLock && id && id !== prev) {
-                    const top = window.__nexusTabStack[window.__nexusTabStack.length - 1];
-                    if (top !== id) window.__nexusTabStack.push(id);
-                    if (typeof isNativeIosApp === 'function' && isNativeIosApp()) {
-                        const base = location.pathname + location.search;
-                        try { history.pushState({ nexusTab: id }, '', base + '#tab=' + id); } catch (e) {}
-                    }
-                }
-                return out;
-            };
-            window.addEventListener('popstate', function() {
-                if (window.__nexusNavLock) return;
-                if (!window.__nexusTabStack || window.__nexusTabStack.length <= 1) {
-                    if (typeof isNativeIosApp === 'function' && isNativeIosApp() && window.__nexusTabStack && window.__nexusTabStack[0]) {
-                        const base = location.pathname + location.search;
-                        try { history.pushState({ nexusTab: window.__nexusTabStack[0] }, '', base + '#tab=' + window.__nexusTabStack[0]); } catch (e) {}
-                    }
-                    return;
-                }
-                window.__nexusNavLock = true;
-                window.__nexusTabStack.pop();
-                const tab = window.__nexusTabStack[window.__nexusTabStack.length - 1] || 'home';
-                nativeSwitch(tab);
-                window.__nexusNavLock = false;
-            });
+            try {
+                const base = location.pathname + location.search;
+                history.replaceState({ nexusStatic: true }, '', base);
+            } catch (e) { /* noop */ }
         }
 
         function refreshActiveTabView() {
@@ -8963,9 +9019,8 @@
                 const fm = $id('finances-menu'); const fd = $id('finances-detail'); if (fm && fd) { fm.classList.remove('hidden'); fd.classList.add('hidden'); }
                 const ll = $id('loans-view-list'); const ld = $id('loans-view-detail'); if (ll && ld) { ll.classList.remove('hidden'); ld.classList.add('hidden'); }
                 
-                const isBack = id === 'home'; 
-                $qAll('.tab-content').forEach(t => { t.classList.remove('active'); t.classList.remove('slide-back'); }); 
-                const targetTab = $id('tab-' + id); if (targetTab) { if (isBack) targetTab.classList.add('slide-back'); targetTab.classList.add('active'); }
+                $qAll('.tab-content').forEach(t => t.classList.remove('active'));
+                const targetTab = $id('tab-' + id); if (targetTab) targetTab.classList.add('active');
                 
                 const pN = $id('period-nav'); if (pN) { if (['loans', 'afterpay', 'settings', 'report', 'accounts', 'finances', 'database', 'calendar', 'budget', 'analysis', 'scanner', 'taxes', 'tasks', 'projects'].includes(id)) pN.classList.add('hidden'); else pN.classList.remove('hidden'); }
                 
