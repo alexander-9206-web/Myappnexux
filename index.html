@@ -3249,7 +3249,29 @@
 
         async function isFounderAccount(email, uid) {
             const boot = await getBootstrapInfo();
-            return isBootstrapFounder(boot, email, uid);
+            if (isBootstrapFounder(boot, email, uid)) return true;
+            try {
+                const p = await getProfileForVault(email);
+                if (p && (p.isAdmin === true || p.role === 'admin') && p.linkedUid && uid && p.linkedUid === uid) return true;
+            } catch (e) { /* noop */ }
+            return false;
+        }
+
+        function nexusShowVaultPinLockAfterAppOpen() {
+            if (!userProfile || !profileHasPin(userProfile)) return;
+            sessionUnlocked = false;
+            const lock = $id('session-lock-screen');
+            const ln = $id('lock-name');
+            if (ln) ln.innerText = userProfile.name || currentUser || 'Usuario';
+            if (lock) {
+                lock.classList.remove('hidden');
+                lock.classList.remove('opacity-0', 'pointer-events-none');
+            }
+            const pinInput = $id('session-pin-input');
+            if (pinInput) {
+                pinInput.value = '';
+                setTimeout(() => pinInput.focus(), 250);
+            }
         }
 
         async function isSystemInitialized() {
@@ -3331,12 +3353,14 @@
                     setLoginRoutingProgress(45, 'Creando bootstrap…');
                     const bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 4, 450);
                     if (!bootRes.ok) {
+                        _loginRoutePhase = 'error';
                         hideLoginRoutingLoading();
                         alert(bootRes.error || 'No se pudo inicializar el sistema.');
                         showInitialLoginChoice();
                         return;
                     }
                 } else if (!isBootstrapFounder(boot, auth.email, auth.uid)) {
+                    _loginRoutePhase = 'error';
                     hideLoginRoutingLoading();
                     alert('El sistema ya fue inicializado por otro administrador.');
                     showInitialLoginChoice();
@@ -3396,6 +3420,9 @@
                 await processLoginSuccess(auth.email);
                 if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+                if (profileHasPin(userProfile)) {
+                    nexusShowVaultPinLockAfterAppOpen();
+                }
                 if (needsSetup) {
                     setTimeout(() => {
                         switchTab('settings');
@@ -3642,7 +3669,7 @@
 
         /** Tras Google/Firebase: si ya hay usuarios → cliente normal; si no → administrador fundador. */
         async function routeAfterFirebaseAuth(fbAuthUser, displayName, photoURL) {
-            _loginRoutePhase = null;
+            _loginRoutePhase = 'routing';
             try {
                 if (!fbAuthUser) {
                     _loginRoutePhase = 'error';
@@ -3771,22 +3798,17 @@
                 loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin background', e));
             }
 
-            const sysReady = await isSystemInitialized();
-            setLoginRoutingProgress(70, sysReady ? 'Verificando PIN de bóveda…' : 'Preparando acceso…');
-            hideLoginRoutingLoading();
-
-            if (sysReady) {
-                _loginRoutePhase = 'pin';
-                showLoginPinStep(userEmail, userName, profile);
-                return;
-            }
-
+            setLoginRoutingProgress(75, 'Abriendo interfaz…');
             loginSelectedEmail = userEmail;
             userProfile = profile;
+            userProfile.lastSeen = Date.now();
             delete userProfile.needsPinSetup;
-            localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile)));
+            localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile, userEmail)));
             _loginRoutePhase = 'app';
             await processLoginSuccess(userEmail);
+            if (await isSystemInitialized() && profileHasPin(userProfile)) {
+                nexusShowVaultPinLockAfterAppOpen();
+            }
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -6358,6 +6380,7 @@
 
         function showInitialLoginChoice() {
             if (sessionUnlocked && currentUser) return;
+            if (_loginRoutePhase === 'app' || _loginRoutePhase === 'routing') return;
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
             nexusRequireAuthScreen();
@@ -6500,22 +6523,23 @@
                 console.warn('[NEXUS] persist session', persistErr);
             }
 
+            let bootOk = true;
             try {
                 setLoginRoutingProgress(45, 'Preparando interfaz…');
                 await bootApp();
                 setLoginRoutingProgress(88, 'Sincronizando datos…');
             } catch (e) {
+                bootOk = false;
                 console.error('[NEXUS] bootApp post-login', e);
-                hideLoginRoutingLoading();
-                clearStaleSession();
-                showLoginFlow();
-                alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
-                return;
             }
 
-            setLoginRoutingProgress(100, 'Listo');
+            setLoginRoutingProgress(100, bootOk ? 'Listo' : 'Interfaz parcial');
             nexusReleaseAppShell();
             hideLoginRoutingLoading();
+
+            if (!bootOk) {
+                console.warn('[NEXUS] interfaz abierta con estado mínimo tras fallo bootApp');
+            }
 
             initCloud().then(async () => {
                 try {
@@ -6669,11 +6693,14 @@
             } finally {
                 if (!delegatedToNative) {
                     window.__nexusGoogleNativePending = null;
-                    const stayInApp = sessionUnlocked && currentUser;
-                    const onLoginScreen = _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup';
-                    if (!stayInApp && !onLoginScreen && (_loginRoutePhase === 'error' || !_loginRoutePhase)) {
+                    const inApp = sessionUnlocked && currentUser;
+                    if (!inApp && _loginRoutePhase === 'error') {
                         resetGoogleLoginButton();
                         showInitialLoginChoice();
+                    } else if (!inApp && _loginRoutePhase === 'pin') {
+                        resetGoogleLoginButton();
+                    } else {
+                        resetGoogleLoginButton();
                     }
                     showLoginRoutingStatus('');
                 }
@@ -6709,9 +6736,11 @@
                 _loginRoutePhase = 'error';
                 alert('Error de autenticación: ' + (error?.message || 'Firebase'));
             } finally {
-                if (_loginRoutePhase === 'error' && !(sessionUnlocked && currentUser)) {
+                if (!(sessionUnlocked && currentUser) && _loginRoutePhase === 'error') {
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
+                } else {
+                    resetGoogleLoginButton();
                 }
                 showLoginRoutingStatus('');
             }
@@ -6777,6 +6806,10 @@
         async function bootApp() {
             if (!sessionUnlocked || !currentUser) throw new Error('Sesión no autenticada');
             let localP = loadLocalProfile(currentUser);
+            if (!localP && userProfile && (userProfile.email || '').trim().toLowerCase() === currentUser) {
+                localP = userProfile;
+                localStorage.setItem('nexus_profile_' + currentUser, JSON.stringify(sanitizeProfileForStorage(localP, currentUser)));
+            }
             if (!localP && typeof getProfileForVault === 'function') {
                 try {
                     localP = await getProfileForVault(currentUser);
@@ -6785,7 +6818,10 @@
                     }
                 } catch (e) { console.warn('[NEXUS] bootApp profile recover', e); }
             }
-            if (!localP) throw new Error('Perfil local no encontrado. Vuelve a entrar con Google o crea el usuario.');
+            if (!localP) {
+                localP = { email: currentUser, name: currentUser.split('@')[0], lastSeen: Date.now(), role: 'user', isAdmin: false };
+                localStorage.setItem('nexus_profile_' + currentUser, JSON.stringify(sanitizeProfileForStorage(localP, currentUser)));
+            }
             userProfile = await ensureProfilePinHash(localP);
             if (!userProfile.email) userProfile.email = currentUser;
             if (window.db) {
@@ -6880,7 +6916,10 @@
             initNexus();
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
-            if (!sessionStorage.getItem('nexus_web_auto_update') && typeof checkScheduledWebUpdate === 'function') checkScheduledWebUpdate();
+            const skipUpd = parseInt(sessionStorage.getItem('nexus_skip_auto_update_until') || '0', 10) || 0;
+            if (Date.now() >= skipUpd && !sessionStorage.getItem('nexus_web_auto_update') && typeof checkScheduledWebUpdate === 'function') {
+                checkScheduledWebUpdate();
+            }
             setTimeout(() => { checkDailyBriefing(); }, 800);
         }
 
