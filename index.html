@@ -105,6 +105,90 @@
             opacity: 1 !important;
             pointer-events: auto !important;
         }
+
+        /* Temas oscuros: títulos y textos secundarios legibles (Oscuro Pro, OLED, Hacker) */
+        html.nexus-theme-dark,
+        html.nexus-theme-oled {
+            --app-muted: #94a3b8;
+            --app-border: rgba(148, 163, 184, 0.22);
+        }
+        html.nexus-theme-hacker { --app-muted: #6ee7b7; --app-border: rgba(0, 255, 65, 0.25); }
+
+        html.nexus-theme-dark main h2.font-black,
+        html.nexus-theme-oled main h2.font-black {
+            color: var(--app-text) !important;
+        }
+        html.nexus-theme-dark main h2[class*="text-cyan"],
+        html.nexus-theme-oled main h2[class*="text-cyan"] { color: #67e8f9 !important; }
+        html.nexus-theme-dark main h2[class*="text-blue"],
+        html.nexus-theme-oled main h2[class*="text-blue"] { color: #93c5fd !important; }
+        html.nexus-theme-dark main h2[class*="text-emerald"],
+        html.nexus-theme-oled main h2[class*="text-emerald"] { color: #6ee7b7 !important; }
+        html.nexus-theme-dark main h2[class*="text-purple"],
+        html.nexus-theme-oled main h2[class*="text-purple"] { color: #c4b5fd !important; }
+        html.nexus-theme-dark main h2[class*="text-indigo"],
+        html.nexus-theme-oled main h2[class*="text-indigo"] { color: #a5b4fc !important; }
+        html.nexus-theme-dark main h2[class*="text-orange"],
+        html.nexus-theme-oled main h2[class*="text-orange"] { color: #fdba74 !important; }
+        html.nexus-theme-dark main h2[class*="text-amber"],
+        html.nexus-theme-oled main h2[class*="text-amber"] { color: #fcd34d !important; }
+        html.nexus-theme-dark main h2[class*="text-rose"],
+        html.nexus-theme-oled main h2[class*="text-rose"] { color: #fda4af !important; }
+
+        html.nexus-theme-dark .text-slate-400,
+        html.nexus-theme-dark .text-slate-500,
+        html.nexus-theme-oled .text-slate-400,
+        html.nexus-theme-oled .text-slate-500 { color: var(--app-muted) !important; }
+        html.nexus-theme-dark .text-slate-600,
+        html.nexus-theme-dark .text-slate-700,
+        html.nexus-theme-oled .text-slate-600,
+        html.nexus-theme-oled .text-slate-700 { color: #cbd5e1 !important; }
+
+        html.nexus-theme-dark .theme-card,
+        html.nexus-theme-oled .theme-card { border-color: var(--app-border) !important; }
+        html.nexus-theme-dark .form-input,
+        html.nexus-theme-oled .form-input {
+            background: #334155 !important;
+            color: var(--app-text) !important;
+            border-color: #475569 !important;
+        }
+        html.nexus-theme-dark .form-input:focus,
+        html.nexus-theme-oled .form-input:focus { border-color: #64748b !important; }
+        html.nexus-theme-dark .filter-chip,
+        html.nexus-theme-oled .filter-chip {
+            background: var(--card-bg) !important;
+            color: var(--app-muted) !important;
+            border-color: var(--app-border) !important;
+        }
+        html.nexus-theme-dark .bg-slate-50,
+        html.nexus-theme-dark .bg-slate-100,
+        html.nexus-theme-oled .bg-slate-50,
+        html.nexus-theme-oled .bg-slate-100 { background-color: #334155 !important; }
+        html.nexus-theme-dark .border-slate-100,
+        html.nexus-theme-dark .border-slate-50,
+        html.nexus-theme-oled .border-slate-100,
+        html.nexus-theme-oled .border-slate-50 { border-color: var(--app-border) !important; }
+        html.nexus-theme-dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]),
+        html.nexus-theme-oled .divide-slate-50 > :not([hidden]) ~ :not([hidden]) { border-color: var(--app-border) !important; }
+        html.nexus-theme-dark #rep-trend-text,
+        html.nexus-theme-dark #rep-structure-text,
+        html.nexus-theme-oled #rep-trend-text,
+        html.nexus-theme-oled #rep-structure-text {
+            color: #cbd5e1 !important;
+            background-color: #334155 !important;
+            border-color: var(--app-border) !important;
+        }
+        html.nexus-theme-dark header .text-slate-400,
+        html.nexus-theme-oled header .text-slate-400 { color: var(--app-muted) !important; }
+        html.nexus-theme-dark .glass-btn,
+        html.nexus-theme-oled .glass-btn { border-color: var(--app-border) !important; }
+        html.nexus-theme-dark .cal-cell,
+        html.nexus-theme-oled .cal-cell { background-color: #334155 !important; }
+        html.nexus-theme-dark .numpad-key,
+        html.nexus-theme-oled .numpad-key {
+            background: #334155 !important;
+            color: var(--app-text) !important;
+        }
     </style>
     <script>
         document.documentElement.classList.add('nexus-auth-pending');
@@ -5160,6 +5244,159 @@
             };
         }
 
+        function sharedTxTimestamp(tx) {
+            return new Date(tx?.updatedAt || tx?._localUpdatedAt || tx?.date || 0).getTime() || 0;
+        }
+
+        function extractTxsMapFromVaultData(data) {
+            const map = {};
+            if (!data) return map;
+            if (data.txsMap && typeof data.txsMap === 'object') Object.assign(map, data.txsMap);
+            if (Array.isArray(data.txs)) data.txs.forEach(t => { if (t && t.id) map[t.id] = t; });
+            return map;
+        }
+
+        function mergeSharedTxsMaps(localMap, remoteMap) {
+            const out = { ...(remoteMap || {}) };
+            Object.keys(localMap || {}).forEach(id => {
+                const L = localMap[id];
+                const R = out[id];
+                if (!R || sharedTxTimestamp(L) >= sharedTxTimestamp(R)) out[id] = L;
+            });
+            return out;
+        }
+
+        function mapRemoteTxToLocalIds(netTx) {
+            const mappedTx = { ...netTx };
+            const localOrig = state.accounts.find(a => a.remoteId === mappedTx.accId);
+            if (localOrig) mappedTx.accId = localOrig.id;
+            const localDest = state.accounts.find(a => a.remoteId === mappedTx.toAccId);
+            if (localDest) mappedTx.toAccId = localDest.id;
+            return mappedTx;
+        }
+
+        function mapLocalTxToRemoteIds(tx) {
+            const net = { ...tx };
+            net.updatedAt = net.updatedAt || new Date().toISOString();
+            net.sharedBy = net.sharedBy || currentUser || '';
+            const orig = state.accounts.find(a => a.id === net.accId && a.isShared);
+            if (orig) net.accId = orig.remoteId;
+            const dest = state.accounts.find(a => a.id === net.toAccId && a.isShared);
+            if (dest) net.toAccId = dest.remoteId;
+            return net;
+        }
+
+        function applySharedTxEffectOnBalance(acc, tx, sign) {
+            const mul = sign > 0 ? 1 : -1;
+            const amt = Math.abs(parseFloat(tx.amount) || 0);
+            if (!amt || !acc) return;
+            if (tx.type === 'transfer') {
+                if (tx.accId === acc.id) {
+                    if (acc.type === 'credit') acc.balance += mul * amt;
+                    else acc.balance -= mul * amt;
+                }
+                if (tx.toAccId === acc.id) {
+                    if (acc.type === 'credit') acc.balance -= mul * amt;
+                    else acc.balance += mul * amt;
+                }
+            } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
+                if (tx.type === 'income') {
+                    if (acc.type === 'credit') acc.balance -= mul * amt;
+                    else acc.balance += mul * amt;
+                } else if (tx.type === 'expense') {
+                    if (acc.type === 'credit') acc.balance += mul * amt;
+                    else acc.balance -= mul * amt;
+                }
+            }
+        }
+
+        function recalculateSharedAccountBalance(acc) {
+            if (!acc || !acc.isShared) return;
+            const opening = typeof acc._openingBalance === 'number' ? acc._openingBalance : 0;
+            acc.balance = opening;
+            const deleted = state.deletedSharedTxs || [];
+            const txs = (state.tx || [])
+                .filter(t => (t.accId === acc.id || t.toAccId === acc.id) && !deleted.includes(t.id))
+                .sort((a, b) => sharedTxTimestamp(a) - sharedTxTimestamp(b));
+            txs.forEach(t => applySharedTxEffectOnBalance(acc, t, 1));
+        }
+
+        function upsertLocalTxFromSharedMap(sharedAcc, txsMap) {
+            let changed = false;
+            const deleted = state.deletedSharedTxs || [];
+            Object.values(txsMap || {}).forEach(netTx => {
+                if (!netTx || !netTx.id || deleted.includes(netTx.id)) return;
+                const mappedTx = mapRemoteTxToLocalIds(netTx);
+                if (mappedTx.accId !== sharedAcc.id && mappedTx.toAccId !== sharedAcc.id) return;
+                const idx = state.tx.findIndex(t => t.id === mappedTx.id);
+                if (idx === -1) {
+                    state.tx.push(mappedTx);
+                    changed = true;
+                } else {
+                    const prev = state.tx[idx];
+                    if (sharedTxTimestamp(mappedTx) >= sharedTxTimestamp(prev)) {
+                        state.tx[idx] = mappedTx;
+                        changed = true;
+                    }
+                }
+            });
+            if (changed) {
+                state.tx = state.tx
+                    .filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
+                    .sort((a, b) => sharedTxTimestamp(a) - sharedTxTimestamp(b));
+            }
+            return changed;
+        }
+
+        function persistSharedP2PChanges() {
+            if (!currentUser || !sessionUnlocked) return;
+            NexusIDB.saveState(currentUser, state).then(() => {
+                if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            }).catch(e => console.warn('[NEXUS] persistSharedP2P', e));
+            if (sessionUnlocked) {
+                clearTimeout(p2pRenderTimeout);
+                p2pRenderTimeout = setTimeout(() => {
+                    updateDashboard();
+                    if (state.activeTab === 'accounts') renderAccountsTab();
+                    if (state.activeTab === 'database') renderDatabase();
+                }, 150);
+            }
+        }
+
+        function applyIncomingSharedVaultSnapshot(currentAcc, data, meta) {
+            if (meta && meta.hasPendingWrites) return false;
+            let hasSharedChanges = false;
+
+            if (typeof currentAcc._openingBalance !== 'number' && data.balance !== undefined) {
+                currentAcc._openingBalance = data.balance;
+                hasSharedChanges = true;
+            }
+
+            if (data.deletedTxs && Array.isArray(data.deletedTxs)) {
+                if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
+                data.deletedTxs.forEach(delId => {
+                    if (state.tx.some(t => t.id === delId)) {
+                        state.tx = state.tx.filter(t => t.id !== delId);
+                        hasSharedChanges = true;
+                    }
+                    if (!state.deletedSharedTxs.includes(delId)) state.deletedSharedTxs.push(delId);
+                });
+            }
+
+            const remoteMap = extractTxsMapFromVaultData(data);
+            if (Object.keys(remoteMap).length > 0) {
+                if (upsertLocalTxFromSharedMap(currentAcc, remoteMap)) hasSharedChanges = true;
+            }
+
+            const prevBal = currentAcc.balance;
+            recalculateSharedAccountBalance(currentAcc);
+            if (prevBal !== currentAcc.balance) hasSharedChanges = true;
+            if (!currentAcc.syncedOnce) {
+                currentAcc.syncedOnce = true;
+                hasSharedChanges = true;
+            }
+            return hasSharedChanges;
+        }
 
         // APEX FIX: Función global inyectable de escucha para P2P (Espejo Quirúrgico Blindado Definitivo)
         function attachP2PListener() {
@@ -5189,121 +5426,28 @@
                     
                     window.sharedUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
                         if (!docSnap.exists()) return;
-                        
-                        // APEX FIX: Obtener referencia VIVA del estado global para evitar mutar objetos fantasma tras recargas
                         const currentAcc = state.accounts.find(a => a.id === aId);
-                        if (!currentAcc) return; 
-                        
+                        if (!currentAcc) return;
+                        const meta = docSnap.metadata || {};
+                        if (meta.hasPendingWrites) return;
+
                         const data = docSnap.data();
-                        let hasSharedChanges = false;
+                        const hasSharedChanges = applyIncomingSharedVaultSnapshot(currentAcc, data, meta);
+                        if (!hasSharedChanges) return;
 
-                        // APEX FIX: Toma el balance de la nube SOLO la primera vez que sincroniza para evitar sobrescrituras de carreras.
-                        if (!currentAcc.syncedOnce && data.balance !== undefined) {
-                            currentAcc.balance = data.balance;
-                            hasSharedChanges = true;
-                        }
-
-                        // 1. Purgar transacciones eliminadas remotamente (Anti-Ghosting y Reversión Contable)
-                        if (data.deletedTxs && Array.isArray(data.deletedTxs)) {
-                            if (!state.deletedSharedTxs) state.deletedSharedTxs = [];
-                            data.deletedTxs.forEach(delId => {
-                                const exTx = state.tx.find(t => t.id === delId);
-                                if (exTx) {
-                                    state.tx = state.tx.filter(t => t.id !== delId);
-                                    hasSharedChanges = true;
-                                    
-                                    // Reversión contable local (solo si ya estábamos sincronizados)
-                                    if (currentAcc.syncedOnce) {
-                                        if (exTx.type === 'transfer') {
-                                            const oOrig = state.accounts.find(a => a.id === exTx.accId);
-                                            const oDest = state.accounts.find(a => a.id === exTx.toAccId);
-                                            if(oOrig && oOrig.id === currentAcc.id) { if(oOrig.type === 'credit') oOrig.balance -= exTx.amount; else oOrig.balance += exTx.amount; }
-                                            if(oDest && oDest.id === currentAcc.id) { if(oDest.type === 'credit') oDest.balance += exTx.amount; else oDest.balance -= exTx.amount; }
-                                        } else if (exTx.accId === currentAcc.id && exTx.type !== 'afterpay') {
-                                            if (exTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance += exTx.amount; else currentAcc.balance -= exTx.amount; }
-                                            if (exTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance -= exTx.amount; else currentAcc.balance += exTx.amount; }
-                                        }
-                                    }
-                                }
-                                if (!state.deletedSharedTxs.includes(delId)) state.deletedSharedTxs.push(delId);
-                            });
-                        }
-                        
-                        let incomingTxs = [];
-                        if (data.txs && Array.isArray(data.txs)) incomingTxs = incomingTxs.concat(data.txs);
-                        if (data.txsMap) incomingTxs = incomingTxs.concat(Object.values(data.txsMap));
-
-                        if (incomingTxs.length > 0) {
-                            incomingTxs.forEach(netTx => {
-                                if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
-
-                                const mappedTx = { ...netTx };
-                                const localOrig = state.accounts.find(a => a.remoteId === mappedTx.accId);
-                                if (localOrig) mappedTx.accId = localOrig.id;
-                                const localDest = state.accounts.find(a => a.remoteId === mappedTx.toAccId);
-                                if (localDest) mappedTx.toAccId = localDest.id;
-
-                                const idx = state.tx.findIndex(t => t.id === mappedTx.id);
-                                if (idx === -1) {
-                                    state.tx.push(mappedTx);
-                                    hasSharedChanges = true;
-                                    
-                                    if (currentAcc.syncedOnce) {
-                                        if (mappedTx.type === 'transfer') {
-                                            if (mappedTx.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
-                                            if (mappedTx.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
-                                        } else if (mappedTx.accId === currentAcc.id && mappedTx.type !== 'afterpay') {
-                                            if (mappedTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
-                                            if (mappedTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
-                                        }
-                                    }
-                                } else {
-                                    const ex = state.tx[idx];
-                                    if (ex.amount !== mappedTx.amount || ex.note !== mappedTx.note || ex.cat !== mappedTx.cat || ex.date !== mappedTx.date || ex.type !== mappedTx.type) {
-                                        
-                                        if (currentAcc.syncedOnce) {
-                                            if (ex.type === 'transfer') {
-                                                if (ex.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= ex.amount; else currentAcc.balance += ex.amount; }
-                                                if (ex.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += ex.amount; else currentAcc.balance -= ex.amount; }
-                                            } else if (ex.accId === currentAcc.id && ex.type !== 'afterpay') {
-                                                if (ex.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance += ex.amount; else currentAcc.balance -= ex.amount; }
-                                                if (ex.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance -= ex.amount; else currentAcc.balance += ex.amount; }
-                                            }
-                                            if (mappedTx.type === 'transfer') {
-                                                if (mappedTx.accId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
-                                                if (mappedTx.toAccId === currentAcc.id) { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
-                                            } else if (mappedTx.accId === currentAcc.id && mappedTx.type !== 'afterpay') {
-                                                if (mappedTx.type === 'income') { if(currentAcc.type === 'credit') currentAcc.balance -= mappedTx.amount; else currentAcc.balance += mappedTx.amount; }
-                                                if (mappedTx.type === 'expense') { if(currentAcc.type === 'credit') currentAcc.balance += mappedTx.amount; else currentAcc.balance -= mappedTx.amount; }
-                                            }
-                                        }
-                                        state.tx[idx] = mappedTx;
-                                        hasSharedChanges = true;
-                                    }
-                                }
-                            });
-                        }
-
-                        if (!currentAcc.syncedOnce) {
-                            currentAcc.syncedOnce = true;
-                            hasSharedChanges = true;
-                        }
-
-                        if (hasSharedChanges) {
-                            state.tx = state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)); 
-                            
-                            // APEX FIX: Usar saveState() para que el SSoT Personal herede la información P2P permanentemente
-                            saveState();
-                            
-                            if (sessionUnlocked) { 
+                        if (nexusIsLocalEditProtected()) {
+                            NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] P2P IDB', e));
+                            if (sessionUnlocked) {
                                 clearTimeout(p2pRenderTimeout);
                                 p2pRenderTimeout = setTimeout(() => {
-                                    updateDashboard(); 
-                                    if(state.activeTab === 'accounts') renderAccountsTab(); 
-                                    if(state.activeTab === 'database') renderDatabase();
+                                    updateDashboard();
+                                    if (state.activeTab === 'accounts') renderAccountsTab();
+                                    if (state.activeTab === 'database') renderDatabase();
                                 }, 150);
                             }
+                            return;
                         }
+                        persistSharedP2PChanges();
                     }, (error) => console.error("[APEX P2P] Error de Snapshot Público", error));
                 });
             });
@@ -5701,7 +5845,7 @@
                 updateCloudBadge(true, true);
                 try {
                     // APEX FIX: Importación de arrayUnion para eliminación bidireccional segura
-                    const { doc, writeBatch, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const { doc, writeBatch, arrayUnion, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     const batch = writeBatch(window.db);
                     let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
@@ -5742,58 +5886,53 @@
                         }
                     }
                     
-                    (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(sharedAcc => {
+                    const sharedAccList = (state.accounts || []).filter(a => a.isShared && a.remoteId);
+                    for (const sharedAcc of sharedAccList) {
+                        recalculateSharedAccountBalance(sharedAcc);
                         const sharedTxs = (state.tx || [])
                             .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
-                            .sort((a,b) => new Date(b.date) - new Date(a.date))
-                            .slice(0, 300) 
-                            .map(t => {
-                                const netTx = { ...t };
-                                const origShared = state.accounts.find(a => a.id === netTx.accId && a.isShared);
-                                if (origShared) netTx.accId = origShared.remoteId;
-                                const destShared = state.accounts.find(a => a.id === netTx.toAccId && a.isShared);
-                                if (destShared) netTx.toAccId = destShared.remoteId;
-                                return netTx;
-                            });
+                            .sort((a, b) => sharedTxTimestamp(a) - sharedTxTimestamp(b))
+                            .slice(-400);
+                        const localMap = {};
+                        sharedTxs.forEach(t => { localMap[t.id] = mapLocalTxToRemoteIds(t); });
 
-                        if (sharedTxs.length === 0 && !sharedAcc.syncedOnce) {
-                            return; 
-                        }
-                        
+                        if (Object.keys(localMap).length === 0 && !sharedAcc.syncedOnce) continue;
+
                         let deletedTxs = state.deletedSharedTxs || [];
                         if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
-                        // APEX OPTIMIZATION: Dirty Checking y Fusión Bidireccional (Mapas en lugar de Arrays)
-                        const txsMap = {};
-                        sharedTxs.forEach(t => { txsMap[t.id] = t; });
+                        const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
+                        let remoteMap = {};
+                        try {
+                            const snap = await getDoc(sharedRef);
+                            if (snap.exists()) remoteMap = extractTxsMapFromVaultData(snap.data());
+                        } catch (e) { console.warn('[NEXUS P2P] lectura remota', e); }
 
-                        const sharedPayload = { 
+                        const mergedMap = mergeSharedTxsMaps(localMap, remoteMap);
+                        upsertLocalTxFromSharedMap(sharedAcc, mergedMap);
+                        recalculateSharedAccountBalance(sharedAcc);
+
+                        const sharedPayload = {
                             name: sharedAcc.name.replace('👥 ', ''),
                             ...buildSharedAclFields(false),
-                            balance: sharedAcc.balance, 
-                            currency: sharedAcc.currency, 
-                            txsMap: txsMap,
-                            updatedAt: new Date().toISOString() 
+                            balance: sharedAcc.balance,
+                            currency: sharedAcc.currency,
+                            txsMap: mergedMap,
+                            updatedAt: new Date().toISOString()
                         };
+                        if (deletedTxs.length > 0) sharedPayload.deletedTxs = arrayUnion(...deletedTxs);
 
-                        if (deletedTxs.length > 0) {
-                            sharedPayload.deletedTxs = arrayUnion(...deletedTxs);
-                        }
-
-                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, t: sharedTxs, d: deletedTxs }); // Hash compacto
+                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, m: Object.keys(mergedMap).length, d: deletedTxs.length });
                         const sharedCacheKey = 'shared_' + sharedAcc.remoteId;
                         const isNewSharedVault = !lastCloudSyncHash[sharedCacheKey];
-                        if (isNewSharedVault) {
-                            Object.assign(sharedPayload, buildSharedAclFields(true));
-                        }
-                        
+                        if (isNewSharedVault) Object.assign(sharedPayload, buildSharedAclFields(true));
+
                         if (lastCloudSyncHash[sharedCacheKey] !== sharedStr) {
-                            const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
                             batch.set(sharedRef, sharedPayload, { merge: true });
                             lastCloudSyncHash[sharedCacheKey] = sharedStr;
                             writesCount++;
                         }
-                    });
+                    }
 
                     // APEX FIX: Sincronización Subida de Tareas P2P a Firebase Bidireccional
                     (state.taskVaults || []).filter(v => v.isShared && v.remoteId).forEach(vault => {
@@ -7621,7 +7760,16 @@
                 state.theme = themes[t] || themes['default'];
             }
 
-            document.documentElement.style.setProperty('--app-bg', state.theme.bg); document.documentElement.style.setProperty('--card-bg', state.theme.card); document.documentElement.style.setProperty('--app-text', state.theme.text); document.documentElement.style.setProperty('--val-inc', state.theme.inc); document.documentElement.style.setProperty('--val-exp', state.theme.exp); 
+            document.documentElement.style.setProperty('--app-bg', state.theme.bg);
+            document.documentElement.style.setProperty('--card-bg', state.theme.card);
+            document.documentElement.style.setProperty('--app-text', state.theme.text);
+            document.documentElement.style.setProperty('--val-inc', state.theme.inc);
+            document.documentElement.style.setProperty('--val-exp', state.theme.exp);
+
+            const themeClass = (t === 'custom' ? 'custom' : (themes[t] ? t : 'default'));
+            document.documentElement.classList.remove('nexus-theme-default', 'nexus-theme-dark', 'nexus-theme-hacker', 'nexus-theme-oled', 'nexus-theme-custom');
+            document.documentElement.classList.add('nexus-theme-' + themeClass);
+            document.querySelector('meta[name="theme-color"]')?.setAttribute('content', state.theme.bg || '#000000');
             
             const f = state.settings.fontStyle || 'system';
             const fonts = { 'system': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', 'mono': 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', 'serif': 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif' };
@@ -8808,6 +8956,7 @@
                 isShared, 
                 remoteId: rId, 
                 _localUpdatedAt: Date.now(),
+                _openingBalance: balance,
                 syncedOnce: isShared ? true : undefined,
                 limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
                 cutoffDay: parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0, 
@@ -9593,6 +9742,10 @@
                 if(acc && tx.type !== 'afterpay') { if(tx.type === 'income') { if(acc.type==='credit') acc.balance -= tx.amount; else acc.balance += tx.amount; } if(tx.type === 'expense') { if(acc.type==='credit') acc.balance += tx.amount; else acc.balance -= tx.amount; } } 
             }
             state.tx = state.tx.filter(t => t.id !== id); deleteCloudTx(id);
+            if (isSharedTx) {
+                const shAcc = state.accounts.find(a => a.isShared && (a.id === tx.accId || a.id === tx.toAccId));
+                if (shAcc) recalculateSharedAccountBalance(shAcc);
+            }
             
             // APEX FIX: Refresco dinámico transversal
             saveState(); updateDashboard(); 
@@ -10711,6 +10864,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                 } 
                 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
+                const txAcc = state.accounts.find(a => a.id === newTx.accId);
+                const txDest = newTx.toAccId ? state.accounts.find(a => a.id === newTx.toAccId) : null;
+                if (txAcc && txAcc.isShared) {
+                    newTx.sharedBy = currentUser || '';
+                    newTx.updatedAt = new Date().toISOString();
+                    recalculateSharedAccountBalance(txAcc);
+                }
+                if (txDest && txDest.isShared) recalculateSharedAccountBalance(txDest);
                 state.tx.push(newTx); saveCloudTx(newTx);
 
                 // APEX FIX: Amortización Automática (Solo genera movimientos bancarios para cobros de hoy, el resto $0)
