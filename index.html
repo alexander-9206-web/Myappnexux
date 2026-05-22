@@ -4891,6 +4891,141 @@
         let isSyncing = false;
         let syncTimeout = null;
         let syncPending = false; // APEX FIX: Flag de cola segura
+        const NEXUS_SYNC_ARRAY_KEYS = ['accounts', 'loans', 'tx', 'tasks', 'goals', 'projects', 'projectVaults', 'taskVaults', 'pseLinks', 'categories', 'catParents'];
+        const NEXUS_LOCAL_GRACE_MS = 3500;
+        let nexusLocalRevision = 0;
+        let nexusLastLocalEditAt = 0;
+        let nexusSuppressRemoteUntil = 0;
+        let nexusLastPushAt = 0;
+        let nexusCloudHydrated = false;
+        let nexusPendingRemoteApply = null;
+        let nexusRemoteFlushTimer = null;
+
+        function markLocalMutation() {
+            nexusLocalRevision++;
+            nexusLastLocalEditAt = Date.now();
+            nexusSuppressRemoteUntil = Date.now() + NEXUS_LOCAL_GRACE_MS;
+        }
+
+        function nexusIsLocalEditProtected() {
+            return isSyncing || Date.now() < nexusSuppressRemoteUntil;
+        }
+
+        function nexusRecordTimestamp(item) {
+            if (!item || typeof item !== 'object') return item;
+            if (!item._localUpdatedAt) item._localUpdatedAt = Date.now();
+            return item;
+        }
+
+        function mergeRecordsById(localArr, remoteArr) {
+            const map = new Map();
+            (remoteArr || []).forEach(item => {
+                if (!item) return;
+                const id = item.id || item.remoteId;
+                if (id) map.set(id, item);
+            });
+            (localArr || []).forEach(item => {
+                if (!item) return;
+                const id = item.id || item.remoteId;
+                if (!id) return;
+                if (!map.has(id)) {
+                    map.set(id, item);
+                    return;
+                }
+                const prev = map.get(id);
+                const localTs = item._localUpdatedAt || new Date(item.updatedAt || item.date || 0).getTime() || 0;
+                const prevTs = prev._localUpdatedAt || new Date(prev.updatedAt || prev.date || 0).getTime() || 0;
+                if (localTs >= prevTs) map.set(id, item);
+            });
+            return Array.from(map.values());
+        }
+
+        function mergeCloudArrayField(key, localArr, remoteArr) {
+            const local = localArr || [];
+            const remote = remoteArr || [];
+            if (!remote.length && local.length) return local;
+            if (nexusIsLocalEditProtected() && local.length > remote.length) return local;
+            if (nexusIsLocalEditProtected() && local.length && remote.length === 0) return local;
+            return mergeRecordsById(local, remote);
+        }
+
+        function mergeCloudCoreIntoLocal(remoteData) {
+            if (!remoteData || typeof remoteData !== 'object') return;
+            const importGuard = Date.now() < parseInt(sessionStorage.getItem('nexus_import_guard_until') || '0', 10);
+            const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
+            const currentTx = state.tx || [];
+
+            if (nexusIsLocalEditProtected()) {
+                mergeCoreSettingsFromCloud(prevSettings, remoteData);
+                return;
+            }
+
+            const remoteCopy = { ...remoteData };
+            NEXUS_SYNC_ARRAY_KEYS.forEach(k => delete remoteCopy[k]);
+            delete remoteCopy.tx;
+            delete remoteCopy.settings;
+
+            state = { ...state, ...remoteCopy };
+            NEXUS_SYNC_ARRAY_KEYS.forEach(k => {
+                if (k === 'tx') return;
+                state[k] = mergeCloudArrayField(k, state[k], remoteData[k]);
+            });
+            state.tx = currentTx;
+
+            if (importGuard) {
+                const preserved = {};
+                NEXUS_SYNC_ARRAY_KEYS.forEach(k => {
+                    if (Array.isArray(state[k]) && state[k].length) preserved[k] = state[k];
+                });
+                NEXUS_SYNC_ARRAY_KEYS.forEach(k => {
+                    const remote = remoteData[k];
+                    const local = preserved[k];
+                    if (local && local.length && (!Array.isArray(remote) || remote.length < local.length)) {
+                        state[k] = local;
+                    }
+                });
+            }
+            mergeCoreSettingsFromCloud(prevSettings, remoteData);
+        }
+
+        function mergeRemoteTxShards(incomingTxByYear) {
+            const localTxByYear = {};
+            (state.tx || []).forEach(t => {
+                const y = new Date(t.date).getFullYear() || new Date().getFullYear();
+                if (!localTxByYear[y]) localTxByYear[y] = [];
+                localTxByYear[y].push(t);
+            });
+            for (const y in incomingTxByYear) {
+                localTxByYear[y] = mergeRecordsById(localTxByYear[y] || [], incomingTxByYear[y] || []);
+            }
+            let merged = [];
+            for (const y in localTxByYear) merged = merged.concat(localTxByYear[y]);
+            return merged;
+        }
+
+        function scheduleNexusRemoteFlush() {
+            clearTimeout(nexusRemoteFlushTimer);
+            nexusRemoteFlushTimer = setTimeout(() => {
+                nexusRemoteFlushTimer = null;
+                if (!nexusPendingRemoteApply || !sessionUnlocked || !currentUser) return;
+                const pending = nexusPendingRemoteApply;
+                nexusPendingRemoteApply = null;
+                if (pending.coreData) mergeCloudCoreIntoLocal(pending.coreData);
+                if (pending.txByYear && Object.keys(pending.txByYear).length) {
+                    state.tx = mergeRemoteTxShards(pending.txByYear);
+                }
+                NexusIDB.saveState(currentUser, state).then(() => {
+                    if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+                }).catch(e => console.warn('[NEXUS] remote flush IDB', e));
+            }, 120);
+        }
+
+        function queueRemoteSnapshotApply(coreData, txByYear) {
+            if (!nexusPendingRemoteApply) nexusPendingRemoteApply = { coreData: null, txByYear: {} };
+            if (coreData) nexusPendingRemoteApply.coreData = coreData;
+            if (txByYear) Object.assign(nexusPendingRemoteApply.txByYear, txByYear);
+            scheduleNexusRemoteFlush();
+        }
 
         function nexusDetachAllP2PListeners() {
             p2pListenersSessionReady = false;
@@ -5493,77 +5628,45 @@
                         let hasChanges = false;
                         let coreTouched = false;
                         let incomingTxByYear = {};
+                        let pendingCore = null;
                         
                         snapshot.docChanges().forEach((change) => {
-                            if (!change.doc.metadata.hasPendingWrites) {
-                                hasChanges = true;
-                                const data = change.doc.data();
-                                
-                                if (change.doc.id === 'core') {
-                                    coreTouched = true;
-                                    const currentTx = state.tx || [];
-                                    const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
-                                    const importGuard = Date.now() < parseInt(sessionStorage.getItem('nexus_import_guard_until') || '0', 10);
-                                    const preserved = {};
-                                    if (importGuard) {
-                                        NEXUS_BACKUP_ARRAY_KEYS.forEach(k => {
-                                            if (Array.isArray(state[k]) && state[k].length) preserved[k] = state[k];
-                                        });
-                                    }
-                                    state = { ...state, ...data };
-                                    state.tx = currentTx;
-                                    if (importGuard) {
-                                        NEXUS_BACKUP_ARRAY_KEYS.forEach(k => {
-                                            const remote = data[k];
-                                            const local = preserved[k];
-                                            if (local && local.length && (!Array.isArray(remote) || remote.length < local.length)) {
-                                                state[k] = local;
-                                            }
-                                        });
-                                    }
-                                    mergeCoreSettingsFromCloud(prevSettings, data);
-                                } else if (change.doc.id.startsWith('tx_')) {
-                                    // Capturamos las transacciones agrupadas por año
-                                    const year = change.doc.id.split('_')[1];
-                                    incomingTxByYear[year] = data.tx || [];
-                                }
+                            if (change.doc.metadata.hasPendingWrites) return;
+                            hasChanges = true;
+                            const data = change.doc.data();
+                            
+                            if (change.doc.id === 'core') {
+                                coreTouched = true;
+                                pendingCore = data;
+                            } else if (change.doc.id.startsWith('tx_')) {
+                                const year = change.doc.id.split('_')[1];
+                                incomingTxByYear[year] = data.tx || [];
                             }
                         });
 
                         const shouldAttachP2p = isFirstLoad || coreTouched;
 
-                        if (hasChanges) {
-                            // Reconstruimos el array de transacciones sin duplicar datos
+                        if (hasChanges && nexusIsLocalEditProtected()) {
+                            queueRemoteSnapshotApply(pendingCore, incomingTxByYear);
+                            if (isFirstLoad) { isFirstLoad = false; nexusCloudHydrated = true; resolve(); }
+                        } else if (hasChanges) {
+                            if (pendingCore) mergeCloudCoreIntoLocal(pendingCore);
                             if (Object.keys(incomingTxByYear).length > 0) {
-                                let newTxArray = [];
-                                const localTxByYear = {};
-                                
-                                (state.tx || []).forEach(t => {
-                                    const y = new Date(t.date).getFullYear() || new Date().getFullYear();
-                                    if(!localTxByYear[y]) localTxByYear[y] = [];
-                                    localTxByYear[y].push(t);
-                                });
-                                
-                                for (const y in incomingTxByYear) {
-                                    localTxByYear[y] = incomingTxByYear[y];
-                                }
-                                
-                                for (const y in localTxByYear) {
-                                    newTxArray = newTxArray.concat(localTxByYear[y]);
-                                }
-                                state.tx = newTxArray;
+                                state.tx = mergeRemoteTxShards(incomingTxByYear);
                             }
 
-                            if(currentUser) {
+                            if (currentUser) {
                                 NexusIDB.saveState(currentUser, state).then(() => {
                                     if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
                                     if (sessionUnlocked) scheduleCloudUiRefresh();
-                                    if(isFirstLoad) { isFirstLoad = false; resolve(); }
+                                    if (isFirstLoad) { isFirstLoad = false; nexusCloudHydrated = true; resolve(); }
                                 });
                             }
-                            console.log(`[APEX SYS] Datos en vivo inyectados desde Firestore. Multidispositivo activo.`);
-                        } else {
-                            if(isFirstLoad) { isFirstLoad = false; resolve(); }
+                            console.log('[APEX SYS] Nube fusionada con bóveda local (sin sobrescritura).');
+                        } else if (isFirstLoad) {
+                            isFirstLoad = false;
+                            nexusCloudHydrated = true;
+                            resolve();
                         }
                         
                         if (shouldAttachP2p) scheduleP2PListenersAttach(!!coreTouched);
@@ -5759,11 +5862,13 @@
                     syncPending = true; // Reprogramar en caso de fallo de red
                 } finally {
                     isSyncing = false;
-                    setTimeout(() => updateCloudBadge(true, false), 500); 
-                    // APEX OPTIMIZATION: Drenar la cola pendiente de forma segura y acelerada (300ms)
+                    nexusLastPushAt = Date.now();
+                    nexusSuppressRemoteUntil = Math.max(nexusSuppressRemoteUntil, Date.now() + 900);
+                    setTimeout(() => updateCloudBadge(true, false), 500);
+                    scheduleNexusRemoteFlush();
                     if (syncPending) setTimeout(() => triggerCloudSync(), 300);
                 }
-            }, 300); // APEX OPTIMIZATION: Latencia de subida reducida a 300ms para sensación de tiempo real estricta
+            }, 300);
         }
 
         function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
@@ -6532,7 +6637,9 @@
             clearTimeout(saveStateDebounceTimer);
             clearTimeout(cloudUiRefreshTimer);
             clearTimeout(syncTimeout);
+            clearTimeout(nexusRemoteFlushTimer);
             clearTimeout(p2pAttachDebounceTimer);
+            nexusPendingRemoteApply = null;
             clearTimeout(inactivityTimer);
             if (autoBackupInterval) { clearInterval(autoBackupInterval); autoBackupInterval = null; }
             if (autoBackupTimeout) { clearTimeout(autoBackupTimeout); autoBackupTimeout = null; }
@@ -6633,6 +6740,7 @@
         
         function saveState() { 
             if (!currentUser || !sessionUnlocked || !state) return;
+            markLocalMutation();
             clearTimeout(saveStateDebounceTimer);
             saveStateDebounceTimer = setTimeout(() => {
                 if (!currentUser || !sessionUnlocked || !state) return;
@@ -6676,7 +6784,11 @@
         }
 
         function convertCurrency(amount, fromCode, toCode) { if (!amount) return 0; if(fromCode === toCode) return amount; return (amount / (LIVE_RATES[fromCode] || 1)) * (LIVE_RATES[toCode] || 1); }
-        function buildTransactionSchema(baseObj) { const baseCurrency = state.settings.baseCurrency || 'USD'; return { ...baseObj, id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), original_amount: baseObj.amount, currency_code: baseObj.currency, base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency), flags: { isAfterpay: baseObj.type === 'afterpay' } }; }
+        function buildTransactionSchema(baseObj) {
+            const baseCurrency = state.settings.baseCurrency || 'USD';
+            const tx = { ...baseObj, id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), original_amount: baseObj.amount, currency_code: baseObj.currency, base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency), flags: { isAfterpay: baseObj.type === 'afterpay' }, _localUpdatedAt: Date.now() };
+            return tx;
+        }
         const getActiveAccounts = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.accounts || []).map(a => ({ ...a, original_balance: a.balance, original_currency: a.currency, balance: convertCurrency(a.balance, a.currency, base), limit: convertCurrency(a.limit || 0, a.currency, base), currency: base, isVirtual: true })); } return (state.accounts || []).filter(a => a.currency === state.activeCurrency); };
         const getActiveTx = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.tx || []).map(t => ({ ...t, original_amount: t.amount, original_currency: t.currency, amount: convertCurrency(t.amount, t.currency, base), currency: base, isVirtual: true })); } return (state.tx || []).filter(t => t.currency === state.activeCurrency); };
         const getActiveLoans = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.loans || []).map(l => ({ ...l, original_total: l.total, original_balance: l.balance, original_currency: l.currency, total: convertCurrency(l.total, l.currency, base), balance: convertCurrency(l.balance, l.currency, base), currency: base, isVirtual: true })); } return (state.loans || []).filter(l => l.currency === state.activeCurrency); };
@@ -8695,6 +8807,7 @@
                 name, currency, balance, type, 
                 isShared, 
                 remoteId: rId, 
+                _localUpdatedAt: Date.now(),
                 syncedOnce: isShared ? true : undefined,
                 limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
                 cutoffDay: parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0, 
