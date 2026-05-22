@@ -968,6 +968,7 @@
                     </div>
                 </div>
                 <div id="cat-manage-list" class="space-y-2 max-h-64 overflow-y-auto pr-2 hide-scrollbar mt-2"></div>
+                <button type="button" onclick="nexusRestoreCategoriesCatalog(true); saveState();" class="w-full mt-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-[9px] font-black uppercase border border-slate-200 active:scale-95 transition-colors"><i class="fa-solid fa-broom mr-1"></i> Restablecer catálogo (quitar Variós / Afterpay / sistema)</button>
                 <div id="edit-cat-panel" class="hidden bg-purple-50 p-4 rounded-2xl border border-purple-100 mt-2">
                     <input type="hidden" id="edit-cat-original">
                     <input type="hidden" id="edit-cat-type">
@@ -2914,8 +2915,54 @@
         }
 
         // APEX FIX: Listas de purga para limpiar el estado de usuarios existentes
-        const PURGE_CATS = ["💰 Salario", "💼 Freelance", "📈 Inversión", "🏠 Vivienda", "🍎 Comida", "🚗 Transporte", "🍿 Ocio", "🏥 Salud", "🛍️ Compras", "💳 Pago Deuda", "🛍️ Afterpay", "🔀 Entre Cuentas", "⬇️ Retiro Efectivo"];
-        const LEGACY_SYSTEM_CATS = [...PURGE_CATS, '⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay', '🛍️ Compras TC', 'Afterpay'];
+        const PURGE_CATS = ["💰 Salario", "💼 Freelance", "📈 Inversión", "🏠 Vivienda", "🍎 Comida", "🚗 Transporte", "🍿 Ocio", "🏥 Salud", "🛍️ Compras", "💳 Pago Deuda", "🛍️ Afterpay", "🔀 Entre Cuentas", "⬇️ Retiro Efectivo", "💰 Ingresos Varios", "🛍️ Gastos Varios", "🛍️ Compras TC", "Afterpay", "Varios", "varios"];
+        const PURGE_PARENTS = ["Ingresos", "Gastos", "Transferencias", "Deudas", "Afterpay", "Varios", "Sistema", "General"];
+        const LEGACY_SYSTEM_CATS = [...new Set([...PURGE_CATS, ...PURGE_PARENTS, '⚡ Pendiente Único', '💳 Pago TC', '💳 Pago Deuda', '🛍️ Afterpay', '🛍️ Compras TC', 'Afterpay'])];
+
+        function nexusIsLegacyCategoryLabel(label) {
+            if (label == null || typeof label !== 'string') return true;
+            const t = label.trim();
+            if (!t) return false;
+            if (LEGACY_SYSTEM_CATS.includes(t)) return true;
+            const lower = t.toLowerCase();
+            return /varios|afterpay|entre cuentas|pago deuda|pago tc|compras tc|pendiente único|retiro efectivo|ingresos varios|gastos varios|salario|freelance|inversión|inversion/.test(lower);
+        }
+
+        /** Elimina categorías de fábrica y reconstruye el catálogo solo con padres/subcategorías creados por el usuario. */
+        function nexusRestoreCategoriesCatalog(showAlert) {
+            if (!state) return;
+            if (!state.categories) state.categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+            if (!state.catParents) state.catParents = { global: [] };
+            const parents = new Set();
+            const cats = new Set();
+            (state.catParents.global || []).forEach(p => {
+                if (p && !nexusIsLegacyCategoryLabel(p)) parents.add(p.trim());
+            });
+            (state.categories.global || []).forEach(c => {
+                if (c && !nexusIsLegacyCategoryLabel(c)) cats.add(c.trim());
+            });
+            (state.tx || []).forEach(tx => {
+                if (!tx || !tx.cat || nexusIsLegacyCategoryLabel(tx.cat)) return;
+                const m = tx.cat.match(/\[(.*?)\]\s*(.*)/);
+                if (m && m[1]) {
+                    const p = m[1].trim();
+                    const sub = (m[2] || '').trim();
+                    if (!nexusIsLegacyCategoryLabel(p)) {
+                        parents.add(p);
+                        cats.add(sub ? `[${p}] ${sub}` : p);
+                    }
+                } else if (!nexusIsLegacyCategoryLabel(tx.cat)) {
+                    parents.add(tx.cat.trim());
+                    cats.add(tx.cat.trim());
+                }
+            });
+            state.catParents = { global: [...parents].sort((a, b) => a.localeCompare(b, 'es')) };
+            state.categories = { global: [...cats].sort((a, b) => a.localeCompare(b, 'es')) };
+            sanitizeUserCategoriesInState();
+            if (typeof updateCatManageView === 'function') updateCatManageView();
+            if (typeof updateDbCatFilter === 'function') updateDbCatFilter();
+            if (showAlert) alert('✅ Catálogo restablecido: solo categorías y subcategorías creadas por ti.');
+        }
 
         function isValidVaultUserId(id) {
             if (!id || typeof id !== 'string') return false;
@@ -3184,8 +3231,8 @@
             if (!state.categories.global) state.categories.global = [];
             if (!state.catParents) state.catParents = { global: [] };
             if (!state.catParents.global) state.catParents.global = [];
-            state.categories.global = (state.categories.global || []).filter(c => c && !LEGACY_SYSTEM_CATS.includes(c));
-            state.catParents.global = (state.catParents.global || []).filter(p => p && !PURGE_PARENTS.includes(p) && !LEGACY_SYSTEM_CATS.includes(p));
+            state.categories.global = (state.categories.global || []).filter(c => c && !nexusIsLegacyCategoryLabel(c));
+            state.catParents.global = (state.catParents.global || []).filter(p => p && !nexusIsLegacyCategoryLabel(p));
             const validParents = new Set(state.catParents.global);
             state.categories.global = state.categories.global.filter(c => {
                 const m = c.match(/\[(.*?)\]\s*(.*)/);
@@ -7922,11 +7969,10 @@
             }
 
             // APEX FIX: Purga de Categorías Nativas para dejar únicamente las manuales
-            if (state.categories && state.categories.global) {
-                state.categories.global = state.categories.global.filter(c => !LEGACY_SYSTEM_CATS.includes(c));
-            }
-            if (state.catParents && state.catParents.global) {
-                state.catParents.global = state.catParents.global.filter(p => !PURGE_PARENTS.includes(p));
+            const catsBefore = JSON.stringify({ c: state.categories, p: state.catParents });
+            nexusRestoreCategoriesCatalog(false);
+            if (JSON.stringify({ c: state.categories, p: state.catParents }) !== catsBefore) {
+                nexusTouchLocalState('categories-purge');
             }
             sanitizeUserCategoriesInState();
             if (typeof loadAiKeySessionCache === 'function') loadAiKeySessionCache();
@@ -8233,7 +8279,7 @@
                             const amtOrig = l.original_balance || l.balance || l.total;
                             const pId = 'proj_pend_'+l.id;
                             if (!rawTx.some(rt => rt.id === pId)) {
-                                rawTx.push({ id: pId, type: 'expense', amount: convertCurrency(amtOrig, l.original_currency || l.currency, cDisplay), original_amount: amtOrig, original_currency: l.original_currency || l.currency, cat: '⚡ Pendiente Único', accId: null, date: pD.toISOString(), note: l.name, isProjected: true, currency: cDisplay, priority: l.priority || 'medium' });
+                                rawTx.push({ id: pId, type: 'expense', amount: convertCurrency(amtOrig, l.original_currency || l.currency, cDisplay), original_amount: amtOrig, original_currency: l.original_currency || l.currency, cat: `[Deudas] ${l.name}`, accId: null, date: pD.toISOString(), note: l.name, isProjected: true, currency: cDisplay, priority: l.priority || 'medium' });
                             }
                         }
                     } else {
@@ -10399,7 +10445,7 @@
             } 
             card.balance += amount; 
             // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
-            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: '🛍️ Compras TC', accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
+            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: `[Crédito] ${desc}`, accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
             
             state.tx.push(newTx); saveCloudTx(newTx);
@@ -10434,7 +10480,7 @@
                 
                 cats.forEach(c => {
                     const m = c.match(/\[(.*?)\]\s*(.*)/);
-                    if (m && m[1] === parent && m[2]) subs.add(m[2]);
+                    if (m && m[1] === parent && m[2] && !nexusIsLegacyCategoryLabel(m[2])) subs.add(m[2]);
                 });
                 
                 subContainer.classList.remove('hidden');
@@ -10484,6 +10530,7 @@
             const inp = $id('f-cat-parent');
             const val = inp.value.trim();
             if (!val) return alert("Escribe un nombre para la categoría.");
+            if (nexusIsLegacyCategoryLabel(val)) return alert('Ese nombre está reservado (categoría del sistema). Elige otro nombre.');
             
             if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
             if(!state.catParents.global) state.catParents.global = [];
@@ -10512,6 +10559,9 @@
             
             if (!subVal) return alert("Escribe un nombre para la subcategoría.");
             if (!parentVal || parentVal === 'ADD_NEW_CAT') return;
+            if (nexusIsLegacyCategoryLabel(parentVal) || nexusIsLegacyCategoryLabel(subVal)) {
+                return alert('Nombre reservado del sistema. Usa categorías creadas por ti.');
+            }
             
             const fullCatName = `[${parentVal}] ${subVal}`;
             
@@ -10754,7 +10804,7 @@
                 selP.innerHTML = '<option value="">-- Seleccionar Categoría --</option>'; 
                 if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
                 const parents = state.catParents.global || []; 
-                parents.forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
+                parents.filter(p => !nexusIsLegacyCategoryLabel(p)).forEach(p => { selP.innerHTML += `<option value="${p}">${p}</option>`; }); 
                 selP.innerHTML += `<option value="ADD_NEW_CAT" class="font-bold text-indigo-600">➕ Agregar categoría...</option>`;
                 selP.classList.remove('hidden'); 
             }
@@ -10811,22 +10861,22 @@
                         if ($id('f-time')) $id('f-time').value = String(dObj.getHours()).padStart(2, '0') + ':' + String(dObj.getMinutes()).padStart(2, '0');
                     }
                     
-                    if (oldTx.cat && selP) {
+                    if (oldTx.cat && selP && !nexusIsLegacyCategoryLabel(oldTx.cat)) {
                         const m = oldTx.cat.match(/\[(.*?)\]\s*(.*)/);
-                        if (m && m[1]) {
+                        if (m && m[1] && !nexusIsLegacyCategoryLabel(m[1])) {
                             let exists = Array.from(selP.options).some(o => o.value === m[1]);
-                            if (!exists) selP.innerHTML += `<option value="${m[1]}">${m[1]}</option>`;
+                            if (!exists && !nexusIsLegacyCategoryLabel(m[1])) selP.innerHTML += `<option value="${m[1]}">${m[1]}</option>`;
                             selP.value = m[1];
                             handleParentCategoryChange();
                             setTimeout(() => {
                                 const subSel = $id('f-cat-sub-select');
-                                if (subSel && m[2]) {
+                                if (subSel && m[2] && !nexusIsLegacyCategoryLabel(m[2])) {
                                     let subExists = Array.from(subSel.options).some(o => o.value === m[2]);
                                     if (!subExists) subSel.innerHTML += `<option value="${m[2]}">${m[2]}</option>`;
                                     subSel.value = m[2];
                                 }
                             }, 50);
-                        } else {
+                        } else if (!nexusIsLegacyCategoryLabel(oldTx.cat)) {
                             let exists = Array.from(selP.options).some(o => o.value === oldTx.cat);
                             if (!exists) selP.innerHTML += `<option value="${oldTx.cat}">${oldTx.cat}</option>`;
                             selP.value = oldTx.cat;
@@ -10986,8 +11036,8 @@
                 
                 cats = getUserCategoryLabels();
                 if (type === 'afterpay') {
-                    const apFromTx = [...new Set((state.tx || []).filter(t => t.type === 'afterpay' && t.cat).map(t => t.cat))];
-                    cats = [...new Set([...cats.filter(c => /afterpay/i.test(c)), ...apFromTx])];
+                    const apFromTx = [...new Set((state.tx || []).filter(t => t.type === 'afterpay' && t.cat && !nexusIsLegacyCategoryLabel(t.cat)).map(t => t.cat))];
+                    cats = [...new Set([...cats, ...apFromTx])].filter(c => !nexusIsLegacyCategoryLabel(c));
                 } else if (type === 'debt' || type === 'single_debt') {
                     cats = cats.filter(c => /deuda|tc|pendiente/i.test(c));
                 }
@@ -11863,18 +11913,17 @@ ${JSON.stringify(dataToAnalyze)}`;
             const costType = $id('f-cost-type') ? $id('f-cost-type').value : 'variable';
             
             let cat = sub ? `[${parent}] ${sub}` : parent;
-            
-            // APEX FIX: Interceptar Gasto manual categorizado como Afterpay y forzar conversión a contrato BNPL (4 cuotas sin interés)
-            if (type === 'expense' && cat && cat.toLowerCase().includes('afterpay')) {
-                type = 'afterpay';
-            }
 
-            if(type === 'afterpay' && !parent) cat = '🛍️ Gastos Varios';
-            if(type === 'transfer') cat = '🔀 Entre Cuentas';
-            if(type === 'income' && !cat) cat = '💰 Ingresos Varios';
-            if(type === 'expense' && !cat) cat = '🛍️ Gastos Varios';
+            if (type === 'transfer') {
+                cat = '';
+            } else if (!parent) {
+                return alert('Debes crear o seleccionar una categoría padre (y subcategoría si aplica) antes de guardar.');
+            }
             
             if (parent && type !== 'transfer') {
+                if (nexusIsLegacyCategoryLabel(parent) || nexusIsLegacyCategoryLabel(cat)) {
+                    return alert('Ese nombre de categoría pertenece al catálogo antiguo del sistema. Crea una categoría nueva en Ajustes.');
+                }
                 if(!state.catParents) state.catParents = JSON.parse(JSON.stringify(CAT_PARENTS));
                 if(!state.catParents.global) state.catParents.global = [];
                 if(!state.catParents.global.includes(parent)) state.catParents.global.push(parent);
@@ -15625,6 +15674,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             const sub = $id('manage-cat-sub').value.trim();
             
             if(!parent) return alert("El nombre de la Categoría Padre es obligatorio.");
+            if (nexusIsLegacyCategoryLabel(parent) || (sub && nexusIsLegacyCategoryLabel(sub))) {
+                return alert('Ese nombre pertenece al catálogo antiguo (Varios, Afterpay, etc.). Elige otro.');
+            }
             
             const fullCatName = sub ? `[${parent}] ${sub}` : parent;
             
@@ -15670,6 +15722,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             const parentRef = $id('edit-cat-parent-ref').value;
 
             if(!newName || orig === newName) { closeCategoryEdit(); return; }
+            if (nexusIsLegacyCategoryLabel(newName)) {
+                return alert('Ese nombre pertenece al catálogo antiguo (Varios, Afterpay, etc.). Elige otro.');
+            }
             
             if(!state.categories) state.categories = { global: [] };
             if(!state.categories.global) state.categories.global = [];
