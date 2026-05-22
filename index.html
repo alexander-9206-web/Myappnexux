@@ -3491,7 +3491,13 @@
 
         function showColdStartLogin() {
             nexusRequireAuthScreen();
-            initCloud().then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+            initCloud().then(async () => {
+                if (sessionStorage.getItem('nexus_auth_redirect_pending') === '1') {
+                    const handled = await nexusHandleGoogleRedirectResult();
+                    if (handled) return;
+                }
+                await refreshFounderLoginHint();
+            }).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
             fetchLoginUsers(false);
             showInitialLoginChoice();
         }
@@ -6505,6 +6511,78 @@
         // ============================================================================
         // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
         // ============================================================================
+        function nexusFormatAuthError(error) {
+            const code = error?.code || '';
+            const host = window.location.hostname || '(vacío)';
+            const origin = window.location.origin || window.location.protocol;
+            const map = {
+                'auth/unauthorized-domain': `Dominio no autorizado (${host}).\n\nFirebase Console → Authentication → Dominios autorizados → añade:\n• ${host}\n• ${origin}`,
+                'auth/popup-blocked': 'El navegador bloqueó la ventana de Google. Se usará redirección completa; si falla, permite ventanas emergentes o cookies para este sitio.',
+                'auth/popup-closed-by-user': '',
+                'auth/cancelled-popup-request': 'Espera a que termine el intento anterior de Google e inténtalo de nuevo.',
+                'auth/network-request-failed': 'Sin conexión o la red bloquea Firebase. Revisa Wi‑Fi / VPN / firewall.',
+                'auth/operation-not-allowed': 'Google Sign-In no está habilitado en Firebase Authentication.',
+                'auth/invalid-api-key': 'Clave de API de Firebase inválida en la configuración de la app.',
+                'auth/account-exists-with-different-credential': 'Ese correo ya está registrado con otro método de acceso.',
+                'auth/too-many-requests': 'Demasiados intentos. Espera un minuto e inténtalo otra vez.',
+                'auth/internal-error': 'Error interno de Google/Firebase. Prueba en otra pestaña o con redirección.',
+            };
+            if (Object.prototype.hasOwnProperty.call(map, code)) return map[code];
+            const msg = String(error?.message || '');
+            if (/third.?party|cookie|iframe|storage/i.test(msg)) {
+                return 'Cookies o almacenamiento bloqueados. En Safari desactiva "Impedir seguimiento entre sitios" para este dominio, o usa Chrome/Edge.';
+            }
+            return msg || code || 'Revisa la conexión e inténtalo de nuevo.';
+        }
+
+        function nexusAuthOriginBlocked() {
+            if (window.location.protocol === 'file:') {
+                return 'No puedes iniciar sesión abriendo el archivo .html local (file://).\n\nUsa la URL HTTPS de Vercel o un servidor local (http://localhost).';
+            }
+            return null;
+        }
+
+        function nexusPreferGoogleRedirect() {
+            const ua = navigator.userAgent || '';
+            const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+            const inApp = /FBAN|Instagram|Line\//i.test(ua);
+            const safari = /^((?!chrome|android).)*safari/i.test(ua);
+            return mobile || inApp || (safari && touch) || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
+        }
+
+        async function nexusSignOutAnonymousIfNeeded(auth, signOutFn) {
+            if (auth.currentUser?.isAnonymous) {
+                try { await signOutFn(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo', e); }
+            }
+        }
+
+        async function nexusHandleGoogleRedirectResult() {
+            if (window.webkit?.messageHandlers?.native_google_login) return false;
+            try {
+                await initCloud();
+                const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth(window.__nexusFirebaseApp);
+                const result = await getRedirectResult(auth);
+                if (!result?.user) return false;
+                sessionStorage.removeItem('nexus_auth_redirect_pending');
+                sessionStorage.removeItem('nexus_auth_use_redirect');
+                fbUser = result.user;
+                showLoginRoutingLoading('Completando inicio con Google…');
+                await routeAfterFirebaseAuth(result.user, result.user.displayName || 'Usuario Google', result.user.photoURL);
+                return true;
+            } catch (e) {
+                console.error('[NEXUS] getRedirectResult', e);
+                sessionStorage.removeItem('nexus_auth_redirect_pending');
+                _loginRoutePhase = 'error';
+                const txt = nexusFormatAuthError(e);
+                if (txt) alert('Error de autenticación: ' + txt);
+                resetGoogleLoginButton();
+                showInitialLoginChoice();
+                return false;
+            }
+        }
+
         async function triggerNativeGoogleLogin() {
             const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
             if (btn) {
@@ -6512,7 +6590,14 @@
                 btn.disabled = true;
             }
             let delegatedToNative = false;
+            let redirectStarted = false;
             try {
+                const originErr = nexusAuthOriginBlocked();
+                if (originErr) {
+                    _loginRoutePhase = 'error';
+                    alert(originErr);
+                    return;
+                }
                 if (window.webkit?.messageHandlers?.native_google_login) {
                     delegatedToNative = true;
                     console.log('[NEXUS] Auth nativa iOS → Swift');
@@ -6526,33 +6611,48 @@
                     }, 120000);
                     return;
                 }
-                console.log('[NEXUS] Auth web → Google popup');
+                console.log('[NEXUS] Auth web → Google');
                 await initCloud();
-                const { getAuth, GoogleAuthProvider, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } = authMod;
                 const auth = getAuth(window.__nexusFirebaseApp);
-                if (auth.currentUser?.isAnonymous) {
-                    try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo', e); }
-                }
+                await nexusSignOutAnonymousIfNeeded(auth, signOut);
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' });
-                const result = await signInWithPopup(auth, provider);
-                fbUser = result.user;
-                await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
+
+                if (nexusPreferGoogleRedirect()) {
+                    sessionStorage.setItem('nexus_auth_redirect_pending', '1');
+                    redirectStarted = true;
+                    await signInWithRedirect(auth, provider);
+                    return;
+                }
+
+                try {
+                    const result = await signInWithPopup(auth, provider);
+                    fbUser = result.user;
+                    await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
+                } catch (popupErr) {
+                    const retryRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code);
+                    if (!retryRedirect) throw popupErr;
+                    console.warn('[NEXUS] Popup falló, usando redirect', popupErr?.code);
+                    sessionStorage.setItem('nexus_auth_use_redirect', '1');
+                    sessionStorage.setItem('nexus_auth_redirect_pending', '1');
+                    redirectStarted = true;
+                    await signInWithRedirect(auth, provider);
+                }
             } catch (error) {
                 console.error('[NEXUS] Google login', error);
                 _loginRoutePhase = 'error';
+                const txt = nexusFormatAuthError(error);
                 if (error?.code === 'auth/unauthorized-domain') {
-                    const currentDomain = window.location.hostname;
-                    const msg = `⚠️ DOMINIO NO AUTORIZADO\n\nAgrega este dominio en Firebase → Authentication → Dominios autorizados:\n[ ${currentDomain} ]`;
+                    const msg = '⚠️ ' + txt;
                     if (typeof triggerUIConfirm === 'function') triggerUIConfirm(msg, 'mock_google_login');
                     else alert(msg);
                     return;
                 }
-                if (error?.code !== 'auth/popup-closed-by-user') {
-                    alert('Error de autenticación: ' + (error?.message || 'revisa la conexión'));
-                }
+                if (txt) alert('Error de autenticación: ' + txt);
             } finally {
-                if (!delegatedToNative) {
+                if (!delegatedToNative && !redirectStarted) {
                     window.__nexusGoogleNativePending = null;
                     if (_loginRoutePhase === 'error' || !_loginRoutePhase) {
                         resetGoogleLoginButton();
