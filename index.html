@@ -116,6 +116,12 @@
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reveal);
             else reveal();
         })();
+        (function nexusEarlyBootRuntime() {
+            var h = window.webkit && window.webkit.messageHandlers;
+            var channel = (h && typeof h.native_google_login !== 'undefined') ? 'ios-native' : 'web-popup';
+            document.documentElement.setAttribute('data-nexus-auth-channel', channel);
+            window.__nexusAuthChannel = channel;
+        })();
     </script>
 </head>
 <body class="pb-40">
@@ -158,7 +164,7 @@
 
                 <p id="login-founder-hint" class="hidden text-[9px] text-amber-300 font-bold text-center leading-relaxed border border-amber-500/30 bg-amber-500/10 rounded-xl p-3"><i class="fa-solid fa-shield-halved mr-1"></i> Primer uso del sistema: inicia con <b>Google</b> para crear el administrador fundador.</p>
 
-                <button onclick="triggerNativeGoogleLogin()" class="w-full bg-white text-black hover:bg-slate-100 p-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+                <button type="button" id="nexus-google-login-btn" data-nexus-auth-channel="web-popup" class="w-full bg-white text-black hover:bg-slate-100 p-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
                     <svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg>
                     Continuar con Google
                 </button>
@@ -3405,11 +3411,50 @@
             }
         }
 
+        async function nexusHandleGoogleRedirectOnLoad() {
+            if (!isNexusWebBrowser()) return false;
+            try {
+                await initCloud({ skipAnonymous: true });
+                const { getAuth, getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const auth = getAuth(window.__nexusFirebaseApp);
+                const result = await getRedirectResult(auth);
+                if (!result?.user) return false;
+                sessionStorage.removeItem('nexus_google_redirect_pending');
+                sessionStorage.removeItem('nexus_auth_use_redirect');
+                console.log('[NEXUS] web-popup redirect completado', result.user.email);
+                fbUser = result.user;
+                await routeAfterFirebaseAuth(result.user, result.user.displayName || 'Usuario Google', result.user.photoURL);
+                return true;
+            } catch (e) {
+                if (e?.code !== 'auth/no-auth-event') {
+                    console.error('[NEXUS] getRedirectResult', { code: e?.code, message: e?.message, origin: window.location.origin });
+                    _loginRoutePhase = 'error';
+                    const txt = nexusFormatAuthError(e);
+                    if (txt) alert('Error de autenticación: ' + txt);
+                    resetGoogleLoginButton();
+                    showInitialLoginChoice();
+                }
+                sessionStorage.removeItem('nexus_google_redirect_pending');
+                return false;
+            }
+        }
+
         function showColdStartLogin() {
             nexusRequireAuthScreen();
-            initCloud().then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
-            fetchLoginUsers(false);
-            showInitialLoginChoice();
+            nexusSyncGoogleLoginButton();
+            nexusHandleGoogleRedirectOnLoad()
+                .then((handled) => {
+                    if (!handled) {
+                        initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+                        fetchLoginUsers(false);
+                        showInitialLoginChoice();
+                    }
+                })
+                .catch(() => {
+                    initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
+                    fetchLoginUsers(false);
+                    showInitialLoginChoice();
+                });
         }
 
         function showLoginFlow() {
@@ -3508,11 +3553,82 @@
 
         const GOOGLE_LOGIN_BTN_HTML = `<svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg> Continuar con Google`;
 
+        function nexusGetAuthChannel() {
+            const h = window.webkit && window.webkit.messageHandlers;
+            const live = (h && typeof h.native_google_login !== 'undefined') ? 'ios-native' : 'web-popup';
+            window.__nexusAuthChannel = live;
+            document.documentElement.setAttribute('data-nexus-auth-channel', live);
+            return live;
+        }
+
+        function isNexusNativeContainer() {
+            return nexusGetAuthChannel() === 'ios-native';
+        }
+
+        function isNexusWebBrowser() {
+            return !isNexusNativeContainer();
+        }
+
+        function nexusPreferGoogleRedirect() {
+            return sessionStorage.getItem('nexus_auth_use_redirect') === '1';
+        }
+
+        function nexusFormatAuthError(error) {
+            const code = error?.code || '';
+            const host = window.location.hostname || '(vacío)';
+            const origin = window.location.origin || window.location.protocol;
+            const map = {
+                'auth/unauthorized-domain': `Dominio no autorizado (${host}).\n\nFirebase Console → Authentication → Dominios autorizados → añade:\n• ${host}\n• ${origin}`,
+                'auth/popup-blocked': 'El navegador bloqueó la ventana de Google. Se usará redirección; permite ventanas emergentes o cookies.',
+                'auth/popup-closed-by-user': '',
+                'auth/cancelled-popup-request': 'Espera a que termine el intento anterior de Google e inténtalo de nuevo.',
+                'auth/network-request-failed': 'Sin conexión o la red bloquea Firebase. Revisa Wi‑Fi / VPN.',
+                'auth/operation-not-allowed': 'Google Sign-In no está habilitado en Firebase Authentication.',
+                'auth/invalid-api-key': 'Clave de API de Firebase inválida en la configuración de la app.',
+                'auth/account-exists-with-different-credential': 'Ese correo ya está registrado con otro método de acceso.',
+                'auth/too-many-requests': 'Demasiados intentos. Espera un minuto e inténtalo otra vez.',
+                'auth/internal-error': 'Error interno de Google/Firebase. Prueba redirección o otra pestaña.',
+            };
+            if (Object.prototype.hasOwnProperty.call(map, code)) return map[code];
+            const msg = String(error?.message || '');
+            if (/third.?party|cookie|iframe|storage/i.test(msg)) {
+                return 'Cookies o almacenamiento bloqueados. En Safari desactiva "Impedir seguimiento entre sitios" para este dominio.';
+            }
+            return msg || code || 'Revisa la conexión e inténtalo de nuevo.';
+        }
+
+        function nexusAuthOriginBlocked() {
+            if (window.location.protocol === 'file:') {
+                return 'No puedes iniciar sesión abriendo el archivo .html local (file://).\n\nUsa la URL HTTPS (Vercel) o un servidor local (http://localhost).';
+            }
+            return null;
+        }
+
+        async function nexusSignOutAnonymousIfNeeded(auth, signOutFn) {
+            if (auth.currentUser?.isAnonymous) {
+                try { await signOutFn(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo', e); }
+                if (fbUser?.isAnonymous) fbUser = null;
+            }
+        }
+
+        function nexusSyncGoogleLoginButton() {
+            const btn = $id('nexus-google-login-btn');
+            if (!btn) return;
+            const channel = nexusGetAuthChannel();
+            btn.setAttribute('data-nexus-auth-channel', channel);
+            btn.removeAttribute('onclick');
+            btn.onclick = function() {
+                if (channel === 'ios-native') nexusGoogleAuthViaNativeRepository();
+                else nexusGoogleAuthViaWebPopup();
+            };
+        }
+
         function resetGoogleLoginButton() {
-            const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
+            const btn = $id('nexus-google-login-btn');
             if (!btn) return;
             btn.disabled = false;
             btn.innerHTML = GOOGLE_LOGIN_BTN_HTML;
+            nexusSyncGoogleLoginButton();
         }
 
         function showLoginRoutingStatus(msg) {
@@ -5451,7 +5567,7 @@
             if (!email || !email.includes('@')) {
                 throw new Error('Se requiere cuenta Google con correo.');
             }
-            await initCloud();
+            await initCloud({ skipAnonymous: true });
             const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
             const auth = getAuth(window.__nexusFirebaseApp);
             const wantEmail = email.trim().toLowerCase();
@@ -5474,12 +5590,18 @@
             return u;
         }
 
-        async function initCloud() {
+        async function initCloud(opts) {
+            const skipAnonymous = !!(opts && opts.skipAnonymous);
             if (window.db) {
                 try {
-                    const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                    const u = getAuth(window.__nexusFirebaseApp).currentUser;
-                    if (u) fbUser = u;
+                    const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    const auth = getAuth(window.__nexusFirebaseApp);
+                    const u = auth.currentUser;
+                    if (skipAnonymous && u?.isAnonymous) {
+                        try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo (initCloud)', e); }
+                        fbUser = null;
+                    } else if (u && !u.isAnonymous) fbUser = u;
+                    else if (u) fbUser = u;
                 } catch (e) { /* noop */ }
                 updateCloudBadge(true, false);
                 return true;
@@ -5536,9 +5658,9 @@
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
-                        } else if (!auth.currentUser) {
+                        } else if (!auth.currentUser && !skipAnonymous && !window.__nexusGoogleLoginInFlight) {
                             await signInAnonymously(auth);
-                        } else {
+                        } else if (auth.currentUser) {
                             fbUser = auth.currentUser;
                         }
                     } catch (e) {
@@ -6172,6 +6294,7 @@
         function showInitialLoginChoice() {
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
+            nexusSyncGoogleLoginButton();
             nexusRequireAuthScreen();
             hideFirstTimeSetup();
             hideAllLoginPanels();
@@ -6384,67 +6507,145 @@
         // ============================================================================
         // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
         // ============================================================================
-        async function triggerNativeGoogleLogin() {
-            const btn = document.querySelector('button[onclick="triggerNativeGoogleLogin()"]');
-            if (btn) {
+        function nexusSetGoogleLoginButtonBusy(busy) {
+            const btn = $id('nexus-google-login-btn');
+            if (!btn) return;
+            if (busy) {
                 btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-400 text-lg"></i> Conectando...';
                 btn.disabled = true;
+            } else {
+                resetGoogleLoginButton();
             }
-            let delegatedToNative = false;
+        }
+
+        async function nexusGoogleAuthViaNativeRepository() {
+            if (!isNexusNativeContainer()) {
+                console.warn('[NEXUS] ios-native solicitado fuera del contenedor; usando web-popup');
+                return nexusGoogleAuthViaWebPopup();
+            }
+            nexusSetGoogleLoginButtonBusy(true);
             try {
-                if (window.webkit?.messageHandlers?.native_google_login) {
-                    delegatedToNative = true;
-                    console.log('[NEXUS] Auth nativa iOS → Swift');
-                    window.webkit.messageHandlers.native_google_login.postMessage('login_request');
-                    window.__nexusGoogleNativePending = Date.now();
-                    setTimeout(() => {
-                        if (window.__nexusGoogleNativePending && _loginRoutePhase !== 'first-setup' && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'app') {
-                            window.__nexusGoogleNativePending = null;
-                            resetGoogleLoginButton();
-                        }
-                    }, 120000);
+                console.log('[NEXUS] Auth channel: ios-native → Swift native_google_login');
+                window.webkit.messageHandlers.native_google_login.postMessage('login_request');
+                window.__nexusGoogleNativePending = Date.now();
+                setTimeout(() => {
+                    if (window.__nexusGoogleNativePending && _loginRoutePhase !== 'first-setup' && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'app') {
+                        window.__nexusGoogleNativePending = null;
+                        resetGoogleLoginButton();
+                    }
+                }, 120000);
+            } catch (e) {
+                console.error('[NEXUS] native_google_login bridge', e);
+                _loginRoutePhase = 'error';
+                alert('No se pudo abrir Google nativo. Reintenta o actualiza la app iOS.');
+                resetGoogleLoginButton();
+            }
+        }
+
+        async function nexusGoogleAuthViaWebPopup() {
+            if (isNexusNativeContainer()) {
+                console.warn('[NEXUS] web-popup en contenedor iOS; delegando a nativo');
+                return nexusGoogleAuthViaNativeRepository();
+            }
+            let redirectStarted = false;
+            window.__nexusGoogleLoginInFlight = true;
+            nexusSetGoogleLoginButtonBusy(true);
+            try {
+                const originErr = nexusAuthOriginBlocked();
+                if (originErr) {
+                    _loginRoutePhase = 'error';
+                    alert(originErr);
                     return;
                 }
-                console.log('[NEXUS] Auth web → Google popup');
-                await initCloud();
-                const { getAuth, GoogleAuthProvider, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                console.log('[NEXUS] Auth channel: web-popup', {
+                    origin: window.location.origin,
+                    hostname: window.location.hostname,
+                    preferRedirect: nexusPreferGoogleRedirect()
+                });
+                await initCloud({ skipAnonymous: true });
+                const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } = authMod;
                 const auth = getAuth(window.__nexusFirebaseApp);
-                if (auth.currentUser?.isAnonymous) {
-                    try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo', e); }
-                }
+                await nexusSignOutAnonymousIfNeeded(auth, signOut);
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' });
-                const result = await signInWithPopup(auth, provider);
-                fbUser = result.user;
-                await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
+
+                if (nexusPreferGoogleRedirect()) {
+                    sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    redirectStarted = true;
+                    await signInWithRedirect(auth, provider);
+                    return;
+                }
+
+                try {
+                    const result = await signInWithPopup(auth, provider);
+                    console.log('[NEXUS] signInWithPopup OK', result.user?.email);
+                    fbUser = result.user;
+                    await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
+                } catch (popupErr) {
+                    if (popupErr?.code === 'auth/popup-closed-by-user') throw popupErr;
+                    const useRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code)
+                        || /popup-blocked|blocked/i.test(popupErr?.message || '');
+                    if (!useRedirect) throw popupErr;
+                    console.warn('[NEXUS] Popup falló, usando redirect', popupErr?.code, popupErr?.message);
+                    sessionStorage.setItem('nexus_auth_use_redirect', '1');
+                    sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    redirectStarted = true;
+                    await signInWithRedirect(auth, provider);
+                }
             } catch (error) {
-                console.error('[NEXUS] Google login', error);
+                console.error('[NEXUS] Google login web-popup', {
+                    code: error?.code,
+                    message: error?.message,
+                    origin: window.location.origin,
+                    hostname: window.location.hostname
+                });
                 _loginRoutePhase = 'error';
+                const txt = nexusFormatAuthError(error);
                 if (error?.code === 'auth/unauthorized-domain') {
-                    const currentDomain = window.location.hostname;
-                    const msg = `⚠️ DOMINIO NO AUTORIZADO\n\nAgrega este dominio en Firebase → Authentication → Dominios autorizados:\n[ ${currentDomain} ]`;
+                    const msg = '⚠️ ' + txt;
                     if (typeof triggerUIConfirm === 'function') triggerUIConfirm(msg, 'mock_google_login');
                     else alert(msg);
                     return;
                 }
-                if (error?.code !== 'auth/popup-closed-by-user') {
-                    alert('Error de autenticación: ' + (error?.message || 'revisa la conexión'));
+                if (error?.code !== 'auth/popup-closed-by-user' && txt) {
+                    alert('Error de autenticación: ' + txt);
                 }
             } finally {
-                if (!delegatedToNative) {
+                window.__nexusGoogleLoginInFlight = false;
+                if (!redirectStarted) {
                     window.__nexusGoogleNativePending = null;
                     if (_loginRoutePhase === 'error' || !_loginRoutePhase) {
                         resetGoogleLoginButton();
                         showInitialLoginChoice();
+                    } else {
+                        resetGoogleLoginButton();
                     }
                     showLoginRoutingStatus('');
                 }
             }
         }
+
+        async function triggerNativeGoogleLogin() {
+            const channel = nexusGetAuthChannel();
+            if (channel === 'ios-native') return nexusGoogleAuthViaNativeRepository();
+            return nexusGoogleAuthViaWebPopup();
+        }
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
+        window.nexusGoogleAuthViaNativeRepository = nexusGoogleAuthViaNativeRepository;
+        window.nexusGoogleAuthViaWebPopup = nexusGoogleAuthViaWebPopup;
+        window.nexusSyncGoogleLoginButton = nexusSyncGoogleLoginButton;
+        window.nexusHandleGoogleRedirectOnLoad = nexusHandleGoogleRedirectOnLoad;
+        window.isNexusNativeContainer = isNexusNativeContainer;
+        window.isNexusWebBrowser = isNexusWebBrowser;
 
         async function handleNativeGoogleAuthPayload(payload) {
+            if (!isNexusNativeContainer()) {
+                console.warn('[NEXUS] receiveNativeAuthPayload ignorado: canal', nexusGetAuthChannel());
+                return;
+            }
             window.__nexusGoogleNativePending = null;
+            window.__nexusGoogleLoginInFlight = true;
             const idToken = payload?.idToken || payload?.token || '';
             const email = (payload?.email || '').trim().toLowerCase();
             const name = payload?.name || payload?.displayName || 'Usuario Google';
@@ -6455,24 +6656,26 @@
                 return;
             }
             try {
-                await initCloud();
+                await initCloud({ skipAnonymous: true });
                 const { getAuth, GoogleAuthProvider, signInWithCredential, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth(window.__nexusFirebaseApp);
-                if (auth.currentUser?.isAnonymous) {
-                    try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo nativo', e); }
-                }
+                await nexusSignOutAnonymousIfNeeded(auth, signOut);
                 const credential = GoogleAuthProvider.credential(idToken);
                 const result = await signInWithCredential(auth, credential);
                 fbUser = result.user;
                 await routeAfterFirebaseAuth(fbUser, name || fbUser.displayName || 'Usuario Google', photoUrl || fbUser.photoURL);
             } catch (error) {
-                console.error('[NEXUS] native Google credential', error);
+                console.error('[NEXUS] native Google credential', { code: error?.code, message: error?.message });
                 _loginRoutePhase = 'error';
-                alert('Error de autenticación: ' + (error?.message || 'Firebase'));
+                const txt = nexusFormatAuthError(error);
+                if (txt) alert('Error de autenticación: ' + txt);
             } finally {
+                window.__nexusGoogleLoginInFlight = false;
                 if (_loginRoutePhase === 'error') {
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
+                } else {
+                    resetGoogleLoginButton();
                 }
                 showLoginRoutingStatus('');
             }
