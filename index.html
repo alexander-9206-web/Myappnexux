@@ -3466,6 +3466,13 @@
                     user = await nexusWaitForFirebaseGoogleUser(auth, null, fbUser, 8000);
                 } catch (e) { /* timeout */ }
             }
+            if (user && !user.isAnonymous) {
+                try {
+                    user = await nexusConfirmGoogleAuthReady(auth, user, user.email);
+                } catch (e) {
+                    console.warn('[NEXUS] confirm redirect auth', e);
+                }
+            }
             return user;
         }
 
@@ -3525,6 +3532,15 @@
             }
         }
 
+        function nexusLoginSessionActive() {
+            return !!(window.__nexusGoogleLoginInFlight
+                || _loginRoutePhase === 'app'
+                || _loginRoutePhase === 'pin'
+                || _loginRoutePhase === 'first-setup'
+                || _loginRoutePhase === 'routing'
+                || (sessionUnlocked && currentUser));
+        }
+
         function showColdStartLogin() {
             nexusRequireAuthScreen();
             nexusSyncGoogleLoginButton();
@@ -3535,6 +3551,7 @@
             }
             nexusHandleGoogleRedirectOnLoad()
                 .then((handled) => {
+                    if (nexusLoginSessionActive()) return;
                     if (!handled) {
                         hideLoginRoutingLoading();
                         initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
@@ -3543,6 +3560,7 @@
                     }
                 })
                 .catch(() => {
+                    if (nexusLoginSessionActive()) return;
                     sessionStorage.removeItem('nexus_google_redirect_pending');
                     hideLoginRoutingLoading();
                     initCloud({ skipAnonymous: isNexusWebBrowser() }).then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
@@ -3730,6 +3748,21 @@
             }
         }
 
+        /** Tras popup/redirect: espera sesión estable y token (consentimiento Google incluido). */
+        async function nexusConfirmGoogleAuthReady(auth, fbAuthUser, expectedEmail) {
+            const email = (expectedEmail || fbAuthUser?.email || '').trim().toLowerCase();
+            let user = await nexusWaitForFirebaseGoogleUser(auth, email, fbAuthUser, 15000);
+            try {
+                await user.getIdToken(true);
+            } catch (e) {
+                console.warn('[NEXUS] getIdToken tras Google', e);
+                await sleepMs(400);
+                await user.getIdToken(true);
+            }
+            await sleepMs(350);
+            return user;
+        }
+
         /** Espera a que Firebase Auth refleje el usuario Google (evita volver al login tras el popup). */
         async function nexusWaitForFirebaseGoogleUser(auth, expectedEmail, holdUser, maxMs = 10000) {
             const want = (expectedEmail || '').trim().toLowerCase();
@@ -3816,21 +3849,22 @@
                 fbUser = fbAuthUser;
                 window.__nexusPendingGoogleUser = fbAuthUser;
                 localStorage.setItem('nexus_firebase_email', email);
-                currentUser = email;
-                sessionUnlocked = true;
                 await initCloud({ skipAnonymous: true });
                 const sessionPromise = ensureFirestoreGoogleSession(email, fbAuthUser.uid, fbAuthUser).catch(e => {
                     console.warn('[NEXUS] ensureFirestore (no bloquea UI)', e);
                     return null;
                 });
 
-                const routeKind = await runLoginRoutingWithProgress('Preparando tu bóveda…', async () => {
-                    await sessionPromise;
+                await sessionPromise;
+                currentUser = email;
+                sessionUnlocked = true;
+
+                const routeKind = await runLoginRoutingWithProgress('Validando acceso con Google…', async () => {
                     const initialized = await isSystemInitialized();
                     if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) return 'founder-resume';
                     if (initialized) return 'client';
                     return 'founder-new';
-                }, 900);
+                }, 2200);
 
                 _firstSetupFirebaseUser = {
                     email,
@@ -3961,10 +3995,8 @@
             }
             userProfile = profile;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, userEmail)));
-            _loginRoutePhase = 'app';
-            hideLoginRoutingLoading();
-            resetGoogleLoginButton();
-            await processLoginSuccess(userEmail, { fastEntry: true, googleLinked: true });
+            beginLoginRoutingUI('Abriendo tu bóveda…');
+            await processLoginSuccess(userEmail, { googleLinked: true });
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -4588,20 +4620,53 @@
             nexusEnsureSyncMeta();
             const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
             const currentTx = state.tx || [];
+            const payload = { ...cloudData };
+            delete payload.tx;
+            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, payload);
             if (nexusShouldKeepLocalCore(cloudData)) {
+                state = { ...state, ...mergedCollections };
+                state.tx = currentTx;
                 mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: true });
                 state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
                 state._nexusSync.lastCloudPull = Date.now();
                 return;
             }
-            const payload = { ...cloudData };
-            delete payload.tx;
-            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, payload);
-            state = { ...state, ...payload, ...mergedCollections };
+            const cloudRev = cloudData._nexusSync?.revision || cloudData?.revision || 0;
+            const localRev = state._nexusSync?.localRevision || 0;
+            const preferLocal = state._nexusSync?.dirty && localRev >= cloudRev;
+            const scalarBase = preferLocal ? { ...payload, ...state } : { ...state, ...payload };
+            state = { ...scalarBase, ...mergedCollections };
             state.tx = currentTx;
-            state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
+            state._nexusSync.lastCloudRevision = cloudRev;
             state._nexusSync.lastCloudPull = Date.now();
-            mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: false });
+            mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: preferLocal });
+        }
+
+        function nexusBuildMergedCoreForUpload(localCore, remoteData) {
+            const local = localCore || {};
+            const remote = remoteData || {};
+            delete remote.tx;
+            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, remote);
+            nexusEnsureSyncMeta();
+            const localRev = state._nexusSync?.localRevision || 0;
+            const remoteRev = remote._nexusSync?.revision || remote?.revision || 0;
+            const preferLocal = state._nexusSync?.dirty && localRev >= remoteRev;
+            const scalarBase = preferLocal ? { ...remote, ...local } : { ...local, ...remote };
+            const out = { ...scalarBase, ...mergedCollections };
+            delete out.tx;
+            return out;
+        }
+
+        function nexusBuildMergedTxPayloadForUpload(year, localTxList, remoteData) {
+            const remoteTx = (remoteData && remoteData.tx) ? remoteData.tx : [];
+            const merged = nexusSortByChronology(nexusMergeEntityById(localTxList || [], remoteTx));
+            const pushAt = Date.now();
+            const pushRev = state._nexusSync?.localRevision || pushAt;
+            return {
+                tx: nexusStampTxList(merged),
+                updatedAt: pushAt,
+                _nexusSync: { revision: pushRev, updatedAt: pushAt, source: 'client' }
+            };
         }
 
         function mergeCoreSettingsFromCloud(prevSettings, cloudData, opts) {
@@ -6263,6 +6328,10 @@
                         } else if (auth.currentUser) {
                             fbUser = auth.currentUser;
                         }
+                        if (skipAnonymous && auth.currentUser?.isAnonymous) {
+                            const keep = window.__nexusPendingGoogleUser;
+                            if (keep && !keep.isAnonymous) fbUser = keep;
+                        }
                     } catch (e) {
                         console.warn("[APEX] Auth initialization fallback", e);
                     }
@@ -6440,28 +6509,33 @@
                     const pushAt = Date.now();
                     cleanCore._nexusSync = { revision: pushRev, updatedAt: pushAt, source: 'client' };
                     cleanCore.updatedAt = pushAt;
-                    const stampedTxByYear = {};
-                    for (const year in txByYear) {
-                        stampedTxByYear[year] = nexusStampTxList(txByYear[year]);
-                    }
+                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
+                    let remoteCore = {};
+                    try {
+                        const coreSnap = await getDoc(coreRef);
+                        if (coreSnap.exists()) remoteCore = coreSnap.data();
+                    } catch (e) { console.warn('[NEXUS] lectura core previa a fusión', e); }
+                    const mergedCore = nexusBuildMergedCoreForUpload(cleanCore, remoteCore);
+                    mergedCore._nexusSync = { revision: pushRev, updatedAt: pushAt, source: 'client' };
+                    mergedCore.updatedAt = pushAt;
 
-                    const coreStr = JSON.stringify(cleanCore);
+                    const coreStr = JSON.stringify(mergedCore);
                     if (lastCloudSyncHash['core'] !== coreStr) {
-                        const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
-                        batch.set(coreRef, cleanCore, { merge: true });
+                        batch.set(coreRef, mergedCore, { merge: true });
                         lastCloudSyncHash['core'] = coreStr;
                         writesCount++;
                     }
 
-                    for (const year in stampedTxByYear) {
-                        const payload = {
-                            tx: stampedTxByYear[year],
-                            updatedAt: pushAt,
-                            _nexusSync: { revision: pushRev, updatedAt: pushAt, source: 'client' }
-                        };
+                    for (const year in txByYear) {
+                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
+                        let remoteTxData = {};
+                        try {
+                            const txSnap = await getDoc(txRef);
+                            if (txSnap.exists()) remoteTxData = txSnap.data();
+                        } catch (e) { console.warn('[NEXUS] lectura tx_' + year, e); }
+                        const payload = nexusBuildMergedTxPayloadForUpload(year, txByYear[year], remoteTxData);
                         const txStr = JSON.stringify(payload);
                         if (lastCloudSyncHash['tx_' + year] !== txStr) {
-                            const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
                             batch.set(txRef, payload, { merge: true });
                             lastCloudSyncHash['tx_' + year] = txStr;
                             writesCount++;
@@ -7094,15 +7168,18 @@
                 nexusRefreshCloudBadge(false);
             } catch (e) {
                 console.error('[NEXUS] processLoginSuccess', e);
+                _loginRoutePhase = 'error';
                 if (!shellReleased) {
                     clearStaleSession();
-                    showLoginFlow();
+                    nexusRequireAuthScreen();
+                    showInitialLoginChoice();
                     alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
                 } else {
                     console.warn('[NEXUS] post-login parcial', e);
                 }
             } finally {
-                if (!fastEntry) hideLoginRoutingLoading();
+                hideLoginRoutingLoading();
+                if (_loginRoutePhase === 'app') resetGoogleLoginButton();
             }
         }
 
@@ -7242,11 +7319,11 @@
                 }
 
                 try {
+                    beginLoginRoutingUI('Esperando confirmación de Google…');
                     const result = await signInWithPopup(auth, provider);
                     console.log('[NEXUS] signInWithPopup OK', result.user?.email);
-                    fbUser = result.user;
-                    window.__nexusPendingGoogleUser = result.user;
-                    beginLoginRoutingUI('Conectando con Firebase…');
+                    fbUser = await nexusConfirmGoogleAuthReady(auth, result.user, result.user?.email);
+                    window.__nexusPendingGoogleUser = fbUser;
                     _loginRoutePhase = 'routing';
                     await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
                 } catch (popupErr) {
@@ -7283,15 +7360,18 @@
             } finally {
                 if (redirectStarted) return;
                 window.__nexusGoogleLoginInFlight = false;
-                window.__nexusPendingGoogleUser = null;
-                if (!redirectStarted) {
+                if (_loginRoutePhase === 'error') {
+                    window.__nexusPendingGoogleUser = null;
                     window.__nexusGoogleNativePending = null;
                     resetGoogleLoginButton();
-                    if (_loginRoutePhase === 'error') {
-                        showInitialLoginChoice();
-                    } else if (_loginRoutePhase !== 'app' && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'first-setup') {
-                        showLoginRoutingStatus('');
-                    }
+                    hideLoginRoutingLoading();
+                    showInitialLoginChoice();
+                } else if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup') {
+                    window.__nexusPendingGoogleUser = null;
+                    resetGoogleLoginButton();
+                } else if (!redirectStarted) {
+                    window.__nexusPendingGoogleUser = null;
+                    resetGoogleLoginButton();
                 }
             }
         }
