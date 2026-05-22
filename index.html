@@ -5290,43 +5290,66 @@
         }
 
         async function claimSharedDocAccess(collectionName, vaultId) {
-            if (!fbUser || !currentUser || !window.db || !vaultId) return false;
+            if (!window.db || !vaultId) return false;
+            if (!fbUser || fbUser.isAnonymous) {
+                console.warn('[NEXUS P2P] Requiere sesión Google (no anónima)');
+                return false;
+            }
             const memberEmail = normalizeMemberEmail(currentUser || fbUser.email);
             const memberUid = fbUser.uid;
             if (!memberEmail || !memberUid) return false;
             try {
-                const { doc, getDoc, updateDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                if (!sessionUnlocked) return false;
+                if (typeof initCloud === 'function') await initCloud({ skipAnonymous: true });
+                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', collectionName, vaultId);
+                const joinPatch = {
+                    members: arrayUnion(memberEmail),
+                    memberUids: arrayUnion(memberUid),
+                    updatedAt: new Date().toISOString()
+                };
 
-                // 1) Intentar unirse sin leer primero (regla canSelfJoinShared)
-                try {
-                    await updateDoc(ref, {
-                        members: arrayUnion(memberEmail),
-                        memberUids: arrayUnion(memberUid),
-                        updatedAt: new Date().toISOString()
-                    });
+                const tryJoin = async () => {
+                    await updateDoc(ref, joinPatch);
                     return true;
+                };
+
+                try {
+                    return await tryJoin();
                 } catch (joinErr) {
-                    console.warn('[NEXUS P2P] updateDoc join', joinErr?.code || joinErr);
+                    console.warn('[NEXUS P2P] updateDoc join', joinErr?.code, joinErr?.message);
                 }
 
-                // 2) ¿Ya era miembro? (lectura permitida si joinEnabled o miembro)
-                const snap = await getDoc(ref);
-                if (!snap.exists()) return false;
+                let snap;
+                try {
+                    snap = await getDoc(ref);
+                } catch (readErr) {
+                    console.warn('[NEXUS P2P] getDoc', readErr?.code, readErr?.message);
+                    return false;
+                }
+                if (!snap.exists()) {
+                    console.warn('[NEXUS P2P] Bóveda inexistente en Firestore:', vaultId);
+                    return false;
+                }
                 const data = snap.data() || {};
                 const members = Array.isArray(data.members) ? data.members.map(normalizeMemberEmail) : [];
                 const uids = Array.isArray(data.memberUids) ? data.memberUids : [];
                 if (members.includes(memberEmail) || uids.includes(memberUid)) return true;
 
-                // 3) Reintento join explícito
-                await updateDoc(ref, {
-                    members: arrayUnion(memberEmail),
-                    memberUids: arrayUnion(memberUid),
-                    updatedAt: new Date().toISOString()
-                });
-                return true;
+                if (data.joinEnabled === false) {
+                    console.warn('[NEXUS P2P] joinEnabled=false en bóveda', vaultId);
+                    return false;
+                }
+
+                try {
+                    return await tryJoin();
+                } catch (joinErr2) {
+                    console.error('[NEXUS P2P] claimSharedDocAccess falló:', joinErr2?.code, joinErr2?.message);
+                    return false;
+                }
             } catch (e) {
-                console.error('[NEXUS P2P] claimSharedDocAccess falló:', e);
+                console.error('[NEXUS P2P] claimSharedDocAccess', e);
                 return false;
             }
         }
@@ -5986,7 +6009,8 @@
                             balance: sharedAcc.balance, 
                             currency: sharedAcc.currency, 
                             txsMap: txsMap,
-                            updatedAt: new Date().toISOString() 
+                            updatedAt: new Date().toISOString(),
+                            joinEnabled: true
                         };
 
                         if (deletedTxs.length > 0) {
@@ -5998,6 +6022,13 @@
                         const isNewSharedVault = !lastCloudSyncHash[sharedCacheKey];
                         if (isNewSharedVault) {
                             Object.assign(sharedPayload, buildSharedAclFields(true));
+                        } else {
+                            const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
+                            const ownerUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+                            if (ownerEmail) sharedPayload.owner = ownerEmail;
+                            if (ownerUid) sharedPayload.ownerUid = ownerUid;
+                            if (ownerEmail) sharedPayload.members = arrayUnion(ownerEmail);
+                            if (ownerUid) sharedPayload.memberUids = arrayUnion(ownerUid);
                         }
                         
                         if (lastCloudSyncHash[sharedCacheKey] !== sharedStr) {
@@ -6020,7 +6051,8 @@
                             name: (vault.name || '').replace('👥 ', ''),
                             ...buildSharedAclFields(false),
                             tasksMap: tasksMap,
-                            updatedAt: new Date().toISOString()
+                            updatedAt: new Date().toISOString(),
+                            joinEnabled: true
                         };
 
                         if (dTasks.length > 0) {
@@ -6032,6 +6064,13 @@
                         const isNewTaskVault = !lastCloudSyncHash[taskCacheKey];
                         if (isNewTaskVault) {
                             Object.assign(sharedPayload, buildSharedAclFields(true));
+                        } else {
+                            const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
+                            const ownerUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+                            if (ownerEmail) sharedPayload.owner = ownerEmail;
+                            if (ownerUid) sharedPayload.ownerUid = ownerUid;
+                            if (ownerEmail) sharedPayload.members = arrayUnion(ownerEmail);
+                            if (ownerUid) sharedPayload.memberUids = arrayUnion(ownerUid);
                         }
                         if (lastCloudSyncHash[taskCacheKey] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vault.remoteId);
@@ -6049,12 +6088,22 @@
                             name: (vault.name || '').replace('👥 ', ''),
                             ...buildSharedAclFields(false),
                             projectsMap: projectsMap,
-                            updatedAt: new Date().toISOString()
+                            updatedAt: new Date().toISOString(),
+                            joinEnabled: true
                         };
                         const sharedStr = JSON.stringify({ p: sProjects });
                         const projCacheKey = 'sproj_' + vault.remoteId;
                         const isNewProjVault = !lastCloudSyncHash[projCacheKey];
-                        if (isNewProjVault) Object.assign(sharedPayload, buildSharedAclFields(true));
+                        if (isNewProjVault) {
+                            Object.assign(sharedPayload, buildSharedAclFields(true));
+                        } else {
+                            const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
+                            const ownerUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+                            if (ownerEmail) sharedPayload.owner = ownerEmail;
+                            if (ownerUid) sharedPayload.ownerUid = ownerUid;
+                            if (ownerEmail) sharedPayload.members = arrayUnion(ownerEmail);
+                            if (ownerUid) sharedPayload.memberUids = arrayUnion(ownerUid);
+                        }
                         if (lastCloudSyncHash[projCacheKey] !== sharedStr) {
                             const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', vault.remoteId);
                             batch.set(sharedRef, sharedPayload, { merge: true });
@@ -13083,7 +13132,12 @@ ${JSON.stringify(dataToAnalyze)}`;
 
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_vaults', shareData.vaultId);
-                if (!joined) return alert("No se pudo unir a la bóveda P2P. Publica las reglas Firestore, inicia sesión con Google y revisa el token nx_...");
+                if (!joined) {
+                    const hint = (!fbUser || fbUser.isAnonymous)
+                        ? 'Inicia sesión con Google (no modo anónimo).'
+                        : 'El dueño debe abrir la app y sincronizar la cuenta compartida al menos una vez. Publica firestore.rules en Firebase Console.';
+                    return alert('No se pudo unir a la bóveda P2P.\n\n' + hint + '\n\nRevisa el token nx_...');
+                }
 
                 const newAcc = { 
                     id: 'acc_' + Date.now(), 
@@ -15643,7 +15697,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if(state.projectVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_projects', data.vaultId);
-                if (!joined) return alert("No se pudo unir. Publica firestore.rules, inicia sesión con Google y verifica el token nxp_...");
+                if (!joined) return alert("No se pudo unir.\n\nInicia sesión con Google. El dueño debe sincronizar la bóveda primero. Publica firestore.rules en Firebase Console.\n\nToken nxp_...");
                 state.projectVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('project-vault-token').value = '';
