@@ -5289,19 +5289,89 @@
             return (email || '').trim().toLowerCase();
         }
 
+        function nexusAcceptsGoogleFirebaseUser(user) {
+            return !!(user && !user.isAnonymous && user.email && String(user.email).includes('@'));
+        }
+
+        /** P2P en Firestore exige Auth Google (no sesión anónima tras login solo con PIN). */
+        async function nexusEnsureGoogleAuthForP2P(autoPrompt) {
+            const shouldPrompt = autoPrompt !== false;
+            const vaultEmail = normalizeMemberEmail(
+                currentUser || (userProfile && userProfile.email) || (fbUser && fbUser.email) || ''
+            );
+            if (!vaultEmail) {
+                return { ok: false, code: 'no_vault', message: 'Abre tu bóveda (PIN o Google) antes de pegar el token P2P.' };
+            }
+            if (!currentUser) currentUser = vaultEmail;
+
+            await initCloud({ skipAnonymous: true });
+            const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = getAuth(window.__nexusFirebaseApp);
+            let u = auth.currentUser;
+
+            if (nexusAcceptsGoogleFirebaseUser(u)) {
+                fbUser = u;
+                try {
+                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                } catch (e) { console.warn('[NEXUS P2P] ensureAuthIdentityLinked', e); }
+                return { ok: true, user: u };
+            }
+            if (nexusAcceptsGoogleFirebaseUser(fbUser)) {
+                try {
+                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                } catch (e) { console.warn('[NEXUS P2P] ensureAuthIdentityLinked', e); }
+                return { ok: true, user: fbUser };
+            }
+
+            if (!shouldPrompt) {
+                return { ok: false, code: 'google_required', message: 'Para P2P debes usar «Continuar con Google» (el PIN solo abre la bóveda local).' };
+            }
+
+            alert('⚠️ Para vincular bóvedas compartidas, Firebase debe validar tu cuenta Google.\n\nSe abrirá el acceso con Google (mismo correo de tu bóveda si es posible).');
+
+            if (isNexusNativeContainer() && typeof nexusGoogleAuthViaNativeRepository === 'function') {
+                await nexusGoogleAuthViaNativeRepository();
+                return { ok: false, code: 'google_pending', message: 'Completa Google en el diálogo nativo y vuelve a pegar el token.' };
+            }
+            if (typeof nexusGoogleAuthViaWebPopup === 'function') {
+                await nexusGoogleAuthViaWebPopup();
+                u = getAuth(window.__nexusFirebaseApp).currentUser;
+                if (nexusAcceptsGoogleFirebaseUser(u)) {
+                    fbUser = u;
+                    try {
+                        if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                    } catch (e) { console.warn('[NEXUS P2P] ensureAuthIdentityLinked post-popup', e); }
+                    return { ok: true, user: u };
+                }
+            }
+
+            return {
+                ok: false,
+                code: 'google_required',
+                message: 'No hay sesión Google en Firebase. Cierra sesión, entra con «Continuar con Google» y reintenta el token.'
+            };
+        }
+
         async function claimSharedDocAccess(collectionName, vaultId) {
-            if (!window.db || !vaultId) return false;
-            if (!fbUser || fbUser.isAnonymous) {
-                console.warn('[NEXUS P2P] Requiere sesión Google (no anónima)');
+            window.__nexusLastP2PError = null;
+            if (!window.db || !vaultId) {
+                window.__nexusLastP2PError = 'no_db';
                 return false;
             }
-            const memberEmail = normalizeMemberEmail(currentUser || fbUser.email);
-            const memberUid = fbUser.uid;
-            if (!memberEmail || !memberUid) return false;
+
+            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
+            if (!authPrep.ok) {
+                window.__nexusLastP2PError = authPrep.code || 'google_required';
+                return false;
+            }
+
+            const memberEmail = normalizeMemberEmail(currentUser || authPrep.user.email);
+            const memberUid = authPrep.user.uid;
+            if (!memberEmail || !memberUid) {
+                window.__nexusLastP2PError = 'no_email';
+                return false;
+            }
             try {
-                if (!sessionUnlocked) return false;
-                if (typeof initCloud === 'function') await initCloud({ skipAnonymous: true });
-                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const { doc, getDoc, updateDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', collectionName, vaultId);
                 const joinPatch = {
@@ -5319,6 +5389,9 @@
                     return await tryJoin();
                 } catch (joinErr) {
                     console.warn('[NEXUS P2P] updateDoc join', joinErr?.code, joinErr?.message);
+                    if (/permission|insufficient/i.test(String(joinErr?.message || joinErr?.code || ''))) {
+                        window.__nexusLastP2PError = 'permission_denied';
+                    }
                 }
 
                 let snap;
@@ -5326,10 +5399,14 @@
                     snap = await getDoc(ref);
                 } catch (readErr) {
                     console.warn('[NEXUS P2P] getDoc', readErr?.code, readErr?.message);
+                    if (/permission|insufficient/i.test(String(readErr?.message || readErr?.code || ''))) {
+                        window.__nexusLastP2PError = 'permission_denied';
+                    }
                     return false;
                 }
                 if (!snap.exists()) {
                     console.warn('[NEXUS P2P] Bóveda inexistente en Firestore:', vaultId);
+                    window.__nexusLastP2PError = 'vault_missing';
                     return false;
                 }
                 const data = snap.data() || {};
@@ -5346,12 +5423,35 @@
                     return await tryJoin();
                 } catch (joinErr2) {
                     console.error('[NEXUS P2P] claimSharedDocAccess falló:', joinErr2?.code, joinErr2?.message);
+                    if (/permission|insufficient/i.test(String(joinErr2?.message || joinErr2?.code || ''))) {
+                        window.__nexusLastP2PError = 'permission_denied';
+                    }
                     return false;
                 }
             } catch (e) {
                 console.error('[NEXUS P2P] claimSharedDocAccess', e);
+                if (/permission|insufficient/i.test(String(e?.message || e?.code || ''))) {
+                    window.__nexusLastP2PError = 'permission_denied';
+                }
                 return false;
             }
+        }
+
+        function nexusP2PJoinFailureMessage() {
+            const code = window.__nexusLastP2PError || '';
+            if (code === 'google_required' || code === 'google_pending' || code === 'no_email') {
+                return 'Firebase no tiene tu sesión Google.\n\nEntra con «Continuar con Google» (el PIN solo abre la bóveda en este dispositivo).';
+            }
+            if (code === 'permission_denied') {
+                return 'Firestore rechazó el acceso.\n\n1) Publica el archivo firestore.rules en Firebase Console.\n2) Entra con Google (mismo correo).\n3) Pide al dueño que abra la app y sincronice la cuenta P2P.';
+            }
+            if (code === 'vault_missing') {
+                return 'La bóveda no existe en la nube.\n\nEl dueño debe crear la cuenta «Compartida (P2P)», abrir la app con Google y esperar el icono de nube en verde antes de compartir el token.';
+            }
+            if (code === 'no_vault') {
+                return 'Abre tu bóveda antes de pegar el token.';
+            }
+            return 'No se pudo completar la vinculación. Revisa el token nx_... y tu conexión.';
         }
 
         function buildSharedAclFields(forCreate = false) {
@@ -5768,7 +5868,7 @@
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
-                        } else if (!auth.currentUser && !skipAnonymous && !window.__nexusGoogleLoginInFlight) {
+                        } else if (!auth.currentUser && !skipAnonymous && !window.__nexusGoogleLoginInFlight && !(sessionUnlocked && currentUser)) {
                             await signInAnonymously(auth);
                         } else if (auth.currentUser) {
                             fbUser = auth.currentUser;
@@ -6557,10 +6657,12 @@
                 } catch (persistErr) {
                     console.warn('[NEXUS] persist session (no bloquea acceso)', persistErr);
                 }
-                initCloud().then(async () => {
+                initCloud({ skipAnonymous: true }).then(async () => {
                     try {
-                        await fetchCloudState();
-                        if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                        if (nexusAcceptsGoogleFirebaseUser(fbUser)) {
+                            await fetchCloudState();
+                            if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                        }
                         if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                     } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
                 }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
@@ -13130,13 +13232,9 @@ ${JSON.stringify(dataToAnalyze)}`;
                     return alert("Esta bóveda ya está vinculada a tu cuenta.");
                 }
 
-                if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_vaults', shareData.vaultId);
                 if (!joined) {
-                    const hint = (!fbUser || fbUser.isAnonymous)
-                        ? 'Inicia sesión con Google (no modo anónimo).'
-                        : 'El dueño debe abrir la app y sincronizar la cuenta compartida al menos una vez. Publica firestore.rules en Firebase Console.';
-                    return alert('No se pudo unir a la bóveda P2P.\n\n' + hint + '\n\nRevisa el token nx_...');
+                    return alert('No se pudo unir a la bóveda P2P.\n\n' + nexusP2PJoinFailureMessage());
                 }
 
                 const newAcc = { 
@@ -15629,7 +15727,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if(state.taskVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_tasks', data.vaultId);
-                if (!joined) return alert("No se pudo unir a la bóveda de tareas. Publica las reglas Firestore actualizadas, verifica que iniciaste sesión con Google y que el token nxt_... es correcto.");
+                if (!joined) return alert('No se pudo unir a la bóveda de tareas.\n\n' + nexusP2PJoinFailureMessage());
                 state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('task-vault-token').value = '';
@@ -15697,7 +15795,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if(state.projectVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                 const joined = await claimSharedDocAccess('nexus_shared_projects', data.vaultId);
-                if (!joined) return alert("No se pudo unir.\n\nInicia sesión con Google. El dueño debe sincronizar la bóveda primero. Publica firestore.rules en Firebase Console.\n\nToken nxp_...");
+                if (!joined) return alert('No se pudo unir a proyectos P2P.\n\n' + nexusP2PJoinFailureMessage());
                 state.projectVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
                 $id('project-vault-token').value = '';
