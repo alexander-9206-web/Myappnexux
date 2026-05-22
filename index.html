@@ -4487,6 +4487,91 @@
             }
         }
 
+        function nexusVaultRegistryKey(v) {
+            return (v && (v.remoteId || v.id)) ? String(v.remoteId || v.id) : '';
+        }
+
+        function nexusMergeVaultRegistry(localArr, remoteArr) {
+            const map = new Map();
+            (remoteArr || []).forEach(v => {
+                const k = nexusVaultRegistryKey(v);
+                if (k) map.set(k, { ...v });
+            });
+            (localArr || []).forEach(v => {
+                const k = nexusVaultRegistryKey(v);
+                if (!k) return;
+                const ex = map.get(k);
+                if (!ex) { map.set(k, { ...v }); return; }
+                map.set(k, { ...ex, ...v, name: v.name || ex.name, isShared: !!(v.isShared || ex.isShared), remoteId: v.remoteId || ex.remoteId });
+            });
+            return Array.from(map.values());
+        }
+
+        function nexusMergeAccountsRegistry(localArr, remoteArr) {
+            const map = new Map();
+            (remoteArr || []).forEach(a => { if (a && a.id) map.set(a.id, { ...a }); });
+            (localArr || []).forEach(a => {
+                if (!a || !a.id) return;
+                const ex = map.get(a.id);
+                if (!ex) { map.set(a.id, { ...a }); return; }
+                const winner = nexusMergeEntityById([ex], [a])[0] || a;
+                map.set(a.id, { ...ex, ...winner, balance: a.balance, syncedOnce: a.syncedOnce !== undefined ? a.syncedOnce : ex.syncedOnce });
+            });
+            return Array.from(map.values());
+        }
+
+        /** Evita que el core personal pise tareas/proyectos/bóvedas recibidas por P2P. */
+        function nexusMergeP2PCollectionsFromLocal(localState, cloudPayload) {
+            const local = localState || {};
+            const cloud = cloudPayload || {};
+            return {
+                tasks: nexusMergeEntityById(local.tasks || [], cloud.tasks || []),
+                projects: nexusMergeEntityById(local.projects || [], cloud.projects || []),
+                taskVaults: nexusMergeVaultRegistry(local.taskVaults || [], cloud.taskVaults || []),
+                projectVaults: nexusMergeVaultRegistry(local.projectVaults || [], cloud.projectVaults || []),
+                accounts: nexusMergeAccountsRegistry(local.accounts || [], cloud.accounts || []),
+                deletedSharedTxs: [...new Set([...(local.deletedSharedTxs || []), ...(cloud.deletedSharedTxs || [])])].slice(-200),
+                deletedSharedTasks: [...new Set([...(local.deletedSharedTasks || []), ...(cloud.deletedSharedTasks || [])])].slice(-200)
+            };
+        }
+
+        function nexusHasActiveSharedVaults() {
+            return (state.accounts || []).some(a => a.isShared && a.remoteId)
+                || (state.taskVaults || []).some(v => v.isShared && v.remoteId)
+                || (state.projectVaults || []).some(v => v.isShared && v.remoteId);
+        }
+
+        function nexusTasksForSharedVault(vault) {
+            if (!vault) return [];
+            const rid = vault.remoteId;
+            const lid = vault.id;
+            return (state.tasks || []).filter(t => t.vaultId === rid || (lid && t.vaultId === lid));
+        }
+
+        function nexusProjectsForSharedVault(vault) {
+            if (!vault) return [];
+            const rid = vault.remoteId;
+            const lid = vault.id;
+            return (state.projects || []).filter(p => p.sharedVaultId === rid || (lid && p.sharedVaultId === lid));
+        }
+
+        function nexusSharedPayloadSignature(items) {
+            return (items || []).map(e => `${e.id}:${nexusEntityTimestamp(e) || 0}`).sort().join('|');
+        }
+
+        function nexusInvalidateSharedSyncCache() {
+            if (!lastCloudSyncHash) return;
+            Object.keys(lastCloudSyncHash).forEach(k => {
+                if (k.startsWith('shared_') || k.startsWith('stask_') || k.startsWith('sproj_')) delete lastCloudSyncHash[k];
+            });
+        }
+
+        function nexusPushSharedP2PNow() {
+            nexusInvalidateSharedSyncCache();
+            scheduleP2PListenersAttach(true);
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+        }
+
         function nexusShouldKeepLocalCore(cloudData) {
             nexusEnsureSyncMeta();
             const localRev = state._nexusSync.localRevision || 0;
@@ -4511,7 +4596,8 @@
             }
             const payload = { ...cloudData };
             delete payload.tx;
-            state = { ...state, ...payload };
+            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, payload);
+            state = { ...state, ...payload, ...mergedCollections };
             state.tx = currentTx;
             state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
             state._nexusSync.lastCloudPull = Date.now();
@@ -5900,8 +5986,9 @@
                             state.tx = nexusSortByChronology(
                                 state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id))
                             );
-                            saveState();
+                            NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] P2P tx IDB', e));
                             if (sessionUnlocked) {
+                                if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
                                 clearTimeout(p2pRenderTimeout);
                                 p2pRenderTimeout = setTimeout(() => {
                                     updateDashboard();
@@ -5986,9 +6073,10 @@
                                 state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)),
                                 'dueDate'
                             );
-                            saveState();
+                            NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] P2P task IDB', e));
                             if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
                             if (sessionUnlocked) {
+                                if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
                                 if (state.activeTab === 'tasks') renderTasksTab();
                                 updateDashboard();
                             }
@@ -6045,8 +6133,11 @@
                                 state.projects.filter((p, i, self) => i === self.findIndex(x => x.id === p.id)),
                                 'createdAt'
                             );
-                            saveState();
-                            if (sessionUnlocked && state.activeTab === 'projects') renderProjectsTab();
+                            NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] P2P proj IDB', e));
+                            if (sessionUnlocked) {
+                                if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+                                if (state.activeTab === 'projects') renderProjectsTab();
+                            }
                         }
                     });
                 });
@@ -6247,7 +6338,7 @@
                     
                     // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
                     unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
-                        if (isSyncing) {
+                        if (isSyncing && !isFirstLoad) {
                             updateCloudBadge(true, true);
                             return;
                         }
@@ -6404,7 +6495,7 @@
                         };
                         if (deletedTxs.length > 0) sharedPayload.deletedTxs = arrayUnion(...deletedTxs);
 
-                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, m: mapCount, d: deletedTxs });
+                        const sharedStr = JSON.stringify({ b: sharedAcc.balance, sig: nexusSharedPayloadSignature(Object.values(txsMap)), d: deletedTxs });
                         const sharedCacheKey = 'shared_' + sharedAcc.remoteId;
                         const isNewSharedVault = !lastCloudSyncHash[sharedCacheKey];
                         if (isNewSharedVault) {
@@ -6433,7 +6524,12 @@
                         } catch (e) { console.warn('[NEXUS P2P] lectura tareas', e); }
 
                         const remoteList = nexusPullMapFromFirestore(remoteData, 'tasksMap', 'tasks');
-                        const localList = (state.tasks || []).filter(t => t.vaultId === vault.remoteId);
+                        const localList = nexusTasksForSharedVault(vault).map(t => {
+                            const net = { ...t };
+                            if (net.vaultId !== vault.remoteId) net.vaultId = vault.remoteId;
+                            if (!net.updatedAt) net.updatedAt = Date.now();
+                            return net;
+                        });
                         const merged = nexusSortByChronology(nexusMergeEntityById(localList, remoteList), 'dueDate');
                         const tasksMap = {};
                         merged.forEach(t => { tasksMap[t.id] = t; });
@@ -6450,7 +6546,7 @@
                         };
                         if (dTasks.length > 0) sharedPayload.deletedTasks = arrayUnion(...dTasks);
 
-                        const sharedStr = JSON.stringify({ m: merged.length, d: dTasks });
+                        const sharedStr = JSON.stringify({ sig: nexusSharedPayloadSignature(merged), d: dTasks });
                         const taskCacheKey = 'stask_' + vault.remoteId;
                         const isNewTaskVault = !lastCloudSyncHash[taskCacheKey];
                         if (isNewTaskVault) {
@@ -6479,7 +6575,12 @@
                         } catch (e) { console.warn('[NEXUS P2P] lectura proyectos', e); }
 
                         const remoteList = nexusPullMapFromFirestore(remoteData, 'projectsMap', 'projects');
-                        const localList = (state.projects || []).filter(p => p.sharedVaultId === vault.remoteId);
+                        const localList = nexusProjectsForSharedVault(vault).map(p => {
+                            const net = { ...p };
+                            if (net.sharedVaultId !== vault.remoteId) net.sharedVaultId = vault.remoteId;
+                            if (!net.updatedAt) net.updatedAt = Date.now();
+                            return net;
+                        });
                         const merged = nexusSortByChronology(nexusMergeEntityById(localList, remoteList), 'createdAt');
                         const projectsMap = {};
                         merged.forEach(p => { projectsMap[p.id] = p; });
@@ -6491,7 +6592,7 @@
                             updatedAt: new Date().toISOString(),
                             joinEnabled: true
                         };
-                        const sharedStr = JSON.stringify({ m: merged.length });
+                        const sharedStr = JSON.stringify({ sig: nexusSharedPayloadSignature(merged) });
                         const projCacheKey = 'sproj_' + vault.remoteId;
                         const isNewProjVault = !lastCloudSyncHash[projCacheKey];
                         if (isNewProjVault) {
@@ -7418,6 +7519,7 @@
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
             if (!sessionStorage.getItem('nexus_web_auto_update') && typeof checkScheduledWebUpdate === 'function') checkScheduledWebUpdate();
             setTimeout(() => { checkDailyBriefing(); }, 800);
+            if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
         }
 
         // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
@@ -7533,12 +7635,17 @@
             if (!currentUser || !sessionUnlocked || !state) return;
             if (typeof nexusStampSharedEntitiesForSync === 'function') nexusStampSharedEntitiesForSync();
             nexusTouchLocalState('save');
+            const needsSharedPush = typeof nexusHasActiveSharedVaults === 'function' && nexusHasActiveSharedVaults();
             clearTimeout(saveStateDebounceTimer);
             saveStateDebounceTimer = setTimeout(() => {
                 if (!currentUser || !sessionUnlocked || !state) return;
                 if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
                 NexusIDB.saveState(currentUser, state).then(() => {
-                    if (typeof triggerCloudSync === 'function') triggerCloudSync();
+                    if (needsSharedPush && typeof nexusPushSharedP2PNow === 'function') {
+                        nexusPushSharedP2PNow();
+                    } else if (typeof triggerCloudSync === 'function') {
+                        triggerCloudSync();
+                    }
                 }).catch(e => console.warn('[NEXUS] saveState IDB', e));
             }, 400);
         }
@@ -9615,11 +9722,9 @@
                 state.accounts.push(newAcc); 
             } 
             
-            if (newAcc.isShared) {
-                if(typeof attachP2PListener === 'function') attachP2PListener();
-            }
-
-            saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); 
+            saveState();
+            if (newAcc.isShared && typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
+            updateDashboard(); renderAccountsTab(); closeAccountModal(); 
         }
 
         let loanCalMonthOffset = 0;
@@ -12805,6 +12910,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if(p) {
                     p.name = name; p.budget = budget; p.deadline = date; p.currency = currency;
                     if (sharedVaultId) p.sharedVaultId = sharedVaultId; else delete p.sharedVaultId;
+                    nexusTouchEntityUpdatedAt(p, 'project');
                 }
             } else {
                 const np = {
@@ -12812,12 +12918,12 @@ ${JSON.stringify(dataToAnalyze)}`;
                     name, budget, currency, deadline: date, phases: [], createdAt: new Date().toISOString()
                 };
                 if (sharedVaultId) np.sharedVaultId = sharedVaultId;
+                nexusTouchEntityUpdatedAt(np, 'project');
                 state.projects.push(np);
             }
             
             saveState();
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
-            if (sharedVaultId && typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
+            if (sharedVaultId && typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
             closeProjectModal(); renderProjectsTab();
             
             // APEX FIX: Forzar la redirección a la pestaña de proyectos si se crea desde el FAB global
@@ -13588,8 +13694,8 @@ ${JSON.stringify(dataToAnalyze)}`;
                 };
                 state.accounts.push(newAcc);
                 
-                if(currentUser) NexusIDB.saveState(currentUser, state);
-                if (typeof attachP2PListener === 'function') attachP2PListener();
+                saveState();
+                if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
                 
                 alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
                 closeLinkSharedModal();
@@ -16049,7 +16155,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const remoteId = 'tkv_' + Date.now();
             state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
             saveState();
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
             $id('new-task-vault-name').value = '';
             renderTaskVaultsList();
             populateTaskVaultSelects();
@@ -16069,10 +16175,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if (!joined) return alert('No se pudo unir a la bóveda de tareas.\n\n' + nexusP2PJoinFailureMessage());
                 state.taskVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
+                if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
                 $id('task-vault-token').value = '';
                 renderTaskVaultsList();
                 populateTaskVaultSelects();
-                attachTaskP2PListener();
                 alert("✅ Bóveda de tareas vinculada. Sincronizando...");
             } catch(e) { alert("Error al leer token."); }
         }
@@ -16117,7 +16223,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const remoteId = 'pjv_' + Date.now();
             state.projectVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
             saveState();
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
             $id('new-project-vault-name').value = '';
             renderProjectVaultsList();
             populateProjectVaultSelect();
@@ -16137,10 +16243,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if (!joined) return alert('No se pudo unir a proyectos P2P.\n\n' + nexusP2PJoinFailureMessage());
                 state.projectVaults.push({ id: data.vaultId, name: '👥 ' + data.name, isShared: true, remoteId: data.vaultId, owner: data.owner, syncedOnce: false });
                 saveState();
+                if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
                 $id('project-vault-token').value = '';
                 renderProjectVaultsList();
                 populateProjectVaultSelect();
-                attachProjectP2PListener();
                 alert("✅ Bóveda de proyectos vinculada. Sincronizando...");
             } catch(e) { alert("Error al leer token."); }
         }
