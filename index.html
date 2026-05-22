@@ -5503,8 +5503,24 @@
                                     coreTouched = true;
                                     const currentTx = state.tx || [];
                                     const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
+                                    const importGuard = Date.now() < parseInt(sessionStorage.getItem('nexus_import_guard_until') || '0', 10);
+                                    const preserved = {};
+                                    if (importGuard) {
+                                        NEXUS_BACKUP_ARRAY_KEYS.forEach(k => {
+                                            if (Array.isArray(state[k]) && state[k].length) preserved[k] = state[k];
+                                        });
+                                    }
                                     state = { ...state, ...data };
                                     state.tx = currentTx;
+                                    if (importGuard) {
+                                        NEXUS_BACKUP_ARRAY_KEYS.forEach(k => {
+                                            const remote = data[k];
+                                            const local = preserved[k];
+                                            if (local && local.length && (!Array.isArray(remote) || remote.length < local.length)) {
+                                                state[k] = local;
+                                            }
+                                        });
+                                    }
                                     mergeCoreSettingsFromCloud(prevSettings, data);
                                 } else if (change.doc.id.startsWith('tx_')) {
                                     // Capturamos las transacciones agrupadas por año
@@ -14201,8 +14217,40 @@ ${JSON.stringify(dataToAnalyze)}`;
             } catch (e) { return null; }
         }
 
+        const NEXUS_BACKUP_ARRAY_KEYS = ['accounts', 'loans', 'tx', 'tasks', 'goals', 'projects', 'projectVaults', 'taskVaults', 'pseLinks', 'categories', 'catParents'];
+
+        function unwrapBackupPayload(raw) {
+            if (!raw || typeof raw !== 'object') return raw;
+            if (raw._nexusBackup) return raw;
+            if (raw.state && typeof raw.state === 'object') {
+                const inner = raw.state;
+                if (inner._nexusBackup || inner.accounts || inner.tx || inner.settings) return inner;
+            }
+            if (raw.data && typeof raw.data === 'object') return unwrapBackupPayload(raw.data);
+            if (raw.payload && typeof raw.payload === 'object') return unwrapBackupPayload(raw.payload);
+            if (raw.vault && raw.nexus_data) return unwrapBackupPayload(raw.nexus_data);
+            if (raw.core && typeof raw.core === 'object' && !raw.accounts && !raw.tx) return unwrapBackupPayload(raw.core);
+            return raw;
+        }
+
+        function getBackupPayloadSummary(imported) {
+            const u = unwrapBackupPayload(imported) || {};
+            const n = (k) => (Array.isArray(u[k]) ? u[k].length : 0);
+            return {
+                accounts: n('accounts'),
+                tx: n('tx'),
+                loans: n('loans'),
+                tasks: n('tasks'),
+                projects: n('projects'),
+                pse: n('pseLinks'),
+                goals: n('goals'),
+                vault: (u._nexusBackup && u._nexusBackup.vault) || u.vault || u.email || '—',
+                sections: (u._nexusBackup && u._nexusBackup.sections) || []
+            };
+        }
+
         function upgradeLegacyBackupToV2(raw) {
-            const data = JSON.parse(JSON.stringify(raw || {}));
+            const data = JSON.parse(JSON.stringify(unwrapBackupPayload(raw) || {}));
             if (data._nexusBackup && data._nexusBackup.version >= 2) return data;
             const sections = [];
             NEXUS_BACKUP_SECTIONS.forEach(s => {
@@ -14230,7 +14278,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function normalizeBackupImportPayload(raw) {
-            let imported = upgradeLegacyBackupToV2(raw);
+            let imported = upgradeLegacyBackupToV2(unwrapBackupPayload(raw));
             imported = JSON.parse(JSON.stringify(imported || {}));
             if (Array.isArray(imported.accounts)) {
                 imported.accounts = imported.accounts.map(a => {
@@ -14262,15 +14310,16 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function isValidNexusBackupPayload(imported) {
-            if (!imported || typeof imported !== 'object') return false;
-            if (imported._nexusBackup) return true;
-            const hasArr = (k) => Array.isArray(imported[k]) && imported[k].length > 0;
+            const u = unwrapBackupPayload(imported);
+            if (!u || typeof u !== 'object') return false;
+            if (u._nexusBackup) return true;
+            const hasArr = (k) => Array.isArray(u[k]) && u[k].length > 0;
             return !!(
                 hasArr('accounts') || hasArr('pseLinks') || hasArr('tx') || hasArr('tasks') ||
                 hasArr('loans') || hasArr('projects') || hasArr('goals') || hasArr('projectVaults') ||
-                (imported.settings && typeof imported.settings === 'object' && Object.keys(imported.settings).length) ||
-                (imported.budgets && typeof imported.budgets === 'object' && Object.keys(imported.budgets).length) ||
-                (imported.categories && imported.categories.global && imported.categories.global.length)
+                (u.settings && typeof u.settings === 'object' && Object.keys(u.settings).length) ||
+                (u.budgets && typeof u.budgets === 'object' && Object.keys(u.budgets).length) ||
+                (u.categories && u.categories.global && u.categories.global.length)
             );
         }
 
@@ -14377,13 +14426,16 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hint = $id('backup-select-hint');
             const btn = $id('backup-select-confirm-btn');
             const meta = pendingBackupImport._nexusBackup;
+            const sum = getBackupPayloadSummary(pendingBackupImport);
             if (title) title.innerHTML = '<i class="fa-solid fa-file-import mr-2"></i>Importar datos';
             if (hint) {
-                const nAcc = (pendingBackupImport.accounts || []).length;
-                const nPse = (pendingBackupImport.pseLinks || []).length;
-                hint.textContent = meta && meta.sections
-                    ? `Archivo listo (${nAcc} cuentas, ${nPse} enlaces PSE). Las secciones del archivo ya están marcadas — pulsa «Importar selección».`
-                    : 'Archivo cargado. Elige qué secciones fusionar con tu bóveda actual.';
+                let msg = `Archivo: ${sum.accounts} cuentas, ${sum.tx} transacciones, ${sum.pse} PSE, ${sum.loans} deudas, ${sum.tasks} tareas.`;
+                if (sum.tx === 0) msg += ' Si esperabas movimientos, usa la copia COMPLETA (no solo cuentas/PSE).';
+                if (meta && meta.vault && currentUser && sum.vault !== '—' && sum.vault !== currentUser) {
+                    msg += ` Bóveda archivo: ${sum.vault} · sesión: ${currentUser}.`;
+                }
+                msg += ' Pulsa «Importar selección».';
+                hint.textContent = msg;
             }
             if (btn) btn.textContent = 'Importar selección';
             renderBackupSectionsList('import', pendingBackupImport);
@@ -14489,9 +14541,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
             try {
                 imported = normalizeBackupImportPayload(imported);
+                const sumIn = getBackupPayloadSummary(imported);
                 const allChecked = NEXUS_BACKUP_SECTIONS.every(s => selection[s.id]);
                 const isLegacyFull = !imported._nexusBackup && (imported.tx || imported.accounts);
-                if (isLegacyFull && allChecked && confirm('¿Reemplazar toda la bóveda con esta copia? (Cancelar = fusionar solo lo marcado)')) {
+                const isV2Full = imported._nexusBackup && sumIn.tx > 0 && allChecked;
+                if ((isLegacyFull || isV2Full) && allChecked && confirm('¿Reemplazar TODA la bóveda con esta copia?\n\nOK = sustitución completa\nCancelar = fusionar solo secciones marcadas')) {
                     state = JSON.parse(JSON.stringify(imported));
                     if (state._nexusBackup) delete state._nexusBackup;
                 } else {
@@ -14520,11 +14574,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (!state.loans) state.loans = [];
 
                 await forcePersistVaultState();
+                sessionStorage.setItem('nexus_import_guard_until', String(Date.now() + 120000));
                 if (typeof triggerCloudSync === 'function') {
                     lastCloudSyncHash = {};
                     if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
                     triggerCloudSync();
-                    setTimeout(() => { if (typeof fetchCloudState === 'function') fetchCloudState(); }, 2000);
                 }
                 const gc = document.getElementById('global-currency');
                 if (gc) gc.value = state.activeCurrency;
@@ -14551,7 +14605,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                 updateDashboard();
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
                 const importedLabels = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.label).join(', ');
-                alert('✅ Copia importada (' + importedLabels + ').');
+                const post = getBackupPayloadSummary(state);
+                let msg = '✅ Copia importada (' + importedLabels + ').\n\nEn tu bóveda ahora: '
+                    + post.accounts + ' cuentas, ' + post.tx + ' transacciones, ' + post.pse + ' PSE.';
+                if (selection.tx && post.tx === 0) msg += '\n\n⚠️ No hay transacciones en el archivo importado.';
+                alert(msg);
             } catch (e) {
                 console.error('[NEXUS] applyPartialBackupImport', e);
                 alert('Error al importar la copia: ' + (e.message || 'revisa la consola'));
@@ -14575,13 +14633,20 @@ ${JSON.stringify(dataToAnalyze)}`;
         function importBackup(event) {
             const file = event.target.files[0];
             if (!file) return;
+            if (!currentUser || !sessionUnlocked) {
+                alert('Inicia sesión primero (Nexus Identity + PIN). La copia se guarda en la bóveda del usuario activo.');
+                return;
+            }
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
                     let text = (e.target.result || '').toString().replace(/^\uFEFF/, '').trim();
                     if (!text) throw new Error('Archivo vacío');
-                    const imported = JSON.parse(text);
-                    if (!isValidNexusBackupPayload(imported)) throw new Error('Formato no reconocido');
+                    let imported = JSON.parse(text);
+                    imported = unwrapBackupPayload(imported);
+                    if (!isValidNexusBackupPayload(imported)) {
+                        throw new Error('Formato no reconocido. Debe ser un JSON de Nexus (exportado desde Ajustes o copia legacy).');
+                    }
                     openBackupImportSelectModal(imported);
                 } catch (err) {
                     console.error('[NEXUS] Error leyendo backup:', err);
