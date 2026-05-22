@@ -3666,7 +3666,7 @@
                 _loginRoutePhase = 'error';
                 alert('Error al continuar: ' + (e.message || 'revisa la conexión'));
             } finally {
-                if (_loginRoutePhase === 'error') {
+                if (_loginRoutePhase === 'error' && !(sessionUnlocked && currentUser)) {
                     hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
@@ -3763,8 +3763,6 @@
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile)));
             sessionStorage.removeItem('nexus_pin_banner_ok');
             _loginRoutePhase = 'app';
-            hideLoginRoutingLoading();
-            resetGoogleLoginButton();
             await processLoginSuccess(userEmail);
         }
 
@@ -6294,6 +6292,7 @@
         }
 
         function showInitialLoginChoice() {
+            if (sessionUnlocked && currentUser) return;
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
             nexusRequireAuthScreen();
@@ -6402,46 +6401,52 @@
             const vaultEmail = String(email).trim().toLowerCase();
             currentUser = vaultEmail;
             sessionUnlocked = true;
-            showLoginRoutingLoading('Abriendo tu bóveda…');
-            setLoginRoutingProgress(15, 'Cargando perfil…');
-            let shellReleased = false;
+            _loginRoutePhase = 'app';
+
+            if (!userProfile || !userProfile.email) {
+                userProfile = loadLocalProfile(vaultEmail);
+            }
+            if (!userProfile) {
+                userProfile = { email: vaultEmail, name: vaultEmail.split('@')[0], lastSeen: Date.now(), role: 'user', isAdmin: false };
+            }
+            if (!userProfile.email) userProfile.email = vaultEmail;
+            localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
+
+            nexusReleaseAppShell();
+            hideLoginRoutingLoading();
+            sessionStorage.setItem('nexus_skip_auto_update_until', String(Date.now() + 120000));
+
             try {
-                setLoginRoutingProgress(45, 'Preparando bóveda…');
-                await bootApp();
-                setLoginRoutingProgress(90, 'Sincronizando…');
-                nexusReleaseAppShell();
-                shellReleased = true;
-                _loginRoutePhase = 'app';
-                setLoginRoutingProgress(100, 'Listo');
-                try {
-                    localStorage.setItem('nexus_current_user', vaultEmail);
-                    document.cookie = 'nexus_current_user=' + vaultEmail + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
-                    if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) {
-                        await NexusIDB.saveSession(vaultEmail);
-                    }
-                } catch (persistErr) {
-                    console.warn('[NEXUS] persist session (no bloquea acceso)', persistErr);
+                localStorage.setItem('nexus_current_user', vaultEmail);
+                document.cookie = 'nexus_current_user=' + vaultEmail + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
+                if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) {
+                    await NexusIDB.saveSession(vaultEmail);
                 }
-                initCloud().then(async () => {
-                    try {
-                        if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
-                        await fetchCloudState();
-                        if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
-                        if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                    } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
-                }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
+            } catch (persistErr) {
+                console.warn('[NEXUS] persist session', persistErr);
+            }
+
+            try {
+                await bootApp();
             } catch (e) {
-                console.error('[NEXUS] processLoginSuccess', e);
-                if (!shellReleased) {
+                console.error('[NEXUS] bootApp post-login', e);
+                if (document.documentElement.classList.contains('nexus-auth-pending')) {
                     clearStaleSession();
                     showLoginFlow();
                     alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
-                } else {
-                    console.warn('[NEXUS] post-login parcial', e);
+                    return;
                 }
-            } finally {
-                hideLoginRoutingLoading();
+                console.warn('[NEXUS] interfaz abierta con carga parcial', e);
             }
+
+            initCloud().then(async () => {
+                try {
+                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                    await fetchCloudState();
+                    if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
+                    if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+                } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
+            }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
         }
 
         async function handleLoginExisting(bypassPin = false) {
@@ -6558,7 +6563,9 @@
             } finally {
                 if (!delegatedToNative) {
                     window.__nexusGoogleNativePending = null;
-                    if (_loginRoutePhase === 'error' || !_loginRoutePhase) {
+                    const stayInApp = sessionUnlocked && currentUser;
+                    const onLoginScreen = _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup';
+                    if (!stayInApp && !onLoginScreen && (_loginRoutePhase === 'error' || !_loginRoutePhase)) {
                         resetGoogleLoginButton();
                         showInitialLoginChoice();
                     }
@@ -6595,7 +6602,7 @@
                 _loginRoutePhase = 'error';
                 alert('Error de autenticación: ' + (error?.message || 'Firebase'));
             } finally {
-                if (_loginRoutePhase === 'error') {
+                if (_loginRoutePhase === 'error' && !(sessionUnlocked && currentUser)) {
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
                 }
@@ -6859,6 +6866,11 @@
         }
 
         function checkScheduledWebUpdate() {
+            const skipUntil = parseInt(sessionStorage.getItem('nexus_skip_auto_update_until') || '0', 10) || 0;
+            if (Date.now() < skipUntil) {
+                refreshWebUpdateStatus();
+                return false;
+            }
             const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
             if (!last || (Date.now() - last) >= NEXUS_WEB_UPDATE_INTERVAL_MS) {
                 sessionStorage.setItem('nexus_web_auto_update', '1');
