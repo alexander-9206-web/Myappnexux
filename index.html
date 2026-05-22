@@ -1083,26 +1083,25 @@
             </div>
             <!-- BOTÓN DESBLOQUEO ROOT -->
             <div id="admin-unlock-container" class="admin-only-ui md:max-w-2xl md:mx-auto mt-6">
-                <button onclick="document.getElementById('admin-auth-box').classList.remove('hidden'); this.classList.add('hidden');" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-colors border border-slate-800"><i class="fa-solid fa-user-shield mr-1"></i> Habilitar Panel de Administrador</button>
-                <div id="admin-auth-box" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp">
-                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Ingrese PIN Root</p>
+                <button id="admin-unlock-toggle-btn" onclick="nexusOpenAdminAuthBox()" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-colors border border-slate-800"><i class="fa-solid fa-user-shield mr-1"></i> Panel Administrador Root</button>
+                <div id="admin-root-pin-block" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp mt-3">
+                    <p class="text-[10px] font-black text-amber-400 uppercase tracking-widest text-center"><i class="fa-solid fa-shield-halved mr-1"></i> Primera vez — PIN root</p>
+                    <p class="text-[8px] text-slate-400 font-bold text-center leading-relaxed">Define tu PIN root de 4 dígitos. Se guardará solo el hash en Firebase (<code class="text-slate-500">nexus_security/config</code>).</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="password" id="admin-new-root-pin" maxlength="4" inputmode="numeric" placeholder="PIN root" class="form-input text-center tracking-[0.5em] text-sm bg-slate-800 border-slate-700 text-white">
+                        <input type="password" id="admin-confirm-root-pin" maxlength="4" inputmode="numeric" placeholder="Confirmar" class="form-input text-center tracking-[0.5em] text-sm bg-slate-800 border-slate-700 text-white">
+                    </div>
+                    <button type="button" onclick="saveAdminRootPin()" class="w-full bg-amber-500 text-slate-900 py-3 rounded-xl font-black uppercase text-[9px] active:scale-95">Guardar PIN root</button>
+                    <p id="admin-root-pin-status" class="text-[8px] font-bold text-amber-400 text-center"></p>
+                </div>
+                <div id="admin-auth-box" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp mt-3">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Ingrese PIN Root (Firebase)</p>
                     <div class="flex gap-2">
                         <input type="password" id="admin-master-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] flex-1 text-sm bg-slate-800 border-slate-700 text-white outline-none focus:border-red-500" inputmode="numeric">
-                        <button onclick="bioUnlockAdmin()" title="Acceso Biométrico (FaceID / TouchID)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl font-black text-lg shadow-sm active:scale-95 transition-all"><i class="fa-solid fa-fingerprint"></i></button>
                         <button onclick="verifyAdminRoot()" class="bg-red-600 text-white px-6 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-unlock"></i></button>
                     </div>
                     <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
                 </div>
-            </div>
-            <div id="admin-root-pin-block" class="admin-only-ui hidden md:max-w-2xl md:mx-auto mt-4 theme-card p-5 rounded-2xl border border-red-100 bg-white">
-                <h4 class="text-[10px] font-black uppercase text-red-600 mb-3"><i class="fa-solid fa-key mr-1"></i> PIN Root (Firebase)</h4>
-                <p class="text-[8px] text-slate-500 font-bold mb-3">Se guarda solo el hash en <code>nexus_security/config</code>. Nunca en el código.</p>
-                <div class="grid grid-cols-2 gap-2">
-                    <input type="password" id="admin-new-root-pin" maxlength="4" inputmode="numeric" placeholder="Nuevo PIN" class="form-input text-center tracking-[0.5em] text-sm">
-                    <input type="password" id="admin-confirm-root-pin" maxlength="4" inputmode="numeric" placeholder="Confirmar" class="form-input text-center tracking-[0.5em] text-sm">
-                </div>
-                <button type="button" onclick="saveAdminRootPin()" class="w-full mt-3 bg-red-600 text-white py-3 rounded-xl font-black uppercase text-[9px] active:scale-95">Guardar PIN root en Firebase</button>
-                <p id="admin-root-pin-status" class="text-[8px] font-bold text-red-500 text-center mt-2"></p>
             </div>
 
             <!-- BLOQUE ADMINISTRADOR GLOBAL (ROOT) -->
@@ -3248,18 +3247,9 @@
             return true;
         }
 
-        /** Fundador con bootstrap en Firebase pero sin PIN local/cloud → configuración en app. */
-        async function founderNeedsPinSetup(email, uid) {
+        async function isFounderAccount(email, uid) {
             const boot = await getBootstrapInfo();
-            if (!isBootstrapFounder(boot, email, uid)) return false;
-            const profile = await getProfileForVault(email);
-            if (!profile || !profileHasPin(profile)) return true;
-            if (!cachedRootPinHash) await loadRootPinHashFromCloud();
-            return !cachedRootPinHash;
-        }
-
-        async function founderNeedsInAppSetup(email, uid) {
-            return founderNeedsPinSetup(email, uid);
+            return isBootstrapFounder(boot, email, uid);
         }
 
         async function isSystemInitialized() {
@@ -3304,7 +3294,7 @@
             if (hdr) hdr.classList.add('hidden');
             const fs = $id('login-first-setup');
             if (fs) fs.classList.remove('hidden');
-            isRootAdminUnlocked = true;
+            isRootAdminUnlocked = false;
             const nm = $id('setup-auth-name'); if (nm) nm.textContent = u.name;
             const em = $id('setup-auth-email'); if (em) em.textContent = u.email;
             const uidEl = $id('setup-auth-uid'); if (uidEl) uidEl.textContent = 'UID: ' + (u.uid || '—');
@@ -3355,7 +3345,8 @@
 
                 setLoginRoutingProgress(65, 'Preparando bóveda admin…');
                 let profile = await getProfileForVault(auth.email);
-                const needsSetup = await founderNeedsInAppSetup(auth.email, auth.uid);
+                if (!cachedRootPinHash) await loadRootPinHashFromCloud();
+                const needsSetup = !cachedRootPinHash;
                 if (!profile) {
                     profile = {
                         name: auth.name,
@@ -3396,23 +3387,20 @@
                 }
 
                 loginSelectedEmail = auth.email;
-                isRootAdminUnlocked = true;
+                isRootAdminUnlocked = false;
                 _loginRoutePhase = 'app';
                 _firstSetupFirebaseUser = null;
                 sessionStorage.removeItem('nexus_pin_banner_ok');
 
                 setLoginRoutingProgress(85, 'Abriendo interfaz…');
-                await activateRootMaintainerSession();
                 await processLoginSuccess(auth.email);
+                if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                if (typeof loadRootPinHashFromCloud === 'function') {
-                    loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin founder', e));
-                }
                 if (needsSetup) {
                     setTimeout(() => {
                         switchTab('settings');
-                        if (typeof showFounderSetupBannerIfNeeded === 'function') showFounderSetupBannerIfNeeded();
-                    }, 600);
+                        nexusOpenAdminAuthBox(true);
+                    }, 400);
                 }
             } catch (e) {
                 console.error('[NEXUS] enterFounderAppFlow', e);
@@ -3673,9 +3661,9 @@
 
                 const routeKind = await runLoginRoutingWithProgress('Esperando respuesta de Firebase…', async () => {
                     const initialized = await isSystemInitialized();
-                    if (initialized && await founderNeedsPinSetup(email, fbAuthUser.uid)) return 'founder-resume';
-                    if (initialized) return 'client';
-                    return 'founder-new';
+                    if (!initialized) return 'founder-new';
+                    if (await isFounderAccount(email, fbAuthUser.uid)) return 'founder-return';
+                    return 'client';
                 }, 2800);
 
                 _firstSetupFirebaseUser = {
@@ -3688,12 +3676,6 @@
 
                 if (routeKind === 'client') {
                     await continueNormalClientLogin(fbAuthUser, displayName, photoURL);
-                    return;
-                }
-
-                if (routeKind === 'founder-resume') {
-                    _loginRoutePhase = 'first-setup';
-                    showFirstSetupPinStep();
                     return;
                 }
 
@@ -3745,6 +3727,8 @@
         async function continueNormalClientLogin(fbAuthUser, displayName, photoURL) {
             const userEmail = (fbAuthUser.email || '').trim().toLowerCase();
             const userName = displayName || fbAuthUser.displayName || userEmail.split('@')[0];
+            beginLoginRoutingUI('Cargando perfil desde Firebase…');
+            setLoginRoutingProgress(25, 'Sincronizando bóveda…');
             let profile = await getProfileForVault(userEmail);
             if (!profile) {
                 profile = {
@@ -3787,7 +3771,11 @@
                 loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin background', e));
             }
 
-            if (profileHasPin(profile)) {
+            const sysReady = await isSystemInitialized();
+            setLoginRoutingProgress(70, sysReady ? 'Verificando PIN de bóveda…' : 'Preparando acceso…');
+            hideLoginRoutingLoading();
+
+            if (sysReady) {
                 _loginRoutePhase = 'pin';
                 showLoginPinStep(userEmail, userName, profile);
                 return;
@@ -3795,11 +3783,8 @@
 
             loginSelectedEmail = userEmail;
             userProfile = profile;
-            userProfile.needsPinSetup = true;
-            userProfile.isAdmin = false;
-            userProfile.role = 'user';
+            delete userProfile.needsPinSetup;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-            sessionStorage.removeItem('nexus_pin_banner_ok');
             _loginRoutePhase = 'app';
             await processLoginSuccess(userEmail);
         }
@@ -3829,19 +3814,49 @@
             }
         }
 
+        function nexusOpenAdminAuthBox(forceFirstSetup) {
+            const unlock = $id('admin-unlock-container');
+            const toggleBtn = $id('admin-unlock-toggle-btn');
+            const rpb = $id('admin-root-pin-block');
+            const authBox = $id('admin-auth-box');
+            if (!unlock) return;
+            const needsFirst = forceFirstSetup || (!cachedRootPinHash && isUserAdmin(userProfile));
+            if (toggleBtn) toggleBtn.classList.add('hidden');
+            if (needsFirst && rpb) {
+                rpb.classList.remove('hidden');
+                if (authBox) authBox.classList.add('hidden');
+                setTimeout(() => { const p = $id('admin-new-root-pin'); if (p) p.focus(); }, 200);
+            } else if (authBox) {
+                authBox.classList.remove('hidden');
+                if (rpb) rpb.classList.add('hidden');
+                setTimeout(() => { const p = $id('admin-master-pin'); if (p) p.focus(); }, 200);
+            }
+        }
+
         function applyAdminUIVisibility() {
             const showAdmin = isUserAdmin(userProfile);
             const master = showAdmin && isRootAdminUnlocked;
             const unlock = $id('admin-unlock-container');
             const rpb = $id('admin-root-pin-block');
+            const authBox = $id('admin-auth-box');
+            const toggleBtn = $id('admin-unlock-toggle-btn');
             const block = $id('admin-users-block');
             const dz = $id('danger-zone-container');
             if (!showAdmin) {
-                [unlock, rpb, block, dz].forEach(el => { if (el) el.classList.add('hidden'); });
+                [unlock, rpb, authBox, block, dz].forEach(el => { if (el) el.classList.add('hidden'); });
                 return;
             }
-            if (unlock) unlock.classList.toggle('hidden', master);
-            if (rpb) rpb.classList.toggle('hidden', !master);
+            if (unlock) unlock.classList.remove('hidden');
+            if (master) {
+                if (toggleBtn) toggleBtn.classList.add('hidden');
+                if (rpb) rpb.classList.add('hidden');
+                if (authBox) authBox.classList.add('hidden');
+            } else {
+                const needsFirst = !cachedRootPinHash;
+                if (toggleBtn) toggleBtn.classList.toggle('hidden', needsFirst);
+                if (rpb) rpb.classList.add('hidden');
+                if (authBox) authBox.classList.add('hidden');
+            }
             if (block) {
                 if (master) {
                     block.classList.remove('hidden');
@@ -4745,7 +4760,13 @@
 
         async function verifyUserPin(pin, profile) {
             if (!profile || !pin || String(pin).length !== 4) return false;
-            const p = await ensureProfilePinHash({ ...profile });
+            const email = (profile.email || '').trim().toLowerCase();
+            let p = { ...profile };
+            if (email && window.db) {
+                const cloud = await getProfileForVault(email);
+                if (cloud) p = cloud;
+            }
+            p = await ensureProfilePinHash(p);
             if (!p.pinHash) return false;
             return (await hashVaultPIN(pin)) === p.pinHash;
         }
@@ -4904,15 +4925,8 @@
         // --- Puentes de Inyección Automática Biométrica ---
         function bioUnlockAdmin() {
             if (!isUserAdmin(userProfile)) return;
-            triggerBiometricAuth(async () => {
-                isRootAdminUnlocked = true;
-                await activateRootMaintainerSession();
-                const box = $id('admin-auth-box'); if (box) box.classList.add('hidden');
-                const btn = $id('admin-unlock-container')?.querySelector('button');
-                if (btn) btn.classList.add('hidden');
-                if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                else renderSettingsTab();
-            }, 'Verifica tu identidad para habilitar los controles de administrador.');
+            nexusOpenAdminAuthBox(false);
+            alert('Ingresa tu PIN root en el panel negro. Se verificará contra Firebase.');
         }
 
         function bioUnlockTakeover() {
@@ -6110,19 +6124,14 @@
         async function finishFounderLoginEntry(email) {
             _firstSetupFirebaseUser = null;
             hideFirstTimeSetup();
-            hideLoginRoutingLoading();
             loginSelectedEmail = email;
-            isRootAdminUnlocked = true;
+            isRootAdminUnlocked = false;
             _loginRoutePhase = 'app';
-            const st = $id('first-setup-status');
-            if (st) st.textContent = 'Acceso concedido — abriendo app…';
             try {
-                await activateRootMaintainerSession();
                 await processLoginSuccess(email);
+                if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                if (typeof loadRootPinHashFromCloud === 'function') {
-                    loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin post-founder', e));
-                }
+                nexusOpenAdminAuthBox(!cachedRootPinHash);
             } catch (e) {
                 console.error('[NEXUS] finishFounderLoginEntry', e);
                 _loginRoutePhase = 'error';
@@ -6391,10 +6400,19 @@
             });
         }
 
-        function selectUserForLogin(email, name) {
+        async function selectUserForLogin(email, name) {
             const vaultEmail = String(email || '').trim().toLowerCase();
             loginSelectedEmail = vaultEmail;
             _loginRoutePhase = 'pin';
+            let profile = loadLocalProfile(vaultEmail);
+            if (window.db) {
+                beginLoginRoutingUI('Cargando perfil…');
+                try {
+                    profile = await getProfileForVault(vaultEmail) || profile;
+                } catch (e) { console.warn('[NEXUS] selectUser profile', e); }
+                hideLoginRoutingLoading();
+            }
+            if (profile) userProfile = profile;
             $id('login-initial-choice').classList.add('hidden');
             $id('login-user-selection').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
@@ -6403,8 +6421,6 @@
             
             const pinInput = $id('login-existing-pin');
             pinInput.value = '';
-            
-            const profile = loadLocalProfile(vaultEmail);
             
             setTimeout(() => {
                 if (profile && profile.useBiometrics === true) {
@@ -6459,6 +6475,9 @@
             sessionUnlocked = true;
             _loginRoutePhase = 'app';
 
+            showLoginRoutingLoading('Abriendo bóveda…');
+            setLoginRoutingProgress(8, 'Cargando perfil…');
+
             if (!userProfile || !userProfile.email) {
                 userProfile = loadLocalProfile(vaultEmail);
             }
@@ -6468,11 +6487,10 @@
             if (!userProfile.email) userProfile.email = vaultEmail;
             localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
 
-            nexusReleaseAppShell();
-            hideLoginRoutingLoading();
             sessionStorage.setItem('nexus_skip_auto_update_until', String(Date.now() + 120000));
 
             try {
+                setLoginRoutingProgress(22, 'Guardando sesión…');
                 localStorage.setItem('nexus_current_user', vaultEmail);
                 document.cookie = 'nexus_current_user=' + vaultEmail + '; max-age=' + (60 * 60 * 24 * 365) + '; path=/';
                 if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) {
@@ -6483,23 +6501,28 @@
             }
 
             try {
+                setLoginRoutingProgress(45, 'Preparando interfaz…');
                 await bootApp();
+                setLoginRoutingProgress(88, 'Sincronizando datos…');
             } catch (e) {
                 console.error('[NEXUS] bootApp post-login', e);
-                if (document.documentElement.classList.contains('nexus-auth-pending')) {
-                    clearStaleSession();
-                    showLoginFlow();
-                    alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
-                    return;
-                }
-                console.warn('[NEXUS] interfaz abierta con carga parcial', e);
+                hideLoginRoutingLoading();
+                clearStaleSession();
+                showLoginFlow();
+                alert('No se pudo abrir la bóveda: ' + (e.message || 'revisa tu perfil local'));
+                return;
             }
+
+            setLoginRoutingProgress(100, 'Listo');
+            nexusReleaseAppShell();
+            hideLoginRoutingLoading();
 
             initCloud().then(async () => {
                 try {
                     if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                     await fetchCloudState();
                     if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
+                    if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
                     if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                 } catch (e) { console.warn('[NEXUS] cloud sync post-login', e); }
             }).catch(e => console.warn('[NEXUS] initCloud post-login', e));
@@ -6510,16 +6533,29 @@
             const vaultEmail = loginSelectedEmail ? String(loginSelectedEmail).trim().toLowerCase() : '';
             if (!vaultEmail || (!bypassPin && pin.length !== 4)) return alert('Ingresa un PIN de 4 dígitos.');
             loginSelectedEmail = vaultEmail;
-            
+
+            showLoginRoutingLoading('Verificando PIN en Firebase…');
+            setLoginRoutingProgress(15, 'Consultando perfil…');
+
             let profile = await getProfileForVault(vaultEmail);
-            if (!profile) return alert('No se encontró el perfil de este usuario.');
+            if (!profile) {
+                hideLoginRoutingLoading();
+                return alert('No se encontró el perfil de este usuario.');
+            }
 
             profile = await ensureProfilePinHash(profile);
             if (!profile.email) profile.email = vaultEmail;
-            let pinOk = bypassPin || await verifyUserPin(pin, profile);
 
-            // Primera vez: guardar el PIN ingresado en login
+            setLoginRoutingProgress(45, 'Validando PIN…');
+            let pinOk = false;
+            if (bypassPin && profileHasPin(profile)) {
+                pinOk = true;
+            } else if (!bypassPin) {
+                pinOk = await verifyUserPin(pin, profile);
+            }
+
             if (!pinOk && !bypassPin && pin.length === 4 && !profileHasPin(profile)) {
+                setLoginRoutingProgress(60, 'Registrando PIN en Firebase…');
                 profile.pinHash = await hashVaultPIN(pin);
                 delete profile.pin;
                 delete profile.needsPinSetup;
@@ -6531,38 +6567,48 @@
                 userProfile.lastSeen = Date.now();
                 delete userProfile.needsPinSetup;
                 localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
-                syncProfileToCloud(userProfile).catch(e => console.warn('[NEXUS] syncProfile login', e));
+                setLoginRoutingProgress(75, 'Guardando en Firebase…');
+                await syncProfileToCloud(userProfile);
                 if (profileHasPin(userProfile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
-                else sessionStorage.removeItem('nexus_pin_banner_ok');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
                 await processLoginSuccess(vaultEmail);
             } else {
-                alert('PIN incorrecto.');
+                hideLoginRoutingLoading();
+                alert('PIN incorrecto. Verifica en Firebase o crea uno nuevo si es tu primer acceso.');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
             }
         }
 
         async function handleLoginNew() {
+            beginLoginRoutingUI('Conectando con Firebase…');
             await initCloud();
+            setLoginRoutingProgress(20, 'Verificando sistema…');
             if (!(await isSystemInitialized())) {
+                hideLoginRoutingLoading();
                 return alert('El sistema aún no tiene administrador. El primer acceso debe ser con Google (cuenta fundadora).');
             }
             const email = $id('login-new-email').value.trim().toLowerCase();
             const name = $id('login-new-name').value.trim();
             const pin = $id('login-new-pin').value.trim();
             
-            if(!email || !name || pin.length !== 4) return alert("Todos los campos son requeridos. PIN de 4 dígitos.");
+            if(!email || !name || pin.length !== 4) {
+                hideLoginRoutingLoading();
+                return alert("Todos los campos son requeridos. PIN de 4 dígitos.");
+            }
             
             let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
-            if (existingProfile) return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
+            if (existingProfile) {
+                hideLoginRoutingLoading();
+                return alert("Este correo ya está registrado en este dispositivo. Por favor usa el selector.");
+            }
             
+            setLoginRoutingProgress(55, 'Creando bóveda…');
             userProfile = { name, email, lastSeen: Date.now(), pinHash: await hashVaultPIN(pin), isAdmin: false, role: 'user' };
             delete userProfile.needsPinSetup;
             localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-            await initCloud();
+            setLoginRoutingProgress(72, 'Guardando PIN en Firebase…');
             await syncProfileToCloud(userProfile);
             sessionStorage.setItem('nexus_pin_banner_ok', '1');
-            
             markSystemInitializedCache();
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
@@ -6593,7 +6639,10 @@
                     return;
                 }
                 console.log('[NEXUS] Auth web → Google popup');
+                beginLoginRoutingUI('Conectando con Google…');
+                setLoginRoutingProgress(12, 'Iniciando Firebase…');
                 await initCloud();
+                setLoginRoutingProgress(28, 'Abriendo ventana Google…');
                 const { getAuth, GoogleAuthProvider, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const auth = getAuth(window.__nexusFirebaseApp);
                 if (auth.currentUser?.isAnonymous) {
@@ -6631,6 +6680,7 @@
             }
         }
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
+        window.nexusOpenAdminAuthBox = nexusOpenAdminAuthBox;
 
         async function handleNativeGoogleAuthPayload(payload) {
             window.__nexusGoogleNativePending = null;
@@ -13373,13 +13423,18 @@ ${JSON.stringify(dataToAnalyze)}`;
             const err = $id('admin-auth-error');
             if (!cachedRootPinHash) await loadRootPinHashFromCloud();
             if (!cachedRootPinHash) {
-                if (err) { err.classList.remove('hidden'); err.textContent = 'Configura rootPinHash en Firebase (nexus_security/config)'; }
+                if (err) { err.classList.remove('hidden'); err.textContent = 'Define tu PIN root en el panel negro (primera vez)'; }
+                nexusOpenAdminAuthBox(true);
+                return;
+            }
+            if (pin.length !== 4) {
+                if (err) { err.classList.remove('hidden'); err.textContent = 'Ingresa 4 dígitos'; }
                 return;
             }
             if (await verifyRootPin(pin)) {
                 isRootAdminUnlocked = true;
                 await activateRootMaintainerSession();
-                const cont = $id('admin-unlock-container'); if (cont) cont.classList.add('hidden');
+                if ($id('admin-master-pin')) $id('admin-master-pin').value = '';
                 if (err) err.classList.add('hidden');
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                 else renderSettingsTab();
@@ -13416,12 +13471,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (st) st.textContent = 'El PIN debe tener 4 dígitos y coincidir.';
                 return;
             }
-            const res = await saveRootPinToCloud(p1);
-            if (st) st.textContent = res.ok ? 'PIN root guardado en Firebase.' : ('Error: ' + (res.error || ''));
+            const res = await saveRootPinToCloud(p1, true);
+            if (st) st.textContent = res.ok ? 'PIN root guardado en Firebase. Ahora ingrésalo para desbloquear.' : ('Error: ' + (res.error || ''));
             if (res.ok) {
                 if ($id('admin-new-root-pin')) $id('admin-new-root-pin').value = '';
                 if ($id('admin-confirm-root-pin')) $id('admin-confirm-root-pin').value = '';
                 await maybeClearFounderSetupFlags();
+                if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+                nexusOpenAdminAuthBox(false);
             }
         }
 
