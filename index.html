@@ -3433,15 +3433,18 @@
                 }
                 return true;
             } catch (e) {
-                if (e?.code !== 'auth/no-auth-event') {
-                    console.error('[NEXUS] getRedirectResult', { code: e?.code, message: e?.message, origin: window.location.origin });
+                const redirectExpected = sessionStorage.getItem('nexus_google_redirect_pending') === '1';
+                sessionStorage.removeItem('nexus_google_redirect_pending');
+                if (e?.code === 'auth/no-auth-event') return false;
+                console.error('[NEXUS] getRedirectResult', { code: e?.code, message: e?.message, origin: window.location.origin, redirectExpected });
+                if (redirectExpected) {
                     _loginRoutePhase = 'error';
+                    sessionStorage.setItem('nexus_auth_use_redirect', '1');
                     const txt = nexusFormatAuthError(e);
                     if (txt) alert('Error de autenticación: ' + txt);
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
                 }
-                sessionStorage.removeItem('nexus_google_redirect_pending');
                 return false;
             }
         }
@@ -3588,6 +3591,31 @@
             return sessionStorage.getItem('nexus_auth_use_redirect') === '1';
         }
 
+        /** En navegador el popup suele fallar (Safari, cookies, auth/internal-error); redirección es más fiable. */
+        function nexusShouldUseRedirectFirst() {
+            if (!isNexusWebBrowser()) return false;
+            if (sessionStorage.getItem('nexus_auth_use_popup') === '1') return false;
+            if (nexusPreferGoogleRedirect()) return true;
+            const ua = navigator.userAgent || '';
+            const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR/i.test(ua);
+            const isIOSWeb = /iPhone|iPad|iPod/i.test(ua);
+            return isSafari || isIOSWeb || true;
+        }
+
+        async function nexusPrepareGoogleWebAuth() {
+            await initCloud({ skipAnonymous: true });
+            const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, setPersistence, browserLocalPersistence } = authMod;
+            const auth = getAuth(window.__nexusFirebaseApp);
+            try {
+                await setPersistence(auth, browserLocalPersistence);
+            } catch (e) { console.warn('[NEXUS] setPersistence', e); }
+            await nexusSignOutAnonymousIfNeeded(auth, signOut);
+            const provider = new GoogleAuthProvider();
+            provider.setCustomParameters({ prompt: 'select_account' });
+            return { auth, provider, signInWithPopup, signInWithRedirect };
+        }
+
         function nexusFormatAuthError(error) {
             const code = error?.code || '';
             const host = window.location.hostname || '(vacío)';
@@ -3601,8 +3629,8 @@
                 'auth/operation-not-allowed': 'Google Sign-In no está habilitado en Firebase Authentication.',
                 'auth/invalid-api-key': 'Clave de API de Firebase inválida en la configuración de la app.',
                 'auth/account-exists-with-different-credential': 'Ese correo ya está registrado con otro método de acceso.',
-                'auth/too-many-requests': 'Demasiados intentos. Espera un minuto e inténtalo otra vez.',
-                'auth/internal-error': 'Error interno de Google/Firebase. Prueba redirección o otra pestaña.',
+                'auth/too-many-requests': 'Demasiados intentos. Espera un minuto e inténtalo de nuevo.',
+                'auth/internal-error': `Firebase no completó Google en este sitio.\n\nOrigen: ${origin}\n\n• Usa la URL HTTPS donde publicaste la app (no abras el .html suelto).\n• Firebase Console → Authentication → Dominios autorizados → añade "${host}".\n• Safari: permite cookies / desactiva "Impedir seguimiento entre sitios".\n• Pulsa de nuevo "Continuar con Google" (redirección completa).`,
             };
             if (Object.prototype.hasOwnProperty.call(map, code)) return map[code];
             const msg = String(error?.message || '');
@@ -6616,21 +6644,19 @@
                     alert(originErr);
                     return;
                 }
+                const useRedirectFirst = nexusShouldUseRedirectFirst();
                 console.log('[NEXUS] Auth channel: web-popup', {
                     origin: window.location.origin,
                     hostname: window.location.hostname,
+                    useRedirectFirst,
                     preferRedirect: nexusPreferGoogleRedirect()
                 });
-                await initCloud({ skipAnonymous: true });
-                const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } = authMod;
-                const auth = getAuth(window.__nexusFirebaseApp);
-                await nexusSignOutAnonymousIfNeeded(auth, signOut);
-                const provider = new GoogleAuthProvider();
-                provider.setCustomParameters({ prompt: 'select_account' });
+                const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
 
-                if (nexusPreferGoogleRedirect()) {
+                if (useRedirectFirst) {
+                    sessionStorage.setItem('nexus_auth_use_redirect', '1');
                     sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    beginLoginRoutingUI('Redirigiendo a Google…');
                     redirectStarted = true;
                     await signInWithRedirect(auth, provider);
                     return;
@@ -6646,13 +6672,15 @@
                 } catch (popupErr) {
                     if (popupErr?.code === 'auth/popup-closed-by-user') throw popupErr;
                     const useRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code)
-                        || /popup-blocked|blocked/i.test(popupErr?.message || '');
+                        || /popup-blocked|blocked|internal-error/i.test(popupErr?.message || '');
                     if (!useRedirect) throw popupErr;
                     console.warn('[NEXUS] Popup falló, usando redirect', popupErr?.code, popupErr?.message);
                     sessionStorage.setItem('nexus_auth_use_redirect', '1');
                     sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    beginLoginRoutingUI('Redirigiendo a Google…');
                     redirectStarted = true;
                     await signInWithRedirect(auth, provider);
+                    return;
                 }
             } catch (error) {
                 console.error('[NEXUS] Google login web-popup', {
@@ -6673,6 +6701,7 @@
                     alert('Error de autenticación: ' + txt);
                 }
             } finally {
+                if (redirectStarted) return;
                 window.__nexusGoogleLoginInFlight = false;
                 window.__nexusPendingGoogleUser = null;
                 if (!redirectStarted) {
