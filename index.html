@@ -125,6 +125,11 @@
             if (channel === 'web-popup' && (/\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href))) {
                 try { sessionStorage.setItem('nexus_google_redirect_pending', '1'); } catch (e) {}
             }
+            function wireGoogleBtnWhenReady() {
+                if (typeof window.nexusSyncGoogleLoginButton === 'function') window.nexusSyncGoogleLoginButton();
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireGoogleBtnWhenReady);
+            else wireGoogleBtnWhenReady();
         })();
     </script>
 </head>
@@ -3635,9 +3640,19 @@
             return best || '';
         }
 
-        /** Reanudar sesión al abrir/reinstalar: Google nativo (Keychain) o Firebase persistido → entrar sin pantalla fundador. */
+        /** Solo reanudar si ya hubo sesión en este dispositivo (instalación nueva → Identity primero). */
+        function nexusShouldAttemptAutoResume() {
+            if (localStorage.getItem('nexus_firebase_email')) return true;
+            if (localStorage.getItem('nexus_current_user')) return true;
+            if (localStorage.getItem('nexus_system_initialized') === '1') return true;
+            if (countLocalProfiles() > 0) return true;
+            return false;
+        }
+
+        /** Reanudar sesión al reabrir la app (no en instalación fría sin datos locales). */
         async function nexusTryAutoResumeSession() {
             if (window.__nexusAutoResumeDone || nexusLoginSessionActive()) return false;
+            if (!nexusShouldAttemptAutoResume()) return false;
             window.__nexusAutoResumeDone = true;
             try {
                 beginLoginRoutingUI('Abriendo NEXUS…');
@@ -3855,12 +3870,13 @@
 
         function showColdStartLogin() {
             nexusRequireAuthScreen();
-            nexusSyncGoogleLoginButton();
             nexusSanitizeStaleRedirectFlags();
-            const founderHint = $id('login-founder-hint');
-            if (founderHint) founderHint.classList.add('hidden');
+            nexusSyncGoogleLoginButton();
+            showInitialLoginChoice();
 
             (async () => {
+                initCloud({ skipAnonymous: true }).then(() => refreshFounderLoginHint()).catch(() => {});
+
                 if (await nexusTryAutoResumeSession()) return;
 
                 const redirectPending = /\/__\/auth\/handler/i.test(location.href || '')
@@ -7823,23 +7839,25 @@
                 console.warn('[NEXUS] ios-native solicitado fuera del contenedor; usando web-popup');
                 return nexusGoogleAuthViaWebPopup();
             }
-            nexusSetGoogleLoginButtonBusy(true);
             window.__nexusUserTriggeredGoogleLogin = true;
+            window.__nexusGoogleLoginInFlight = true;
+            beginLoginRoutingUI('Conectando con Google…');
             try {
                 console.log('[NEXUS] Auth channel: ios-native → Swift native_google_login');
                 window.webkit.messageHandlers.native_google_login.postMessage('login_request');
-                window.__nexusGoogleNativePending = Date.now();
+                const pendingMark = Date.now();
+                window.__nexusGoogleNativePending = pendingMark;
                 setTimeout(() => {
-                    if (window.__nexusGoogleNativePending && _loginRoutePhase !== 'first-setup' && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'app') {
-                        window.__nexusGoogleNativePending = null;
-                        resetGoogleLoginButton();
-                    }
+                    if (window.__nexusGoogleNativePending !== pendingMark) return;
+                    if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup' || _loginRoutePhase === 'routing') return;
+                    if (nexusLoginSessionActive()) return;
+                    nexusAbortGoogleLogin();
                 }, 120000);
             } catch (e) {
                 console.error('[NEXUS] native_google_login bridge', e);
                 _loginRoutePhase = 'error';
                 alert('No se pudo abrir Google nativo. Reintenta o actualiza la app iOS.');
-                resetGoogleLoginButton();
+                nexusAbortGoogleLogin();
             }
         }
 
@@ -7971,9 +7989,10 @@
 
         function nexusRestoreNativeGoogleSession(vaultEmail) {
             const email = normalizeMemberEmail(vaultEmail);
-            if (!email || !isNexusNativeContainer() || !window.webkit?.messageHandlers?.native_google_login) {
+            if (!isNexusNativeContainer() || !window.webkit?.messageHandlers?.native_google_login) {
                 return Promise.resolve(false);
             }
+            const waitMs = email ? 12000 : 4500;
             return new Promise((resolve) => {
                 let settled = false;
                 const finish = (ok) => {
@@ -7985,14 +8004,26 @@
                 };
                 window.__nexusNativeRestoreResolver = finish;
                 try {
-                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({ action: 'restore_session', email }));
+                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({ action: 'restore_session', email: email || '' }));
                 } catch (e) {
                     console.warn('[NEXUS] native restore_session post', e);
                     finish(false);
                     return;
                 }
-                const timer = setTimeout(() => finish(false), 12000);
+                const timer = setTimeout(() => finish(false), waitMs);
             });
+        }
+
+        /** Usuario canceló Google o falló el puente nativo → volver a Nexus Identity. */
+        function nexusAbortGoogleLogin() {
+            window.__nexusGoogleNativePending = null;
+            window.__nexusGoogleLoginInFlight = false;
+            window.__nexusUserTriggeredGoogleLogin = false;
+            if (_loginRoutePhase !== 'app') _loginRoutePhase = null;
+            hideLoginRoutingLoading();
+            resetGoogleLoginButton();
+            nexusRequireAuthScreen();
+            showInitialLoginChoice();
         }
 
         window.onNativeGoogleRestoreResult = async function(payload) {
@@ -8022,17 +8053,21 @@
             const name = payload?.name || payload?.displayName || 'Usuario Google';
             const photoUrl = payload?.photoUrl || payload?.photoURL || null;
             if (!idToken) {
-                _loginRoutePhase = 'error';
-                alert('No se recibió token de Google.');
+                nexusAbortGoogleLogin();
                 return;
             }
             try {
+                beginLoginRoutingUI('Validando acceso con Google…');
+                setLoginRoutingProgress(25, 'Aceptando sesión…');
                 const ok = await nexusApplyNativeGoogleCredential({ idToken, email, name, photoUrl }, email);
                 if (!ok) {
                     _loginRoutePhase = 'error';
                     alert('No se pudo validar tu cuenta Google. Usa «Continuar con Google» de nuevo.');
+                    nexusAbortGoogleLogin();
                     return;
                 }
+                setLoginRoutingProgress(45, 'Abriendo bóveda…');
+                _loginRoutePhase = 'routing';
                 await routeAfterFirebaseAuth(fbUser, name || fbUser.displayName || 'Usuario Google', photoUrl || fbUser.photoURL);
             } catch (error) {
                 console.error('[NEXUS] native Google credential', { code: error?.code, message: error?.message });
@@ -8042,14 +8077,12 @@
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
                 window.__nexusUserTriggeredGoogleLogin = false;
-                if (_loginRoutePhase === 'error') {
-                    resetGoogleLoginButton();
-                    hideLoginRoutingLoading();
-                    showInitialLoginChoice();
-                } else if (_loginRoutePhase === 'app') {
-                    hideLoginRoutingLoading();
-                    resetGoogleLoginButton();
+                const okPhase = _loginRoutePhase === 'app' || _loginRoutePhase === 'routing'
+                    || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup';
+                if (_loginRoutePhase === 'error' || !okPhase) {
+                    nexusAbortGoogleLogin();
                 } else {
+                    hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                 }
                 showLoginRoutingStatus('');
@@ -8058,6 +8091,7 @@
 
         window.receiveNativeAuthPayload = handleNativeGoogleAuthPayload;
         window.nexusTryAutoResumeSession = nexusTryAutoResumeSession;
+        window.nexusAbortGoogleLogin = nexusAbortGoogleLogin;
         window.receiveNativeAuthToken = async (idToken, email, name, photoUrl) => {
             await handleNativeGoogleAuthPayload({ idToken, email, name, photoUrl });
         };
