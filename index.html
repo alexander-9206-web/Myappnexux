@@ -1107,6 +1107,7 @@
                     </div>
                     <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
                 </div>
+                <button id="admin-close-console-btn" type="button" onclick="nexusCloseAdminAuthBox()" class="hidden w-full mt-3 bg-slate-800 text-slate-300 hover:text-white p-3 rounded-xl font-black uppercase text-[9px] border border-slate-700 active:scale-95 transition-colors"><i class="fa-solid fa-lock mr-1"></i> Cerrar consola administrador root</button>
             </div>
 
             <!-- BLOQUE ADMINISTRADOR GLOBAL (ROOT) -->
@@ -3262,7 +3263,7 @@
             return false;
         }
 
-        /** Tras abrir la app: admin → panel negro; demás usuarios → banner PIN en dashboard. */
+        /** Tras abrir la app: consola root bloqueada; PIN bóveda en dashboard si aplica. */
         async function nexusPostLoginOnboarding() {
             if (!sessionUnlocked || !currentUser) return;
             if (isUserAdmin(userProfile)) {
@@ -3275,22 +3276,32 @@
 
         async function nexusPromptAdminPanelAfterLogin() {
             if (!isUserAdmin(userProfile)) return;
+            isRootAdminUnlocked = false;
+            if (typeof deactivateRootMaintainerSession === 'function') await deactivateRootMaintainerSession();
             if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-            setTimeout(() => {
-                switchTab('settings');
-                if (!cachedRootPinHash) {
-                    nexusOpenAdminAuthBox(true);
-                } else {
-                    nexusOpenAdminAuthBox(false);
-                    triggerBiometricAuth(async () => {
-                        isRootAdminUnlocked = true;
-                        if (typeof activateRootMaintainerSession === 'function') await activateRootMaintainerSession();
-                        if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                    }, 'Acceso biométrico al panel administrador root');
-                }
-            }, 450);
         }
+
+        function nexusCloseAdminAuthBox() {
+            isRootAdminUnlocked = false;
+            if (typeof deactivateRootMaintainerSession === 'function') deactivateRootMaintainerSession();
+            const rpb = $id('admin-root-pin-block');
+            const authBox = $id('admin-auth-box');
+            const toggleBtn = $id('admin-unlock-toggle-btn');
+            const err = $id('admin-auth-error');
+            if (rpb) rpb.classList.add('hidden');
+            if (authBox) authBox.classList.add('hidden');
+            if (toggleBtn) toggleBtn.classList.remove('hidden');
+            const mp = $id('admin-master-pin');
+            if (mp) mp.value = '';
+            const np = $id('admin-new-root-pin');
+            const cp = $id('admin-confirm-root-pin');
+            if (np) np.value = '';
+            if (cp) cp.value = '';
+            if (err) err.classList.add('hidden');
+            if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+        }
+        window.nexusCloseAdminAuthBox = nexusCloseAdminAuthBox;
 
         async function isSystemInitialized() {
             if (hasSystemInitializedCache()) return true;
@@ -3737,8 +3748,8 @@
                 const txt = typeof nexusFormatAuthError === 'function' ? nexusFormatAuthError(e) : (e.message || 'revisa la conexión');
                 if (txt) alert('Error al continuar: ' + txt);
             } finally {
-                if (_loginRoutePhase === 'routing' && sessionUnlocked && currentUser) _loginRoutePhase = 'app';
-                if (_loginRoutePhase === 'error' && !(sessionUnlocked && currentUser)) {
+                if (sessionUnlocked && currentUser) _loginRoutePhase = 'app';
+                else if (_loginRoutePhase === 'error') {
                     hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
@@ -3897,10 +3908,11 @@
             const rpb = $id('admin-root-pin-block');
             const authBox = $id('admin-auth-box');
             const toggleBtn = $id('admin-unlock-toggle-btn');
+            const closeBtn = $id('admin-close-console-btn');
             const block = $id('admin-users-block');
             const dz = $id('danger-zone-container');
             if (!showAdmin) {
-                [unlock, rpb, authBox, block, dz].forEach(el => { if (el) el.classList.add('hidden'); });
+                [unlock, rpb, authBox, block, dz, closeBtn].forEach(el => { if (el) el.classList.add('hidden'); });
                 return;
             }
             if (unlock) unlock.classList.remove('hidden');
@@ -3908,11 +3920,13 @@
                 if (toggleBtn) toggleBtn.classList.add('hidden');
                 if (rpb) rpb.classList.add('hidden');
                 if (authBox) authBox.classList.add('hidden');
+                if (closeBtn) closeBtn.classList.remove('hidden');
             } else {
                 const needsFirst = !cachedRootPinHash;
                 if (toggleBtn) toggleBtn.classList.toggle('hidden', needsFirst);
                 if (rpb) rpb.classList.add('hidden');
                 if (authBox) authBox.classList.add('hidden');
+                if (closeBtn) closeBtn.classList.add('hidden');
             }
             if (block) {
                 if (master) {
@@ -5766,7 +5780,13 @@
         /** Firestore exige auth con correo para bootstrap fundador; evita quedar en anónimo tras Google. */
         async function ensureFirestoreGoogleSession(email, uid, preferredUser) {
             await initCloud({ skipAnonymous: true });
-            return nexusResolveGoogleAuthUser(email, uid, preferredUser || fbUser);
+            const want = (email || '').trim().toLowerCase();
+            const pref = preferredUser || fbUser;
+            if (pref && !pref.isAnonymous && (pref.email || '').trim().toLowerCase() === want) {
+                fbUser = pref;
+                return pref;
+            }
+            return nexusResolveGoogleAuthUser(email, uid, pref);
         }
 
         async function initCloud(opts) {
@@ -6224,8 +6244,8 @@
             try {
                 await processLoginSuccess(email);
                 if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
+                isRootAdminUnlocked = false;
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                nexusOpenAdminAuthBox(!cachedRootPinHash);
             } catch (e) {
                 console.error('[NEXUS] finishFounderLoginEntry', e);
                 _loginRoutePhase = 'error';
@@ -6578,6 +6598,8 @@
             currentUser = vaultEmail;
             sessionUnlocked = true;
             _loginRoutePhase = 'app';
+            isRootAdminUnlocked = false;
+            nexusReleaseAppShell();
 
             showLoginRoutingLoading('Abriendo bóveda…');
             setLoginRoutingProgress(8, 'Cargando perfil…');
@@ -6624,7 +6646,7 @@
 
             nexusPostLoginOnboarding().catch(e => console.warn('[NEXUS] post-login onboarding', e));
 
-            initCloud().then(async () => {
+            initCloud({ skipAnonymous: true }).then(async () => {
                 try {
                     if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
                     await fetchCloudState();
@@ -6808,11 +6830,6 @@
         async function nexusCompleteGoogleWebSignIn(googleUser, displayName, photoURL) {
             if (!googleUser) throw new Error('Sin usuario Google');
             fbUser = googleUser;
-            await nexusResolveGoogleAuthUser(
-                (googleUser.email || '').trim().toLowerCase(),
-                googleUser.uid,
-                googleUser
-            );
             await routeAfterFirebaseAuth(googleUser, displayName || googleUser.displayName || 'Usuario Google', photoURL || googleUser.photoURL);
         }
 
@@ -6934,10 +6951,10 @@
                 if (!delegatedToNative && !redirectStarted) {
                     window.__nexusGoogleNativePending = null;
                     const inApp = sessionUnlocked && currentUser;
-                    if (!inApp && _loginRoutePhase === 'error') {
+                    if (!(sessionUnlocked && currentUser) && _loginRoutePhase === 'error') {
                         resetGoogleLoginButton();
                         showInitialLoginChoice();
-                    } else {
+                    } else if (!(sessionUnlocked && currentUser)) {
                         resetGoogleLoginButton();
                     }
                     showLoginRoutingStatus('');
@@ -13787,7 +13804,6 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if ($id('admin-confirm-root-pin')) $id('admin-confirm-root-pin').value = '';
                 await maybeClearFounderSetupFlags();
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                nexusOpenAdminAuthBox(false);
             }
         }
 
