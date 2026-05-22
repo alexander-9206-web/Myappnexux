@@ -109,10 +109,18 @@
     <script>
         document.documentElement.classList.add('nexus-auth-pending');
         (function nexusEarlyBootRuntime() {
-            var h = window.webkit && window.webkit.messageHandlers;
-            var rt = (h && h.native_google_login) ? 'ios-container' : 'web-browser';
-            window.__nexusRuntime = rt;
-            document.documentElement.dataset.nexusRuntime = rt;
+            function apply() {
+                var h = window.webkit && window.webkit.messageHandlers;
+                var rt = (h && h.native_google_login) ? 'ios-container' : 'web-browser';
+                window.__nexusRuntime = rt;
+                document.documentElement.dataset.nexusRuntime = rt;
+            }
+            apply();
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', apply);
+            }
+            setTimeout(apply, 0);
+            setTimeout(apply, 350);
         })();
         (function nexusBootLoginShell() {
             function reveal() {
@@ -3539,20 +3547,30 @@
             return isNexusNativeContainer() ? 'ios-container' : 'web-browser';
         }
 
-        /** Entorno fijado al arranque (Swift/WKWebView vs navegador). */
+        /** Entorno en vivo (handlers WK pueden registrarse después del head). */
         function nexusGetBootRuntime() {
-            if (window.__nexusRuntime === 'ios-container' || window.__nexusRuntime === 'web-browser') {
-                return window.__nexusRuntime;
+            const live = nexusDetectRuntime();
+            if (window.__nexusRuntime !== live) {
+                window.__nexusRuntime = live;
+                document.documentElement.dataset.nexusRuntime = live;
             }
-            return nexusDetectRuntime();
+            return live;
         }
 
         function nexusBootRuntimeIsIos() {
-            return nexusGetBootRuntime() === 'ios-container';
+            return isNexusNativeContainer();
         }
 
         function nexusBootRuntimeIsWeb() {
-            return nexusGetBootRuntime() === 'web-browser';
+            return isNexusWebBrowser();
+        }
+
+        function nexusCancelGoogleLoginAttempt() {
+            window.__nexusGoogleLoginInFlight = false;
+            window.__nexusGoogleNativePending = null;
+            hideLoginRoutingLoading();
+            resetGoogleLoginButton();
+            showInitialLoginChoice();
         }
 
         const NEXUS_RECENT_SESSIONS_KEY = 'nexus_recent_sessions';
@@ -3682,26 +3700,27 @@
         }
 
         async function nexusGoogleAuthViaWebPopup() {
-            if (nexusBootRuntimeIsIos()) {
-                console.warn('[NEXUS] Popup web cancelado: arranque en contenedor Swift/iOS');
-                return;
-            }
             if (isNexusNativeContainer()) {
-                console.warn('[NEXUS] Popup web cancelado: handler nativo presente');
-                return;
+                console.warn('[NEXUS] Popup web omitido: contenedor iOS activo');
+                return nexusGoogleAuthViaNativeRepository();
             }
             if (window.location.protocol === 'file:') {
                 alert('No puedes iniciar sesión con file://. Usa la URL HTTPS de Vercel.');
-                nexusRequireAuthScreen();
-                showInitialLoginChoice();
+                nexusCancelGoogleLoginAttempt();
                 return;
             }
-            console.log('[NEXUS] Auth → popup Firebase (repositorio iOS desactivado)');
-            if (window.__nexusGoogleLoginFromButton) beginLoginRoutingUI();
+            console.log('[NEXUS] Auth navegador → Firebase popup/redirect');
+            beginLoginRoutingUI();
+            setLoginRoutingProgress(15);
             window.__nexusGoogleLoginInFlight = true;
             updateCloudBadge(false, true);
+            let redirectStarted = false;
             try {
                 await initCloud({ skipAnonymous: true });
+                if (!window.__nexusFirebaseApp) {
+                    throw new Error('No se pudo inicializar Firebase.');
+                }
+                setLoginRoutingProgress(35);
                 const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                 const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } = authMod;
                 const auth = getAuth(window.__nexusFirebaseApp);
@@ -3710,32 +3729,34 @@
                 }
                 const provider = new GoogleAuthProvider();
                 provider.setCustomParameters({ prompt: 'select_account' });
+                setLoginRoutingProgress(50);
                 if (nexusPreferGoogleRedirect()) {
                     sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    redirectStarted = true;
                     await signInWithRedirect(auth, provider);
                     return;
                 }
                 try {
+                    setLoginRoutingProgress(65);
                     const result = await signInWithPopup(auth, provider);
                     fbUser = result.user;
+                    setLoginRoutingProgress(80);
                     await routeAfterFirebaseAuth(fbUser, fbUser.displayName || 'Usuario Google', fbUser.photoURL);
                 } catch (popupErr) {
                     if (popupErr?.code === 'auth/popup-closed-by-user') {
-                        console.warn('[NEXUS] Popup cerrado');
-                        nexusRequireAuthScreen();
-                        showInitialLoginChoice();
+                        _loginRoutePhase = 'error';
                         return;
                     }
                     const useRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code);
                     if (!useRedirect) throw popupErr;
                     sessionStorage.setItem('nexus_auth_use_redirect', '1');
                     sessionStorage.setItem('nexus_google_redirect_pending', '1');
+                    redirectStarted = true;
                     await signInWithRedirect(auth, provider);
                 }
             } catch (error) {
                 console.error('[NEXUS] Google popup', error);
                 _loginRoutePhase = 'error';
-                hideLoginRoutingLoading();
                 if (error?.code === 'auth/unauthorized-domain') {
                     const msg = `⚠️ DOMINIO NO AUTORIZADO\n\nAgrega este dominio en Firebase → Authentication → Dominios autorizados:\n[ ${window.location.hostname} ]`;
                     if (typeof triggerUIConfirm === 'function') triggerUIConfirm(msg, 'mock_google_login');
@@ -3745,17 +3766,10 @@
                 if (error?.code !== 'auth/popup-closed-by-user') {
                     alert('Error de autenticación: ' + (error?.message || 'revisa la conexión'));
                 }
-                nexusRequireAuthScreen();
-                showInitialLoginChoice();
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
-                if (window.__nexusGoogleLoginFromButton) {
-                    if (!window.__nexusAuthSuccess && _loginRoutePhase === 'error') {
-                        resetGoogleLoginButton();
-                        nexusForceLoginUISync();
-                        showInitialLoginChoice();
-                    }
-                    showLoginRoutingStatus('');
+                if (!redirectStarted && !window.__nexusAuthSuccess) {
+                    nexusCancelGoogleLoginAttempt();
                 }
             }
         }
@@ -6708,41 +6722,41 @@
         // ============================================================================
         // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
         // ============================================================================
-        /** Solo contenedor Swift/WKWebView: repositorio interno; sin popup Firebase. */
+        /** Solo contenedor Swift/WKWebView: repositorio interno; sin popup Firebase ni pantalla de carga bloqueante. */
         async function nexusGoogleAuthViaNativeRepository() {
-            if (nexusBootRuntimeIsWeb()) {
-                console.warn('[NEXUS] Repositorio iOS cancelado: arranque en navegador');
-                return;
-            }
-            if (!window.webkit?.messageHandlers?.native_google_login) {
+            if (!isNexusNativeContainer() || !window.webkit?.messageHandlers?.native_google_login) {
                 alert('Repositorio Google interno no disponible. Abre Nexus desde la app iOS.');
-                resetGoogleLoginButton();
+                nexusCancelGoogleLoginAttempt();
                 return;
             }
-            console.log('[NEXUS] Auth → repositorio interno Swift (popup web desactivado)');
-            beginLoginRoutingUI();
+            console.log('[NEXUS] Auth iOS → repositorio nativo Swift');
             window.__nexusGoogleLoginInFlight = true;
-            window.webkit.messageHandlers.native_google_login.postMessage('login_request');
+            try {
+                window.webkit.messageHandlers.native_google_login.postMessage('login_request');
+            } catch (e) {
+                console.error('[NEXUS] postMessage nativo', e);
+                _loginRoutePhase = 'error';
+                nexusCancelGoogleLoginAttempt();
+                return;
+            }
             window.__nexusGoogleNativePending = Date.now();
             setTimeout(() => {
                 if (window.__nexusGoogleNativePending && _loginRoutePhase !== 'first-setup' && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'app') {
                     window.__nexusGoogleNativePending = null;
                     _loginRoutePhase = 'error';
-                    window.__nexusGoogleLoginInFlight = false;
-                    resetGoogleLoginButton();
-                    showInitialLoginChoice();
+                    nexusCancelGoogleLoginAttempt();
                 }
             }, 120000);
         }
 
-        /** Despacha Google según entorno de arranque (no mezcla rutas). */
+        /** Despacha Google según entorno detectado al pulsar (iOS nativo vs popup web). */
         async function triggerNativeGoogleLogin() {
             nexusApplyBootEnvironment(nexusDetectRuntime());
             window.__nexusUserRequestedGoogle = true;
             sessionStorage.removeItem('nexus_suppress_native_google');
             window.__nexusSuppressNativeGoogle = false;
             window.__nexusAuthSuccess = false;
-            const nativeIos = nexusBootRuntimeIsIos();
+            const nativeIos = isNexusNativeContainer();
             const btn = $id('login-google-btn');
             if (btn) {
                 btn.innerHTML = nativeIos
@@ -6755,12 +6769,7 @@
             if (nativeIos) {
                 return nexusGoogleAuthViaNativeRepository();
             }
-            window.__nexusGoogleLoginFromButton = true;
-            try {
-                return await nexusGoogleAuthViaWebPopup();
-            } finally {
-                window.__nexusGoogleLoginFromButton = false;
-            }
+            return nexusGoogleAuthViaWebPopup();
         }
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
         window.nexusGoogleAuthViaNativeRepository = nexusGoogleAuthViaNativeRepository;
@@ -6802,10 +6811,10 @@
                 alert('Error de autenticación: ' + (error?.message || 'Firebase'));
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
+                window.__nexusGoogleNativePending = null;
+                hideLoginRoutingLoading();
                 if (!window.__nexusAuthSuccess && _loginRoutePhase === 'error') {
-                    resetGoogleLoginButton();
-                    nexusForceLoginUISync();
-                    showInitialLoginChoice();
+                    nexusCancelGoogleLoginAttempt();
                 }
                 showLoginRoutingStatus('');
             }
