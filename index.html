@@ -3213,6 +3213,20 @@
             return n;
         }
 
+        function markSystemInitializedCache() {
+            try { localStorage.setItem('nexus_system_initialized', '1'); } catch (e) { /* noop */ }
+        }
+
+        function hasSystemInitializedCache() {
+            try {
+                if (localStorage.getItem('nexus_system_initialized') === '1') return true;
+                if (countLocalProfiles() > 0) return true;
+                const saved = (localStorage.getItem('nexus_current_user') || '').trim().toLowerCase();
+                if (saved && loadLocalProfile(saved)) return true;
+            } catch (e) { /* noop */ }
+            return false;
+        }
+
         async function getBootstrapInfo() {
             try {
                 if (!window.db) await initCloud();
@@ -3249,18 +3263,26 @@
         }
 
         async function isSystemInitialized() {
+            if (hasSystemInitializedCache()) return true;
             try {
                 if (!window.db) await initCloud();
-                if (!window.db) return countLocalProfiles() > 0;
+                if (!window.db) return false;
                 const boot = await getBootstrapInfo();
-                if (boot && boot.initialized) return true;
+                if (boot && boot.initialized) {
+                    markSystemInitializedCache();
+                    return true;
+                }
                 const { collection, getDocs, limit, query } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                 const q = query(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'), limit(1));
                 const snap = await getDocs(q);
-                return !snap.empty;
+                if (!snap.empty) {
+                    markSystemInitializedCache();
+                    return true;
+                }
+                return false;
             } catch (e) {
                 console.warn('[NEXUS] isSystemInitialized', e);
-                return countLocalProfiles() > 0;
+                return hasSystemInitializedCache();
             }
         }
 
@@ -3362,7 +3384,7 @@
 
                 userProfile = await ensureProfilePinHash(profile);
                 localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-                localStorage.setItem('nexus_system_initialized', '1');
+                markSystemInitializedCache();
 
                 if (window.db) {
                     const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -3481,19 +3503,34 @@
         async function refreshFounderLoginHint() {
             const el = $id('login-founder-hint');
             if (!el) return;
+            if (hasSystemInitializedCache()) {
+                el.classList.add('hidden');
+                return;
+            }
+            el.classList.add('hidden');
             try {
                 if (!window.db) await initCloud();
-                el.classList.toggle('hidden', await isSystemInitialized());
+                const initialized = await isSystemInitialized();
+                el.classList.toggle('hidden', initialized);
             } catch (e) {
-                el.classList.remove('hidden');
+                console.warn('[NEXUS] refreshFounderLoginHint', e);
+                el.classList.toggle('hidden', hasSystemInitializedCache());
             }
         }
 
         function showColdStartLogin() {
             nexusRequireAuthScreen();
-            initCloud().then(() => refreshFounderLoginHint()).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
             fetchLoginUsers(false);
             showInitialLoginChoice();
+            (async () => {
+                try {
+                    await initCloud();
+                    await refreshFounderLoginHint();
+                } catch (e) {
+                    console.warn('[NEXUS] initCloud en arranque', e);
+                    await refreshFounderLoginHint();
+                }
+            })();
         }
 
         function showLoginFlow() {
@@ -3743,6 +3780,7 @@
                 profile.role = 'user';
             }
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile, userEmail)));
+            markSystemInitializedCache();
             ensureProfilePinHash(profile).catch(e => console.warn('[NEXUS] pin hash background', e));
             syncProfileToCloud(profile).catch(e => console.warn('[NEXUS] syncProfile background', e));
             if (typeof loadRootPinHashFromCloud === 'function') {
@@ -3773,6 +3811,7 @@
                 const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_system', 'bootstrap');
                 const snap = await getDoc(ref);
                 if (snap.exists() && snap.data().initialized) {
+                    markSystemInitializedCache();
                     if (isBootstrapFounder(snap.data(), email, uid)) return { ok: true, existing: true };
                     return { ok: false, error: 'Sistema ya inicializado' };
                 }
@@ -3783,6 +3822,7 @@
                     adminToken: uid,
                     initializedAt: Date.now()
                 }, { merge: false });
+                markSystemInitializedCache();
                 return { ok: true };
             } catch (e) {
                 return { ok: false, error: nexusFormatFirebaseError(e) };
@@ -5699,21 +5739,33 @@
                         console.warn("[APEX] Auth initialization fallback", e);
                     }
 
+                    const afterCloudReady = () => {
+                        finish(true);
+                        isSystemInitialized().then((ok) => {
+                            if (ok && typeof refreshFounderLoginHint === 'function') refreshFounderLoginHint().catch(() => {});
+                        }).catch(() => {});
+                    };
+
                     if (auth.currentUser) {
                         fbUser = auth.currentUser;
-                        finish(true);
+                        afterCloudReady();
                     } else {
                         const unsub = onAuthStateChanged(auth, (user) => {
                             if (user) {
                                 fbUser = user;
                                 try { unsub(); } catch (e) {}
-                                finish(true);
+                                afterCloudReady();
                             }
                         });
                         setTimeout(() => {
                             try { unsub(); } catch (e) {}
-                            finish(!!auth.currentUser);
-                        }, 8000);
+                            if (auth.currentUser) {
+                                fbUser = auth.currentUser;
+                                afterCloudReady();
+                            } else {
+                                finish(false);
+                            }
+                        }, 5000);
                     }
                 });
             } catch(e) {
@@ -6117,7 +6169,7 @@
                         adminToken: auth.uid
                     };
                     localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-                    localStorage.setItem('nexus_system_initialized', '1');
+                    markSystemInitializedCache();
                     delete userProfile.needsFounderSetup;
                     await finishFounderLoginEntry(auth.email);
                     return;
@@ -6159,7 +6211,7 @@
                     return { ok: true };
                 }, 4, 450);
 
-                localStorage.setItem('nexus_system_initialized', '1');
+                markSystemInitializedCache();
                 delete userProfile.needsFounderSetup;
                 await finishFounderLoginEntry(auth.email);
             } catch (e) {
@@ -6267,6 +6319,10 @@
                     
                     if (hasChanges) renderList();
                     else if (usersMap.size === 0) list.innerHTML = '<p class="text-[10px] text-center text-slate-500 font-bold py-4">No se encontraron bóvedas en la red.</p>';
+                    if (!snap.empty) {
+                        markSystemInitializedCache();
+                        refreshFounderLoginHint().catch(() => {});
+                    }
                     
                 } catch(e) { 
                     console.warn("[APEX] Fallo leyendo usuarios en login", e); 
@@ -6507,6 +6563,7 @@
             await syncProfileToCloud(userProfile);
             sessionStorage.setItem('nexus_pin_banner_ok', '1');
             
+            markSystemInitializedCache();
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
         }
