@@ -301,7 +301,7 @@
                 </div>
                 <div><label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Correo (ID)</label><input type="email" id="login-new-email" class="w-full bg-black/50 border border-white/10 text-white p-4 rounded-2xl mt-1 outline-none font-bold text-sm shadow-inner"></div>
                 <div><label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Nombre</label><input type="text" id="login-new-name" class="w-full bg-black/50 border border-white/10 text-white p-4 rounded-2xl mt-1 outline-none font-bold text-sm shadow-inner"></div>
-                <div><label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Crea un PIN (4 Dígitos)</label><input type="password" id="login-new-pin" maxlength="4" pattern="[0-9]*" inputmode="numeric" class="w-full bg-black/50 border border-white/10 text-white p-4 rounded-2xl mt-1 outline-none font-bold text-sm text-center tracking-[1em] shadow-inner"></div>
+                <div><label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">PIN (opcional — lo defines en el dashboard)</label><input type="password" id="login-new-pin" maxlength="4" pattern="[0-9]*" inputmode="numeric" placeholder="••••" class="w-full bg-black/50 border border-white/10 text-white p-4 rounded-2xl mt-1 outline-none font-bold text-sm text-center tracking-[1em] shadow-inner"></div>
                 <button onclick="handleLoginNew()" type="button" class="w-full bg-emerald-500 text-slate-900 p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-emerald-500/20 active:scale-95 transition-transform flex items-center justify-center gap-2">Registrar <i class="fa-solid fa-arrow-right"></i></button>
             </div>
 
@@ -1086,19 +1086,23 @@
                 <button id="admin-unlock-toggle-btn" onclick="nexusOpenAdminAuthBox()" class="w-full bg-slate-900 text-slate-400 hover:text-white p-4 rounded-xl font-black uppercase text-[9px] md:text-[10px] shadow-sm active:scale-95 transition-colors border border-slate-800"><i class="fa-solid fa-user-shield mr-1"></i> Panel Administrador Root</button>
                 <div id="admin-root-pin-block" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp mt-3">
                     <p class="text-[10px] font-black text-amber-400 uppercase tracking-widest text-center"><i class="fa-solid fa-shield-halved mr-1"></i> Primera vez — PIN root</p>
-                    <p class="text-[8px] text-slate-400 font-bold text-center leading-relaxed">Define tu PIN root de 4 dígitos. Se guardará solo el hash en Firebase (<code class="text-slate-500">nexus_security/config</code>).</p>
+                    <p class="text-[8px] text-slate-400 font-bold text-center leading-relaxed">Define tu PIN root de 4 dígitos. Se guardará solo el hash en Firebase.</p>
                     <div class="grid grid-cols-2 gap-2">
                         <input type="password" id="admin-new-root-pin" maxlength="4" inputmode="numeric" placeholder="PIN root" class="form-input text-center tracking-[0.5em] text-sm bg-slate-800 border-slate-700 text-white">
                         <input type="password" id="admin-confirm-root-pin" maxlength="4" inputmode="numeric" placeholder="Confirmar" class="form-input text-center tracking-[0.5em] text-sm bg-slate-800 border-slate-700 text-white">
                     </div>
-                    <button type="button" onclick="saveAdminRootPin()" class="w-full bg-amber-500 text-slate-900 py-3 rounded-xl font-black uppercase text-[9px] active:scale-95">Guardar PIN root</button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="saveAdminRootPin()" class="flex-1 bg-amber-500 text-slate-900 py-3 rounded-xl font-black uppercase text-[9px] active:scale-95">Guardar PIN root</button>
+                        <button type="button" onclick="bioUnlockAdmin()" title="Biometría" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl font-black text-lg active:scale-95"><i class="fa-solid fa-fingerprint"></i></button>
+                    </div>
                     <p id="admin-root-pin-status" class="text-[8px] font-bold text-amber-400 text-center"></p>
                 </div>
                 <div id="admin-auth-box" class="hidden bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 flex flex-col gap-3 animate-slideUp mt-3">
                     <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Ingrese PIN Root (Firebase)</p>
                     <div class="flex gap-2">
                         <input type="password" id="admin-master-pin" maxlength="4" placeholder="••••" class="form-input text-center tracking-[1em] flex-1 text-sm bg-slate-800 border-slate-700 text-white outline-none focus:border-red-500" inputmode="numeric">
-                        <button onclick="verifyAdminRoot()" class="bg-red-600 text-white px-6 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-unlock"></i></button>
+                        <button type="button" onclick="bioUnlockAdmin()" title="Biometría" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl font-black text-lg active:scale-95"><i class="fa-solid fa-fingerprint"></i></button>
+                        <button type="button" onclick="verifyAdminRoot()" class="bg-red-600 text-white px-6 rounded-xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-unlock"></i></button>
                     </div>
                     <p id="admin-auth-error" class="hidden text-red-500 text-[9px] text-center font-bold uppercase tracking-widest">Acceso Denegado</p>
                 </div>
@@ -3257,21 +3261,34 @@
             return false;
         }
 
-        function nexusShowVaultPinLockAfterAppOpen() {
-            if (!userProfile || !profileHasPin(userProfile)) return;
-            sessionUnlocked = false;
-            const lock = $id('session-lock-screen');
-            const ln = $id('lock-name');
-            if (ln) ln.innerText = userProfile.name || currentUser || 'Usuario';
-            if (lock) {
-                lock.classList.remove('hidden');
-                lock.classList.remove('opacity-0', 'pointer-events-none');
+        /** Tras abrir la app: admin → panel negro; demás usuarios → banner PIN en dashboard. */
+        async function nexusPostLoginOnboarding() {
+            if (!sessionUnlocked || !currentUser) return;
+            if (isUserAdmin(userProfile)) {
+                await nexusPromptAdminPanelAfterLogin();
+            } else if (!profileHasPin(userProfile)) {
+                sessionStorage.removeItem('nexus_pin_banner_ok');
+                if (typeof showPinSetupBannerIfNeeded === 'function') showPinSetupBannerIfNeeded();
             }
-            const pinInput = $id('session-pin-input');
-            if (pinInput) {
-                pinInput.value = '';
-                setTimeout(() => pinInput.focus(), 250);
-            }
+        }
+
+        async function nexusPromptAdminPanelAfterLogin() {
+            if (!isUserAdmin(userProfile)) return;
+            if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
+            if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+            setTimeout(() => {
+                switchTab('settings');
+                if (!cachedRootPinHash) {
+                    nexusOpenAdminAuthBox(true);
+                } else {
+                    nexusOpenAdminAuthBox(false);
+                    triggerBiometricAuth(async () => {
+                        isRootAdminUnlocked = true;
+                        if (typeof activateRootMaintainerSession === 'function') await activateRootMaintainerSession();
+                        if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+                    }, 'Acceso biométrico al panel administrador root');
+                }
+            }, 450);
         }
 
         async function isSystemInitialized() {
@@ -3417,18 +3434,8 @@
                 sessionStorage.removeItem('nexus_pin_banner_ok');
 
                 setLoginRoutingProgress(85, 'Abriendo interfaz…');
+                if (needsSetup) userProfile.needsFounderSetup = true;
                 await processLoginSuccess(auth.email);
-                if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
-                if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
-                if (profileHasPin(userProfile)) {
-                    nexusShowVaultPinLockAfterAppOpen();
-                }
-                if (needsSetup) {
-                    setTimeout(() => {
-                        switchTab('settings');
-                        nexusOpenAdminAuthBox(true);
-                    }, 400);
-                }
             } catch (e) {
                 console.error('[NEXUS] enterFounderAppFlow', e);
                 _loginRoutePhase = 'error';
@@ -3549,8 +3556,14 @@
         }
 
         function showLoginFlow() {
+            sessionStorage.removeItem('nexus_session_active');
+            _loginRoutePhase = null;
+            isRootAdminUnlocked = false;
+            if (typeof deactivateRootMaintainerSession === 'function') deactivateRootMaintainerSession();
             clearStaleSession();
             nexusRequireAuthScreen();
+            const lock = $id('session-lock-screen');
+            if (lock) lock.classList.add('hidden');
             fetchLoginUsers(false);
             showInitialLoginChoice();
         }
@@ -3804,11 +3817,20 @@
             userProfile.lastSeen = Date.now();
             delete userProfile.needsPinSetup;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(profile, userEmail)));
-            _loginRoutePhase = 'app';
-            await processLoginSuccess(userEmail);
-            if (await isSystemInitialized() && profileHasPin(userProfile)) {
-                nexusShowVaultPinLockAfterAppOpen();
+            if (await isFounderAccount(userEmail, fbAuthUser.uid)) {
+                await enterFounderAppFlow({
+                    email: userEmail,
+                    name: userName,
+                    uid: fbAuthUser.uid,
+                    photoURL: photoURL || fbAuthUser.photoURL || null,
+                    isGoogle: true
+                });
+                return;
             }
+
+            _loginRoutePhase = 'app';
+            if (!profileHasPin(userProfile)) sessionStorage.removeItem('nexus_pin_banner_ok');
+            await processLoginSuccess(userEmail);
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -4947,8 +4969,16 @@
         // --- Puentes de Inyección Automática Biométrica ---
         function bioUnlockAdmin() {
             if (!isUserAdmin(userProfile)) return;
-            nexusOpenAdminAuthBox(false);
-            alert('Ingresa tu PIN root en el panel negro. Se verificará contra Firebase.');
+            triggerBiometricAuth(async () => {
+                if (typeof loadRootPinHashFromCloud === 'function') await loadRootPinHashFromCloud();
+                if (!cachedRootPinHash) {
+                    nexusOpenAdminAuthBox(true);
+                    return;
+                }
+                isRootAdminUnlocked = true;
+                if (typeof activateRootMaintainerSession === 'function') await activateRootMaintainerSession();
+                if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+            }, 'Acceso biométrico al panel administrador root');
         }
 
         function bioUnlockTakeover() {
@@ -6426,7 +6456,6 @@
         async function selectUserForLogin(email, name) {
             const vaultEmail = String(email || '').trim().toLowerCase();
             loginSelectedEmail = vaultEmail;
-            _loginRoutePhase = 'pin';
             let profile = loadLocalProfile(vaultEmail);
             if (window.db) {
                 beginLoginRoutingUI('Cargando perfil…');
@@ -6435,7 +6464,16 @@
                 } catch (e) { console.warn('[NEXUS] selectUser profile', e); }
                 hideLoginRoutingLoading();
             }
-            if (profile) userProfile = profile;
+            if (!profile) return alert('No se encontró la bóveda.');
+            userProfile = profile;
+
+            if (!profileHasPin(profile)) {
+                _loginRoutePhase = 'app';
+                await processLoginSuccess(vaultEmail);
+                return;
+            }
+
+            _loginRoutePhase = 'pin';
             $id('login-initial-choice').classList.add('hidden');
             $id('login-user-selection').classList.add('hidden');
             $id('login-new-section').classList.add('hidden');
@@ -6446,9 +6484,9 @@
             pinInput.value = '';
             
             setTimeout(() => {
-                if (profile && profile.useBiometrics === true) {
+                if (profile.useBiometrics === true) {
                     triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
-                } else {
+                } else if (pinInput) {
                     pinInput.focus();
                 }
             }, 100);
@@ -6541,6 +6579,8 @@
                 console.warn('[NEXUS] interfaz abierta con estado mínimo tras fallo bootApp');
             }
 
+            nexusPostLoginOnboarding().catch(e => console.warn('[NEXUS] post-login onboarding', e));
+
             initCloud().then(async () => {
                 try {
                     if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
@@ -6613,11 +6653,11 @@
             }
             const email = $id('login-new-email').value.trim().toLowerCase();
             const name = $id('login-new-name').value.trim();
-            const pin = $id('login-new-pin').value.trim();
+            const pin = ($id('login-new-pin')?.value || '').trim();
             
-            if(!email || !name || pin.length !== 4) {
+            if (!email || !name) {
                 hideLoginRoutingLoading();
-                return alert("Todos los campos son requeridos. PIN de 4 dígitos.");
+                return alert('Correo y nombre son requeridos.');
             }
             
             let existingProfile = localStorage.getItem(`nexus_profile_${email}`);
@@ -6627,13 +6667,19 @@
             }
             
             setLoginRoutingProgress(55, 'Creando bóveda…');
-            userProfile = { name, email, lastSeen: Date.now(), pinHash: await hashVaultPIN(pin), isAdmin: false, role: 'user' };
+            userProfile = { name, email, lastSeen: Date.now(), isAdmin: false, role: 'user' };
+            if (pin.length === 4) {
+                userProfile.pinHash = await hashVaultPIN(pin);
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
+            } else {
+                sessionStorage.removeItem('nexus_pin_banner_ok');
+            }
             delete userProfile.needsPinSetup;
             localStorage.setItem(`nexus_profile_${email}`, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-            setLoginRoutingProgress(72, 'Guardando PIN en Firebase…');
+            setLoginRoutingProgress(72, 'Guardando en Firebase…');
             await syncProfileToCloud(userProfile);
-            sessionStorage.setItem('nexus_pin_banner_ok', '1');
             markSystemInitializedCache();
+            _loginRoutePhase = 'app';
             await processLoginSuccess(email);
             if (typeof triggerCloudSync === 'function') triggerCloudSync();
         }
@@ -6926,9 +6972,7 @@
         // APEX FIX: Purga profunda de Sockets P2P para evitar fugas de memoria
         function logout() { 
             isRootAdminUnlocked = false;
-            deactivateRootMaintainerSession();
-            sessionUnlocked = false;
-            document.documentElement.classList.add('nexus-auth-pending'); 
+            if (typeof deactivateRootMaintainerSession === 'function') deactivateRootMaintainerSession();
             
             clearTimeout(saveStateDebounceTimer);
             clearTimeout(cloudUiRefreshTimer);
@@ -6948,13 +6992,26 @@
             }
             nexusDetachAllP2PListeners();
             
-            // Destrucción absoluta de anclas de sesión
+            sessionStorage.removeItem('nexus_session_active');
+            sessionStorage.removeItem('nexus_admin_bypass');
+            _loginRoutePhase = null;
+            loginSelectedEmail = null;
+            currentUser = null;
+            userProfile = null;
+            sessionUnlocked = false;
+
             localStorage.removeItem('nexus_current_user'); 
-            NexusIDB.saveSession(null);
+            if (typeof NexusIDB !== 'undefined' && NexusIDB.saveSession) NexusIDB.saveSession(null);
             document.cookie = "nexus_current_user=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-            
-            // APEX FIX: Forzar recarga limpia hacia la ruta raíz burlando la caché de iOS/PWA para asegurar el despliegue del menú global múltiple
-            window.location.href = window.location.pathname + '?v=' + new Date().getTime(); 
+
+            const lock = $id('session-lock-screen');
+            if (lock) lock.classList.add('hidden');
+
+            showLoginFlow();
+            initCloud().then(() => {
+                if (typeof refreshFounderLoginHint === 'function') refreshFounderLoginHint().catch(() => {});
+                if (typeof fetchLoginUsers === 'function') fetchLoginUsers(false);
+            }).catch(() => { if (typeof fetchLoginUsers === 'function') fetchLoginUsers(false); });
         }
         
         function setApMode(mode) {
@@ -7370,12 +7427,24 @@
             const box = document.createElement('div');
             box.id = 'nexus-pin-banner';
             box.className = 'mb-4 p-4 rounded-2xl border border-amber-200 bg-amber-50 flex flex-col gap-2';
-            box.innerHTML = '<p class="text-[10px] font-black text-amber-800 uppercase"><i class="fa-solid fa-key mr-1"></i> Asigna tu PIN de bóveda</p><p class="text-[9px] font-bold text-amber-700">Segundo usuario: configura un PIN de 4 dígitos para bloquear la app cuando quieras.</p><div class="flex gap-2"><button type="button" id="nexus-pin-banner-setup" class="flex-1 bg-amber-600 text-white py-2 rounded-xl text-[9px] font-black uppercase">Definir PIN</button><button type="button" id="nexus-pin-banner-later" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase bg-white border border-amber-200 text-amber-800">Luego</button></div>';
+            box.innerHTML = '<p class="text-[10px] font-black text-amber-800 uppercase"><i class="fa-solid fa-key mr-1"></i> Asigna tu PIN de bóveda</p><p class="text-[9px] font-bold text-amber-700">Primera vez: define un PIN de 4 dígitos. Se guardará en Firebase y podrás usarlo al volver a entrar.</p><div class="flex gap-2 mb-2"><input type="password" id="nexus-dash-pin-input" maxlength="4" inputmode="numeric" placeholder="••••" class="flex-1 text-center tracking-[0.5em] text-sm p-2 rounded-xl border border-amber-300 bg-white font-bold"></div><div class="flex gap-2"><button type="button" id="nexus-pin-banner-save" class="flex-1 bg-amber-600 text-white py-2 rounded-xl text-[9px] font-black uppercase">Guardar PIN</button><button type="button" id="nexus-pin-banner-later" class="px-4 py-2 rounded-xl text-[9px] font-black uppercase bg-white border border-amber-200 text-amber-800">Luego</button></div>';
             homeTab.insertBefore(box, homeTab.firstChild);
-            const setupBtn = $id('nexus-pin-banner-setup');
+            const saveBtn = $id('nexus-pin-banner-save');
             const laterBtn = $id('nexus-pin-banner-later');
-            if (setupBtn) setupBtn.onclick = () => { sessionStorage.removeItem('nexus_pin_banner_ok'); switchTab('settings'); if (typeof openUserEdit === 'function') openUserEdit(currentUser); };
+            const pinIn = $id('nexus-dash-pin-input');
+            if (saveBtn) saveBtn.onclick = async () => {
+                const pin = (pinIn?.value || '').trim();
+                if (pin.length !== 4) return alert('El PIN debe tener 4 dígitos.');
+                userProfile.pinHash = await hashVaultPIN(pin);
+                delete userProfile.needsPinSetup;
+                localStorage.setItem('nexus_profile_' + currentUser, JSON.stringify(sanitizeProfileForStorage(userProfile, currentUser)));
+                await syncProfileToCloud(userProfile);
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                box.remove();
+                if (typeof updateSettingsPinDisplay === 'function') updateSettingsPinDisplay(userProfile);
+            };
             if (laterBtn) laterBtn.onclick = () => { sessionStorage.setItem('nexus_pin_banner_ok', '1'); box.remove(); };
+            if (pinIn) setTimeout(() => pinIn.focus(), 200);
         }
 
         function initNexus() {
