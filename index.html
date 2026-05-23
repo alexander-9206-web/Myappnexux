@@ -5077,7 +5077,7 @@
             const restricted = nexusIsCloudPullRestricted();
 
             const ingestDoc = (docSnap) => {
-                if (docSnap.metadata && docSnap.metadata.hasPendingWrites) return;
+                if (!isBootstrap && docSnap.metadata && docSnap.metadata.hasPendingWrites) return;
                 const data = docSnap.data();
                 hasChanges = true;
                 if (docSnap.id === 'core') {
@@ -5132,6 +5132,27 @@
             }
         }
 
+        /** Descarga inicial obligatoria desde servidor (evita snapshot vacío de caché local). */
+        async function nexusPullVaultFromServerOnce() {
+            if (!fbUser || !window.db || !currentUser || !state) return 0;
+            try {
+                const { collection, getDocsFromServer } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
+                const snapshot = await getDocsFromServer(colRef);
+                if (!snapshot || snapshot.empty) return 0;
+                nexusEnsureSyncMeta();
+                state._nexusSync.awaitingCloudBootstrap = true;
+                state._nexusSync.bootstrapCompleted = false;
+                nexusQueueVaultSnapshotForPull(snapshot, true);
+                await nexusApplyVaultCloudBuffer();
+                window.__nexusVaultListenerBootstrapped = true;
+                return snapshot.size;
+            } catch (e) {
+                console.warn('[NEXUS] nexusPullVaultFromServerOnce', e);
+                return 0;
+            }
+        }
+
         function nexusApplyVaultCloudBuffer(doneCb) {
             const buf = window.__nexusCloudVaultBuffer;
             if (!buf || !buf.snapshot || !currentUser || !state) {
@@ -5143,16 +5164,24 @@
                 if (doneCb) doneCb();
                 return Promise.resolve();
             }
-            const { hasChanges, coreTouched, isBootstrap } = nexusProcessVaultSnapshot(buf.snapshot, { isBootstrap: buf.isFirstLoad });
+            const isBootstrap = !!buf.isFirstLoad;
+            const fromCache = !!(buf.snapshot.metadata && buf.snapshot.metadata.fromCache);
+            const docCount = (buf.snapshot.docs && buf.snapshot.docs.length) || buf.snapshot.size || 0;
+            if (isBootstrap && fromCache && docCount === 0) {
+                if (doneCb) doneCb();
+                return Promise.resolve();
+            }
+            const { hasChanges, coreTouched, isBootstrap: wasBootstrap } = nexusProcessVaultSnapshot(buf.snapshot, { isBootstrap });
             window.__nexusCloudVaultBuffer = null;
 
             const finish = () => {
-                if (coreTouched || isBootstrap) scheduleP2PListenersAttach(!!coreTouched);
+                if (coreTouched || wasBootstrap) scheduleP2PListenersAttach(!!coreTouched);
                 if (doneCb) doneCb();
             };
 
             if (!hasChanges) {
-                if (isBootstrap) nexusNotifyCloudDataReady();
+                if (wasBootstrap && docCount > 0) nexusMarkCloudBootstrapComplete();
+                if (wasBootstrap) nexusNotifyCloudDataReady();
                 finish();
                 return Promise.resolve();
             }
@@ -7845,30 +7874,64 @@
             }
         }
 
+        function nexusPrepareCloudBootstrapOnLogin() {
+            if (!state) return;
+            nexusEnsureSyncMeta();
+            const empty = nexusIsVaultLocallyEmpty();
+            if (empty) {
+                state._nexusSync.awaitingCloudBootstrap = true;
+                state._nexusSync.bootstrapCompleted = false;
+                state._nexusSync.dirty = false;
+            }
+        }
+
         async function fetchCloudState() {
             if (!fbUser || !window.db || !currentUser) return Promise.resolve();
             return new Promise(async (resolve) => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                };
                 try {
-                    // APEX FIX: Migración a lectura de Colección en lugar de Documento Único
                     const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     updateCloudBadge(true, true);
-                    
-                    // APEX FIX: El SSoT ahora enlaza la base de datos a tu CORREO (currentUser), no al ID Anónimo temporal del dispositivo.
-                    // Esto te permite abrir la app en cualquier celular/PC y ver tus datos intactos.
+
                     const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
-                    
+
                     if (unsubscribeSnapshot) {
                         unsubscribeSnapshot();
                         unsubscribeSnapshot = null;
                     }
                     p2pListenersSessionReady = false;
-                    
-                    let isFirstLoad = true;
                     window.__nexusVaultListenerBootstrapped = false;
-                    
-                    // Offline-first: el listener solo encola; la fusión corre en background pull.
-                    unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
+
+                    // 1) Descarga inicial desde SERVIDOR (patrón onSnapshot + datos reales en nube)
+                    let serverDocs = 0;
+                    try {
+                        serverDocs = await nexusPullVaultFromServerOnce();
+                        if (serverDocs > 0) {
+                            console.log('[NEXUS] Bóveda restaurada desde servidor:', serverDocs, 'documentos');
+                            nexusNotifyCloudDataReady();
+                        }
+                    } catch (e) {
+                        console.warn('[NEXUS] pull servidor', e);
+                    }
+
+                    let isFirstLoad = !window.__nexusVaultListenerBootstrapped;
+
+                    // 2) Listener en tiempo real (cambios entre dispositivos)
+                    unsubscribeSnapshot = onSnapshot(colRef, { includeMetadataChanges: true }, (snapshot) => {
+                        const fromCache = !!(snapshot.metadata && snapshot.metadata.fromCache);
                         const firstPass = isFirstLoad;
+                        const docCount = snapshot.size || (snapshot.docs ? snapshot.docs.length : 0);
+
+                        if (firstPass && fromCache && docCount === 0 && serverDocs === 0) {
+                            updateCloudBadge(true, true);
+                            return;
+                        }
+
                         nexusQueueVaultSnapshotForPull(snapshot, firstPass);
 
                         if (isSyncing && !firstPass) {
@@ -7878,9 +7941,11 @@
                         }
 
                         if (firstPass) {
+                            const ready = !fromCache || docCount > 0 || serverDocs > 0;
+                            if (!ready) return;
                             isFirstLoad = false;
                             window.__nexusVaultListenerBootstrapped = true;
-                            nexusApplyVaultCloudBuffer(() => resolve());
+                            nexusApplyVaultCloudBuffer(finish);
                         } else {
                             nexusScheduleBackgroundPull('firestore-listener');
                         }
@@ -7889,12 +7954,14 @@
                     }, (error) => {
                         console.error("[APEX SYS] Error de Snapshot Firestore", error);
                         updateCloudBadge(false);
-                        if(isFirstLoad) resolve();
+                        finish();
                     });
 
-                } catch(e) { 
-                    console.error(e); 
-                    resolve();
+                    setTimeout(finish, serverDocs > 0 ? 500 : 18000);
+
+                } catch (e) {
+                    console.error(e);
+                    finish();
                 }
             });
         }
@@ -8616,6 +8683,10 @@
 
                 await bootApp({ fastBoot: true, deferCloudProfileMerge: true });
 
+                if (bind.cloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
+                    nexusPrepareCloudBootstrapOnLogin();
+                }
+
                 if (!shellReleased) {
                     nexusReleaseAppShell();
                     shellReleased = true;
@@ -8623,11 +8694,11 @@
                     resetGoogleLoginButton();
                 }
 
-                if (bind.cloud && typeof fetchCloudState === 'function') {
+                if ((bind.cloud || alreadyCloud || wantsCloud) && fbUser && window.db && typeof fetchCloudState === 'function') {
                     try {
                         await Promise.race([
                             fetchCloudState(),
-                            new Promise(r => setTimeout(r, 15000))
+                            new Promise(r => setTimeout(r, 22000))
                         ]);
                     } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                 }
@@ -9229,7 +9300,8 @@
                 nexusResetInactivityTimer();
                 if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
                 nexusFlushPendingCloudUi();
-                if (fbUser && nexusNeedsCloudBootstrap() && typeof fetchCloudState === 'function') {
+                if (fbUser && window.db && (nexusNeedsCloudBootstrap() || nexusIsVaultLocallyEmpty()) && typeof fetchCloudState === 'function') {
+                    if (typeof nexusPrepareCloudBootstrapOnLogin === 'function') nexusPrepareCloudBootstrapOnLogin();
                     fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState post-unlock', e));
                 } else if (fbUser && syncPending && typeof nexusScheduleBackgroundPush === 'function') {
                     nexusScheduleBackgroundPush('post-unlock');
