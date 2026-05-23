@@ -1863,22 +1863,25 @@
                         <!-- APEX FIX: Selector Táctil de Modalidad (Nueva vs Conciliación) -->
                         <div class="flex gap-2 bg-teal-100/50 p-1 rounded-xl mb-3">
                             <button type="button" id="ap-mode-new" onclick="setApMode('new')" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg bg-white text-teal-700 shadow-sm transition-all">1ª Compra</button>
-                            <button type="button" id="ap-mode-recon" onclick="setApMode('recon')" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-teal-600/50 transition-all">Conciliar (0 Pagos)</button>
+                            <button type="button" id="ap-mode-recon" onclick="setApMode('recon')" class="flex-1 py-2 text-[10px] font-black uppercase rounded-lg text-teal-600/50 transition-all">Conciliar a cero</button>
                         </div>
-                        
-                        <div class="flex gap-2">
-                            <select id="f-ap-freq" class="form-input border-teal-200 bg-white text-teal-900 flex-1 font-semibold text-center shadow-sm">
+                        <p id="ap-mode-hint" class="text-[8px] font-bold text-teal-700/80 uppercase leading-relaxed px-1 mb-2 hidden">Cuotas pagadas: solo informativas. No afectan cuentas ni auditoría.</p>
+                        <div class="flex gap-2 flex-wrap">
+                            <select id="f-ap-freq" class="form-input border-teal-200 bg-white text-teal-900 flex-1 min-w-[40%] font-semibold text-center shadow-sm">
                                 <option value="weekly">Semanal</option>
                                 <option value="fortnightly">Quincenal</option>
                             </select>
                             <input type="hidden" id="f-ap-quotas" value="4">
-                            <select id="f-ap-paid" class="form-input border-teal-200 bg-white text-teal-900 flex-1 font-black text-center shadow-sm">
-                                <option value="0">0 Pagadas</option>
-                                <option value="1" selected>1 Pagada</option>
-                                <option value="2">2 Pagadas</option>
-                                <option value="3">3 Pagadas</option>
-                                <option value="4">4 Pagadas</option>
-                            </select>
+                            <div id="ap-paid-wrap" class="hidden flex-1 min-w-[40%] flex flex-col gap-1">
+                                <span class="text-[8px] font-black uppercase text-teal-600 ml-1">Cuotas ya pagadas</span>
+                                <select id="f-ap-paid" class="form-input border-teal-200 bg-white text-teal-900 font-black text-center shadow-sm">
+                                    <option value="0">0 Pagadas</option>
+                                    <option value="1">1 Pagada</option>
+                                    <option value="2">2 Pagadas</option>
+                                    <option value="3">3 Pagadas</option>
+                                    <option value="4">4 Pagadas</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     
@@ -5529,16 +5532,58 @@
             const btnNew = $id('ap-mode-new');
             const btnRecon = $id('ap-mode-recon');
             const paidSelect = $id('f-ap-paid');
-            
-            if(mode === 'new') {
-                if(btnNew) { btnNew.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.remove('text-teal-600/50'); }
-                if(btnRecon) { btnRecon.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.add('text-teal-600/50'); }
-                if(paidSelect) paidSelect.value = "1";
-            } else {
-                if(btnRecon) { btnRecon.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.remove('text-teal-600/50'); }
-                if(btnNew) { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
-                if(paidSelect) paidSelect.value = "0";
+            const paidWrap = $id('ap-paid-wrap');
+            const modeHint = $id('ap-mode-hint');
+            const accLbl = $id('f-account') ? $id('f-account').previousElementSibling : null;
+            const isRecon = mode === 'recon';
+
+            if (btnNew) {
+                if (!isRecon) { btnNew.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.remove('text-teal-600/50'); }
+                else { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
             }
+            if (btnRecon) {
+                if (isRecon) { btnRecon.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.remove('text-teal-600/50'); }
+                else { btnRecon.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.add('text-teal-600/50'); }
+            }
+            if (paidWrap) paidWrap.classList.toggle('hidden', !isRecon);
+            if (modeHint) modeHint.classList.toggle('hidden', !isRecon);
+            if (paidSelect && isRecon && paidSelect.value === '') paidSelect.value = '0';
+            if (accLbl && $id('f-type') && $id('f-type').value === 'afterpay') {
+                accLbl.innerText = isRecon ? 'Cuenta origen (referencia)' : 'Cuenta (1er abono)';
+            }
+        }
+
+        function nexusIsApReconModeSelected() {
+            const btn = $id('ap-mode-recon');
+            return !!(btn && btn.classList.contains('bg-white'));
+        }
+
+        /** Registra el 1er abono real (cuota proyectada) en cuenta y auditoría. El contrato madre nunca sale de Afterpay. */
+        function nexusCreateAfterpayFirstPayment(apContract, apAcc) {
+            if (!apContract || !apAcc || apContract.apRecon) return null;
+            if ((apContract.apPaid || 0) >= 1) return null;
+            const quotas = apContract.apQuotas || 4;
+            const rawDeductAmt = (apContract.original_amount || apContract.amount) / quotas;
+            let deductAmt = rawDeductAmt;
+            if (apAcc.currency !== apContract.currency) deductAmt = convertCurrency(rawDeductAmt, apContract.currency, apAcc.currency);
+            if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
+            const label = (apContract.note || (apContract.cat && apContract.cat.length > 2 ? apContract.cat.substring(2) : apContract.cat) || '').trim();
+            const apPayTx = buildTransactionSchema({
+                type: 'expense',
+                amount: rawDeductAmt,
+                cat: apContract.cat,
+                accId: apAcc.id,
+                date: apContract.date,
+                note: `[Pago Inicial] ${label} (1/${quotas})`,
+                currency: apContract.currency,
+                costType: apContract.costType || 'fixed'
+            });
+            apPayTx.apParentId = apContract.id;
+            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
+            apContract.apPaid = 1;
+            state.tx.push(apPayTx);
+            saveCloudTx(apPayTx);
+            return apPayTx;
         }
 
         function nexusFindAfterpayParentForPayment(payTx) {
@@ -8419,7 +8464,7 @@
 
             if (type === 'afterpay') {
                 if(caCont) { caCont.classList.remove('hidden'); caCont.style.display = 'block'; caCont.style.order = '3'; }
-                if(accLbl) accLbl.innerText = 'Cuenta (Abono Inicial)';
+                if(accLbl) accLbl.innerText = 'Cuenta (1er abono)';
                 if(destCont) { destCont.classList.add('hidden'); destCont.style.display = 'none'; }
                 if(catMod) { catMod.classList.remove('hidden'); catMod.style.display = 'block'; catMod.style.order = '4'; }
                 
@@ -8511,7 +8556,7 @@
                 
                 if($id('f-ap-quotas')) $id('f-ap-quotas').value = 4;
                 if($id('f-ap-freq')) $id('f-ap-freq').value = 'weekly';
-                if($id('f-ap-paid')) $id('f-ap-paid').value = 1; 
+                if($id('f-ap-paid')) $id('f-ap-paid').value = '0';
                 
                 if($id('f-is-recur')) { $id('f-is-recur').checked = false; toggleRecurFields(); $id('f-recur-freq').value = 'monthly'; $id('f-recur-count').value = 12; } 
             } else {
@@ -8564,7 +8609,8 @@
                     if (type === 'afterpay') {
                         if ($id('f-ap-freq')) $id('f-ap-freq').value = oldTx.apFreq || 'weekly';
                         if ($id('f-ap-quotas')) $id('f-ap-quotas').value = oldTx.apQuotas || 4;
-                        if ($id('f-ap-paid')) $id('f-ap-paid').value = oldTx.apPaid || 0;
+                        if (typeof setApMode === 'function') setApMode(oldTx.apRecon ? 'recon' : 'new');
+                        if (oldTx.apRecon && $id('f-ap-paid')) $id('f-ap-paid').value = String(oldTx.apPaid || 0);
                     } else {
                         setTimeout(() => { 
                             if ($id('f-account')) {
@@ -9817,29 +9863,12 @@ ${JSON.stringify(dataToAnalyze)}`;
                     if(type === 'afterpay') { 
                         oldTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : (oldTx.apFreq || 'weekly'); 
                         oldTx.apQuotas = ($id('f-ap-quotas') && parseInt($id('f-ap-quotas').value)) ? parseInt($id('f-ap-quotas').value) : (oldTx.apQuotas || 4);
-                        const isApReconEdit = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
+                        const isApReconEdit = typeof nexusIsApReconModeSelected === 'function' && nexusIsApReconModeSelected();
                         oldTx.apRecon = !!isApReconEdit;
-                        const targetPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value, 10) || 0 : (oldTx.apPaid || 0);
-                        
-                        if (!oldTx.apRecon && targetPaid > (oldTx.apPaid || 0)) {
-                            let diff = targetPaid - (oldTx.apPaid || 0);
-                            let apAcc = state.accounts.find(a => a.id === accId);
-                            if (apAcc) {
-                                let rawDeductAmt = (oldTx.original_amount || oldTx.amount) / oldTx.apQuotas;
-                                let deductAmt = rawDeductAmt;
-                                if (apAcc.currency !== oldTx.currency) deductAmt = convertCurrency(rawDeductAmt, oldTx.currency, apAcc.currency);
-                                for (let i = 0; i < diff; i++) {
-                                    oldTx.apPaid = (oldTx.apPaid || 0) + 1;
-                                    if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                    const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: oldTx.cat, accId: apAcc.id, date: new Date().toISOString(), note: `[Abono] ${oldTx.note ? oldTx.note : oldTx.cat.substring(2).trim()} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: oldTx.currency, costType: 'fixed' });
-                                    apPayTx.apParentId = oldTx.id;
-                                    if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-                                    state.tx.push(apPayTx);
-                                    saveCloudTx(apPayTx);
-                                }
-                            } else { oldTx.apPaid = targetPaid; }
-                        } else {
-                            oldTx.apPaid = Math.min(Math.max(0, targetPaid), oldTx.apQuotas || 4);
+                        if (isApReconEdit) {
+                            let manualPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value, 10) : (oldTx.apPaid || 0);
+                            if (Number.isNaN(manualPaid)) manualPaid = 0;
+                            oldTx.apPaid = Math.min(Math.max(0, manualPaid), oldTx.apQuotas || 4);
                         }
                         oldTx.currency = apCurr; oldTx.original_currency = apCurr; 
                     } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
@@ -9872,82 +9901,30 @@ ${JSON.stringify(dataToAnalyze)}`;
                 
                 if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
 
-                let initialPaid = 0;
-                let isApReconMode = false;
-                let movementsToGenerate = 0;
+                const isApReconMode = type === 'afterpay' && typeof nexusIsApReconModeSelected === 'function' && nexusIsApReconModeSelected();
 
-                if (type === 'afterpay') { 
-                    newTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : 'weekly'; 
-                    newTx.apQuotas = 4; // Regla estricta: Todo nuevo Afterpay genera 4 pagos
-                    isApReconMode = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
+                if (type === 'afterpay') {
+                    newTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : 'weekly';
+                    newTx.apQuotas = 4;
                     newTx.apRecon = !!isApReconMode;
-
+                    newTx.apInternalOnly = true;
                     if (isApReconMode) {
-                        /* Conciliar a cero: cuotas pagadas solo en Afterpay, sin auditoría ni débito en cuenta */
                         let manualPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value, 10) : 0;
                         if (Number.isNaN(manualPaid)) manualPaid = 0;
                         newTx.apPaid = Math.min(Math.max(0, manualPaid), newTx.apQuotas);
-                        movementsToGenerate = 0;
-                        initialPaid = newTx.apPaid;
                     } else {
-                        /* 1ª Compra: solo la cuota de hoy genera movimiento real (cuota proyectada, no total compra) */
-                        let calcPaid = 0;
-                        let calcMoves = 0;
-                        const todayD = new Date();
-                        todayD.setHours(0, 0, 0, 0);
-                        const pDate = new Date(`${date}T12:00:00`);
-                        const stD = newTx.apFreq === 'fortnightly' ? 14 : 7;
-                        const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
-
-                        for (let i = 0; i < 4; i++) {
-                            let d = new Date(pDate.getTime());
-                            if (newTx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); }
-                            else { d.setDate(d.getDate() + (i * stD)); }
-                            if (i > 0) {
-                                let currentDay = d.getDay();
-                                let dist = apPayDay - currentDay;
-                                if (dist < 0) dist += 7;
-                                d.setDate(d.getDate() + dist);
-                            }
-                            d.setHours(0, 0, 0, 0);
-                            if (d < todayD) calcPaid++;
-                            else if (d.getTime() === todayD.getTime()) { calcPaid++; calcMoves++; }
-                        }
-
-                        initialPaid = calcPaid;
-                        movementsToGenerate = calcMoves;
-                        newTx.apPaid = initialPaid - movementsToGenerate;
+                        newTx.apPaid = 0;
                     }
-                } 
-                
+                }
+
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
                 nexusTouchEntityUpdatedAt(newTx, 'tx');
-                state.tx.push(newTx); saveCloudTx(newTx);
+                state.tx.push(newTx);
+                saveCloudTx(newTx);
 
-                // APEX FIX: Amortización Automática (Solo genera movimientos bancarios para cobros de hoy, el resto $0)
-                if (type === 'afterpay' && !isApReconMode && movementsToGenerate > 0) {
-                    let apAcc = state.accounts.find(a => a.id === accId);
-                    if (apAcc) {
-                        let rawDeductAmt = (newTx.original_amount || newTx.amount) / newTx.apQuotas;
-                        let deductAmt = rawDeductAmt;
-                        if (apAcc.currency !== newTx.currency) deductAmt = convertCurrency(rawDeductAmt, newTx.currency, apAcc.currency);
-                        for (let i = 0; i < movementsToGenerate; i++) {
-                            newTx.apPaid += 1;
-                            if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                            const isUpfront = (newTx.apPaid === 1 && new Date(newTx.date).toDateString() === new Date().toDateString());
-                            const prefix = isUpfront ? '[Pago Inicial]' : '[Abono]';
-                            const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `${prefix} ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: newTx.currency, costType: 'fixed' });
-                            apPayTx.apParentId = newTx.id;
-                            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-                            state.tx.push(apPayTx);
-                            saveCloudTx(apPayTx);
-                        }
-                        saveCloudTx(newTx);
-                    } else {
-                        newTx.apPaid += movementsToGenerate;
-                        saveCloudTx(newTx);
-                    }
-                } else if (type === 'afterpay' && isApReconMode) {
+                if (type === 'afterpay' && !isApReconMode) {
+                    const apAcc = state.accounts.find(a => a.id === accId);
+                    if (apAcc) nexusCreateAfterpayFirstPayment(newTx, apAcc);
                     saveCloudTx(newTx);
                 }
             }
@@ -11966,10 +11943,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (acc.type === 'credit') acc.balance += deductAmt; else acc.balance -= deductAmt;
             
             const newTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: tx.cat, accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${tx.note ? tx.note : tx.cat.substring(2).trim()} (${tx.apPaid}/${quotas})`, currency: tx.currency, costType: 'fixed' });
-            
-            // APEX FIX: Trazabilidad P2P
+            newTx.apParentId = tx.id;
+
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
-            
+
             state.tx.push(newTx); saveCloudTx(newTx); saveCloudTx(tx);
             saveState(); updateDashboard(); if(state.activeTab === 'afterpay') renderAfterpay(); if(state.activeTab === 'database') renderDatabase(); alert(`✅ Cuota ${tx.apPaid}/${quotas} pagada.`);
         }
