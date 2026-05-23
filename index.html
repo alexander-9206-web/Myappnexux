@@ -1955,6 +1955,7 @@
                 </div>
 
                 <div class="flex flex-col gap-2 mt-4">
+                    <button type="button" id="btn-share-account-token" onclick="void copyAccountFormP2PToken()" class="w-full bg-purple-600 text-white p-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform hidden"><i class="fa-solid fa-share-nodes mr-1"></i> Copiar token nx_ (bóveda P2P)</button>
                     <button type="submit" class="w-full bg-blue-600 text-white p-4 rounded-2xl font-black uppercase text-sm shadow-lg active:scale-95 transition-transform">Guardar Cuenta</button>
                     <button type="button" id="btn-reconcile-account" onclick="reconcileAccountToZero()" class="w-full bg-amber-50 text-amber-600 p-4 rounded-2xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform hidden"><i class="fa-solid fa-scale-balanced mr-1"></i> Conciliar a $0</button>
                     <button type="button" id="btn-delete-account" onclick="deleteAccount()" class="w-full bg-red-50 text-red-600 p-4 rounded-2xl font-black uppercase text-xs shadow-sm active:scale-95 transition-transform hidden">Eliminar Cuenta</button>
@@ -7288,8 +7289,7 @@
                                 const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f1f5f9; color: #64748b;';
                                 const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                                // APEX FIX: Inyectar botón de Token P2P si la cuenta es Compartida
-                                const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+                                const p2pBtn = nexusAccountP2pBtnHtml(a);
 
                                 html += buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn);
                             });
@@ -7324,7 +7324,7 @@
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
                         const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+                        const p2pBtn = nexusAccountP2pBtnHtml(a);
 
                         html += buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn);
                     });
@@ -7358,7 +7358,7 @@
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #fff7ed; color: #f97316;';
                         const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        const p2pBtn = a.isShared ? `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-link text-[10px]"></i></button>` : '';
+                        const p2pBtn = nexusAccountP2pBtnHtml(a);
 
                         html += buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn);
                     });
@@ -7392,7 +7392,7 @@
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
                         const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm border border-purple-200">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
 
-                        const p2pBtn = `<button type="button" onclick="event.stopPropagation(); generateShareTokenForAccount('${a.id}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1" title="Copiar Token P2P"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>`;
+                        const p2pBtn = nexusAccountP2pBtnHtml(a);
 
                         html += buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn);
                     });
@@ -7556,6 +7556,7 @@
             toggleCreditFields();
             const delBtn = $id('btn-delete-account'); if(delBtn) delBtn.classList.add('hidden');
             const recBtn = $id('btn-reconcile-account'); if(recBtn) recBtn.classList.add('hidden');
+            if (typeof nexusUpdateAccountShareTokenButton === 'function') nexusUpdateAccountShareTokenButton();
         }
 
         function fillAccountFormFromAccount(acc) {
@@ -7593,6 +7594,7 @@
             const delBtn = $id('btn-delete-account');
             if(delBtn) { delBtn.innerText = acc.isShared ? "Desvincular Bóveda P2P" : "Eliminar Cuenta"; delBtn.classList.remove('hidden'); }
             const recBtn = $id('btn-reconcile-account'); if(recBtn) recBtn.classList.remove('hidden');
+            if (typeof nexusUpdateAccountShareTokenButton === 'function') nexusUpdateAccountShareTokenButton();
         }
 
         function openAccountModal(editId) {
@@ -7885,6 +7887,13 @@
                     helper.classList.remove('hidden');
                 }
             }
+            if (typeof nexusUpdateAccountShareTokenButton === 'function') nexusUpdateAccountShareTokenButton();
+        }
+
+        function copyAccountFormP2PToken() {
+            const id = $id('fa-id') ? String($id('fa-id').value || '').trim() : '';
+            if (!id) return alert('Primero guarda la cuenta con alcance «Compartida (P2P)»; luego copia el token nx_.');
+            generateShareTokenForAccount(id);
         }
 
         function saveAccount(e) { 
@@ -7916,24 +7925,28 @@
                 }
             }
 
-            const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false; 
-            let rId = null; 
-            if(isShared) { 
-                if(id) { 
-                    const ext = state.accounts.find(a=>a.id===id); 
-                    rId = ext ? (ext.remoteId||id) : id; 
-                } else { 
-                    rId = 'acc_' + Date.now(); 
-                } 
-            } 
-            
-            const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '');
+            const scpEl = $id('fa-scope'); const isShared = scpEl ? (scpEl.value === 'shared') : false;
+            const newId = id || ('acc_' + Date.now());
+            let rId = null;
+            if (isShared) {
+                const ext = id ? state.accounts.find(a => a.id === id) : null;
+                if (ext && ext.remoteId && String(ext.remoteId).startsWith('nxv_')) {
+                    rId = ext.remoteId;
+                } else {
+                    rId = 'nxv_' + Date.now();
+                }
+            }
+
+            const ownerEmail = nexusP2POwnerEmail();
+            const displayName = isShared && name && !name.startsWith('👥') ? ('👥 ' + name) : name;
             const newAcc = { 
-                id: id || 'acc_' + Date.now(), 
-                name, currency, balance, type, 
+                id: newId,
+                name: displayName,
+                currency, balance, type, 
                 isShared, 
                 remoteId: rId,
-                ownerEmail: isShared ? ownerEmail : ownerEmail,
+                owner: isShared ? ownerEmail : undefined,
+                ownerEmail: isShared ? ownerEmail : undefined,
                 syncedOnce: isShared ? true : undefined,
                 limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
                 cutoffDay: parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0, 
@@ -7946,6 +7959,7 @@
                 logoUrl: logoUrl
             }; 
             
+            const wasNew = !id;
             if (id) { 
                 const idx = state.accounts.findIndex(a => a.id === id); 
                 if (idx !== -1) state.accounts[idx] = newAcc; 
@@ -7958,6 +7972,7 @@
                 if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
                 if (typeof nexusScheduleFlushSharedAccountVault === 'function') nexusScheduleFlushSharedAccountVault(newAcc, 0);
                 if (typeof attachP2PListener === 'function') attachP2PListener();
+                setTimeout(() => generateShareTokenForAccount(newAcc.id), wasNew ? 400 : 120);
             }
             updateDashboard(); renderAccountsTab(); closeAccountModal(); 
         }
@@ -11953,25 +11968,42 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         async function generateShareTokenForAccount(accId) {
-            const acc = state.accounts.find(a => a.id === accId);
-            if(!acc || !acc.isShared) return alert('Solo las cuentas con alcance Compartida (P2P) generan token nx_.');
-            const targetRemoteId = acc.remoteId || acc.id;
-            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
-            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda en la nube.');
-            if (typeof nexusFlushSharedAccountVault === 'function') {
-                await nexusFlushSharedAccountVault(acc);
-            }
-            const ownerEmail = normalizeMemberEmail(acc.ownerEmail || acc.owner || currentUser || (fbUser && fbUser.email) || '');
-            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency, owner: ownerEmail };
-            const token = nexusEncodeP2PToken('nx_', payload);
+            const lookupId = String(accId || '').trim();
+            if (!lookupId) return alert('Selecciona una cuenta compartida guardada.');
+            let acc = (state.accounts || []).find(a => a.id === lookupId);
+            if (!acc) return alert('Cuenta no encontrada.');
+            if (!acc.isShared) return alert('Solo las cuentas con alcance «Compartida (P2P)» generan token nx_.\n\nEdita la cuenta y cambia Alcance a Compartida.');
+
+            acc = nexusEnsureSharedAccountRemoteId(acc);
+            saveState();
+
+            const vaultId = acc.remoteId;
+            const payload = {
+                vaultId,
+                name: String(acc.name || '').replace(/^👥\s*/, ''),
+                currency: acc.currency || (state.settings && state.settings.baseCurrency) || 'COP',
+                owner: nexusP2POwnerEmail(acc.ownerEmail || acc.owner)
+            };
+
+            let token;
             try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(token);
-                } else {
-                    const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove();
-                }
-            } catch (e) { console.warn('[NEXUS] copy nx token', e); }
-            alert("✅ Token nx_... copiado.\n\nCompártelo para que otros se unan a «" + payload.name + "».\n\nEl invitado debe entrar con Google (mismo flujo que en Tareas).");
+                token = nexusEncodeP2PToken('nx_', payload);
+            } catch (e) {
+                console.error('[NEXUS] encode nx token', e);
+                return alert('No se pudo generar el token. Revisa el nombre de la cuenta.');
+            }
+
+            const copied = await nexusCopyP2PTokenToClipboard(token);
+            if (copied) {
+                alert('✅ Token nx_... copiado.\n\nBóveda: «' + payload.name + '»\nID: ' + vaultId + '\n\nEl invitado pega el token en Cuentas → Vincular P2P y entra con Google.');
+            } else {
+                prompt('Copia manualmente este token nx_:', token);
+            }
+
+            nexusPublishP2PInBackground(
+                typeof nexusFlushSharedAccountVault === 'function' ? nexusFlushSharedAccountVault : null,
+                acc
+            );
         }
         // --- FIN MOTOR P2P ---
         function copyPSECard(text) {
@@ -14607,7 +14639,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             if(!name) return alert("Ingresa un nombre para la bóveda de tareas.");
             if(!state.taskVaults) state.taskVaults = [];
             const remoteId = 'tkv_' + Date.now();
-            state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
+            state.taskVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: nexusP2POwnerEmail(), syncedOnce: true });
             saveState();
             if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
             $id('new-task-vault-name').value = '';
@@ -14639,20 +14671,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         async function generateTaskVaultToken(id) {
-            const v = state.taskVaults.find(x => x.id === id); if(!v) return;
-            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
-            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda.');
-            if (typeof nexusFlushSharedTaskVault === 'function') await nexusFlushSharedTaskVault(v);
-            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner || normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '') };
-            const token = nexusEncodeP2PToken('nxt_', payload);
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(token);
-                } else {
-                    const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove();
-                }
-            } catch (e) { console.warn('[APEX] copy token', e); }
-            alert("✅ Token copiado al portapapeles.\n\nComparte este código nxt_... para que otros se unan a «" + v.name.replace('👥 ', '') + "».");
+            const v = state.taskVaults.find(x => x.id === id || x.remoteId === id); if(!v) return;
+            const payload = { vaultId: v.remoteId, name: String(v.name || '').replace(/^👥\s*/, ''), owner: nexusP2POwnerEmail(v.owner) };
+            let token;
+            try { token = nexusEncodeP2PToken('nxt_', payload); } catch (e) { return alert('No se pudo generar el token.'); }
+            const copied = await nexusCopyP2PTokenToClipboard(token);
+            alert(copied ? '✅ Token nxt_... copiado para «' + payload.name + '».' : 'Genera el token manualmente:\n' + token);
+            nexusPublishP2PInBackground(typeof nexusFlushSharedTaskVault === 'function' ? nexusFlushSharedTaskVault : null, v);
         } 
 
         // APEX FIX: Modificador seguro para eliminar/desvincular Bóvedas de Tareas
@@ -14675,7 +14700,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             if(!name) return alert("Ingresa un nombre para la bóveda de proyectos.");
             if(!state.projectVaults) state.projectVaults = [];
             const remoteId = 'pjv_' + Date.now();
-            state.projectVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: currentUser, syncedOnce: true });
+            state.projectVaults.push({ id: remoteId, name: '👥 ' + name, isShared: true, remoteId: remoteId, owner: nexusP2POwnerEmail(), syncedOnce: true });
             saveState();
             if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
             $id('new-project-vault-name').value = '';
@@ -14707,17 +14732,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         async function generateProjectVaultToken(id) {
-            const v = state.projectVaults.find(x => x.id === id); if(!v) return;
-            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
-            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda.');
-            if (typeof nexusFlushSharedProjectVault === 'function') await nexusFlushSharedProjectVault(v);
-            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner || normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '') };
-            const token = nexusEncodeP2PToken('nxp_', payload);
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(token);
-                else { const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove(); }
-            } catch (e) { console.warn('[NEXUS] copy project token', e); }
-            alert("✅ Token nxp_... copiado.\n\nCompártelo para que otros se unan a «" + v.name.replace('👥 ', '') + "».");
+            const v = state.projectVaults.find(x => x.id === id || x.remoteId === id); if(!v) return;
+            const payload = { vaultId: v.remoteId, name: String(v.name || '').replace(/^👥\s*/, ''), owner: nexusP2POwnerEmail(v.owner) };
+            let token;
+            try { token = nexusEncodeP2PToken('nxp_', payload); } catch (e) { return alert('No se pudo generar el token.'); }
+            const copied = await nexusCopyP2PTokenToClipboard(token);
+            alert(copied ? '✅ Token nxp_... copiado para «' + payload.name + '».' : 'Genera el token manualmente:\n' + token);
+            nexusPublishP2PInBackground(typeof nexusFlushSharedProjectVault === 'function' ? nexusFlushSharedProjectVault : null, v);
         }
 
         function authAndDeleteProjectVault(id) {
@@ -17214,6 +17235,77 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         function nexusEncodeP2PToken(prefix, payload) {
             const json = JSON.stringify(payload);
             return prefix + btoa(unescape(encodeURIComponent(json)));
+        }
+
+        /** ID de bóveda Firestore para cuentas P2P (independiente del id local acc_*). */
+        function nexusEnsureSharedAccountRemoteId(acc) {
+            if (!acc || !acc.isShared) return acc;
+            const rid = String(acc.remoteId || '').trim();
+            if (rid.startsWith('nxv_')) return acc;
+            acc.remoteId = 'nxv_' + Date.now();
+            const idx = (state.accounts || []).findIndex(a => a.id === acc.id);
+            if (idx !== -1) state.accounts[idx].remoteId = acc.remoteId;
+            return acc;
+        }
+
+        function nexusAccountP2pBtnHtml(acc) {
+            if (!acc || !acc.isShared) return '';
+            const safeId = escapeJsAttr(acc.id);
+            return `<button type="button" onclick="event.stopPropagation(); void generateShareTokenForAccount('${safeId}')" class="text-purple-500 hover:text-purple-700 transition-colors p-1 min-w-[32px] min-h-[32px]" title="Copiar token nx_ (bóveda P2P de esta cuenta)"><i class="fa-solid fa-share-nodes text-[10px]"></i></button>`;
+        }
+
+        async function nexusCopyP2PTokenToClipboard(token) {
+            const s = String(token || '');
+            if (!s) return false;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(s);
+                    return true;
+                }
+            } catch (e) { console.warn('[NEXUS] clipboard API', e); }
+            try {
+                const temp = document.createElement('textarea');
+                temp.value = s;
+                temp.setAttribute('readonly', '');
+                temp.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                document.body.appendChild(temp);
+                temp.focus();
+                temp.select();
+                const ok = document.execCommand('copy');
+                temp.remove();
+                return !!ok;
+            } catch (e2) {
+                console.warn('[NEXUS] clipboard fallback', e2);
+                return false;
+            }
+        }
+
+        function nexusP2POwnerEmail(fallbackOwner) {
+            return normalizeMemberEmail(fallbackOwner || currentUser || (fbUser && fbUser.email) || (userProfile && userProfile.email) || '');
+        }
+
+        async function nexusPublishP2PInBackground(flushFn, entity) {
+            try {
+                const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+                if (!authPrep.ok) {
+                    console.warn('[NEXUS P2P] Publicación en nube pendiente — usa Continuar con Google:', authPrep.code);
+                    return;
+                }
+                if (typeof flushFn === 'function') await flushFn(entity);
+                else if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
+            } catch (e) {
+                console.warn('[NEXUS P2P] publish background', e);
+            }
+        }
+
+        function nexusUpdateAccountShareTokenButton() {
+            const btn = $id('btn-share-account-token');
+            const scp = $id('fa-scope');
+            const accId = $id('fa-id') ? $id('fa-id').value : '';
+            if (!btn) return;
+            const acc = accId ? (state.accounts || []).find(a => a.id === accId) : null;
+            const show = (scp && scp.value === 'shared') || (acc && acc.isShared);
+            btn.classList.toggle('hidden', !show);
         }
 
         function nexusAcceptsGoogleFirebaseUser(user) {
