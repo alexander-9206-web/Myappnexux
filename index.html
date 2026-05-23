@@ -3609,10 +3609,22 @@
             } catch (e) {}
         }
 
-        /** Tras Salir / Cambiar bóveda: cortar Firebase (y nativo iOS) para que no re-entre solo. */
+        function nexusVaultHadCloudLink(email, profile) {
+            const e = normalizeMemberEmail(email);
+            if (!e) return false;
+            if (localStorage.getItem('nexus_firebase_email') === e) return true;
+            if (localStorage.getItem('nexus_google_vault_' + e) === '1') return true;
+            if (profile?.isGoogle) return true;
+            if (profile?.linkedUid) return true;
+            return false;
+        }
+
+        /** Tras Salir / Cambiar bóveda: solo Firebase (nunca el handler native_google_login). */
         async function nexusSignOutSessionForManualLogout() {
             fbUser = null;
             window.__nexusPendingGoogleUser = null;
+            window.__nexusUserTriggeredGoogleLogin = false;
+            window.__nexusGoogleNativePending = null;
             try {
                 if (window.__nexusFirebaseApp) {
                     const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
@@ -3620,10 +3632,10 @@
                     if (auth.currentUser) await signOut(auth);
                 }
             } catch (e) { console.warn('[NEXUS] signOut manual logout', e); }
-            if (isNexusNativeContainer() && window.webkit?.messageHandlers?.native_google_login) {
+            if (isNexusNativeContainer() && window.webkit?.messageHandlers?.appInterface) {
                 try {
-                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({ action: 'sign_out' }));
-                } catch (e) { console.warn('[NEXUS] native sign_out', e); }
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: 'googleSignOut' });
+                } catch (e) { console.warn('[NEXUS] appInterface googleSignOut', e); }
             }
         }
 
@@ -6413,6 +6425,7 @@
 
             alert('⚠️ Para vincular bóvedas compartidas, Firebase debe validar tu cuenta Google.\n\nSe abrirá el acceso con Google (mismo correo de tu bóveda si es posible).');
 
+            window.__nexusUserTriggeredGoogleLogin = true;
             if (isNexusNativeContainer() && typeof nexusGoogleAuthViaNativeRepository === 'function') {
                 await nexusGoogleAuthViaNativeRepository();
                 return { ok: false, code: 'google_pending', message: 'Completa Google en el diálogo nativo y vuelve a pegar el token.' };
@@ -7712,54 +7725,49 @@
             currentUser = vaultEmail;
             sessionUnlocked = false;
             let shellReleased = false;
-            const fastEntry = !!options.fastEntry;
+            const wantsCloud = !!(options.restoreCloud || options.googleLinked || nexusVaultHadCloudLink(vaultEmail, userProfile));
 
-            if (!fastEntry) {
-                showLoginRoutingLoading('Abriendo tu bóveda…');
-                setLoginRoutingProgress(10, 'Identificando ' + vaultEmail + '…');
-            }
+            showLoginRoutingLoading(wantsCloud ? 'Conectando con la nube…' : 'Abriendo tu bóveda…');
+            setLoginRoutingProgress(10, 'Identificando ' + vaultEmail + '…');
+
             try {
                 if (!userProfile || !userProfile.email) {
                     userProfile = loadLocalProfile(vaultEmail) || await getProfileForVault(vaultEmail) || { email: vaultEmail, name: vaultEmail.split('@')[0] };
                     userProfile.email = vaultEmail;
                 }
 
-                if (fastEntry) {
-                    nexusReleaseAppShell();
-                    shellReleased = true;
-                    _loginRoutePhase = 'app';
-                    resetGoogleLoginButton();
-                }
-
                 let bind = { cloud: nexusFirebaseMatchesVault(fbUser, vaultEmail), needsGoogle: !nexusFirebaseMatchesVault(fbUser, vaultEmail) };
                 if (options.googleLinked && bind.cloud) {
-                    /* Sesión Google ya validada en Identity (botón Continuar con Google). */
-                } else if (options.restoreCloud || userProfile?.isGoogle || localStorage.getItem('nexus_firebase_email') === vaultEmail) {
-                    if (!fastEntry) setLoginRoutingProgress(30, 'Conectando con la nube…');
+                    localStorage.setItem('nexus_google_vault_' + vaultEmail, '1');
+                    userProfile.isGoogle = true;
+                } else if (wantsCloud) {
+                    setLoginRoutingProgress(35, 'Sincronizando nube…');
                     bind = await nexusRestoreCloudForVault(vaultEmail, userProfile);
-                } else if (!fastEntry) {
-                    setLoginRoutingProgress(30, 'Conectando Firebase…');
+                } else {
+                    setLoginRoutingProgress(30, 'Cargando bóveda local…');
                     bind = await nexusBindFirebaseToVaultEmail(vaultEmail, userProfile);
                 }
-                if (!fastEntry) setLoginRoutingProgress(50, bind.cloud ? 'Sincronizando nube…' : 'Cargando bóveda…');
+                setLoginRoutingProgress(55, bind.cloud ? 'Bóveda en nube…' : 'Bóveda local…');
                 await bootApp();
-                if (!fastEntry) setLoginRoutingProgress(90, 'Listo');
-                if (!shellReleased) {
-                    nexusReleaseAppShell();
-                    shellReleased = true;
-                    _loginRoutePhase = 'app';
-                }
+                setLoginRoutingProgress(90, 'Listo');
+                nexusReleaseAppShell();
+                shellReleased = true;
+                _loginRoutePhase = 'app';
+                resetGoogleLoginButton();
                 if (bind.cloud && typeof fetchCloudState === 'function') {
                     fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState background', e));
                 }
                 if (bind.cloud && typeof triggerCloudSync === 'function') {
                     setTimeout(() => triggerCloudSync(), 400);
-                } else if (bind.needsGoogle && !fastEntry) {
-                    console.warn('[NEXUS] Sin sesión Google para', vaultEmail);
+                } else if (bind.needsGoogle && wantsCloud) {
+                    console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
                 }
-                if (!fastEntry) setLoginRoutingProgress(100, 'Listo');
+                setLoginRoutingProgress(100, 'Listo');
                 try {
-                    if (options.googleLinked || bind.cloud) userProfile.isGoogle = true;
+                    if (options.googleLinked || bind.cloud) {
+                        userProfile.isGoogle = true;
+                        localStorage.setItem('nexus_google_vault_' + vaultEmail, '1');
+                    }
                     localStorage.setItem('nexus_profile_' + vaultEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, vaultEmail)));
                     localStorage.setItem('nexus_current_user', vaultEmail);
                     localStorage.setItem('nexus_firebase_email', vaultEmail);
@@ -7822,10 +7830,8 @@
                 if (profileHasPin(userProfile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 else sessionStorage.removeItem('nexus_pin_banner_ok');
                 if ($id('login-existing-pin')) $id('login-existing-pin').value = '';
-                const restoreCloud = !!(userProfile.isGoogle || localStorage.getItem('nexus_firebase_email') === vaultEmail);
                 await processLoginSuccess(vaultEmail, {
-                    fastEntry: true,
-                    restoreCloud,
+                    restoreCloud: nexusVaultHadCloudLink(vaultEmail, userProfile),
                     googleLinked: nexusFirebaseMatchesVault(fbUser, vaultEmail)
                 });
             } else {
@@ -7874,11 +7880,14 @@
         }
 
         async function nexusGoogleAuthViaNativeRepository() {
+            if (!window.__nexusUserTriggeredGoogleLogin) {
+                console.warn('[NEXUS] Google nativo bloqueado: solo desde el botón Continuar con Google');
+                return;
+            }
             if (!isNexusNativeContainer()) {
                 console.warn('[NEXUS] ios-native solicitado fuera del contenedor; usando web-popup');
                 return nexusGoogleAuthViaWebPopup();
             }
-            window.__nexusUserTriggeredGoogleLogin = true;
             window.__nexusGoogleLoginInFlight = true;
             beginLoginRoutingUI('Conectando con Google…');
             try {
@@ -8023,53 +8032,44 @@
             fbUser = result.user;
             try { await fbUser.getIdToken(true); } catch (e) { console.warn('[NEXUS] token restore', e); }
             localStorage.setItem('nexus_firebase_email', want);
+            localStorage.setItem('nexus_google_vault_' + want, '1');
             return true;
         }
 
-        /** Restaura Google en iOS sin UI (solo restorePreviousSignIn). Para avatar+PIN tras primer login Google. */
-        function nexusRestoreNativeGoogleSessionSilent(vaultEmail) {
-            if (nexusIsManualLogoutBlocked()) return Promise.resolve(false);
-            const email = normalizeMemberEmail(vaultEmail);
-            if (!isNexusNativeContainer() || !window.webkit?.messageHandlers?.native_google_login) {
-                return Promise.resolve(false);
-            }
-            return new Promise((resolve) => {
-                let settled = false;
-                const finish = (ok) => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    window.__nexusNativeRestoreResolver = null;
-                    resolve(!!ok);
-                };
-                window.__nexusNativeRestoreResolver = finish;
-                try {
-                    window.webkit.messageHandlers.native_google_login.postMessage(JSON.stringify({
-                        action: 'restore_session',
-                        email: email || '',
-                        silent: true
-                    }));
-                } catch (e) {
-                    console.warn('[NEXUS] native restore_session silent', e);
-                    finish(false);
-                    return;
-                }
-                const timer = setTimeout(() => finish(false), 6000);
-            });
-        }
-
+        /** Reconecta Firebase persistido (avatar+PIN). No usa puente nativo Google. */
         async function nexusRestoreCloudForVault(vaultEmail, profileIn) {
             const email = normalizeMemberEmail(vaultEmail);
             if (!email || nexusIsManualLogoutBlocked()) return { cloud: false, needsGoogle: true };
-            let bind = await nexusBindFirebaseToVaultEmail(email, profileIn);
-            if (bind.cloud) return bind;
-            if (profileIn?.isGoogle || localStorage.getItem('nexus_firebase_email') === email) {
-                const silent = await nexusRestoreNativeGoogleSessionSilent(email);
-                if (silent && nexusFirebaseMatchesVault(fbUser, email)) {
-                    return { cloud: true, needsGoogle: false };
-                }
-            }
-            return bind;
+
+            await initCloud({ skipAnonymous: true });
+            if (!window.__nexusFirebaseApp) return { cloud: false, needsGoogle: true };
+
+            const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = getAuth(window.__nexusFirebaseApp);
+
+            const attachCloud = async (u) => {
+                if (!nexusFirebaseMatchesVault(u, email)) return false;
+                fbUser = u;
+                try { await u.getIdToken(true); } catch (e) { console.warn('[NEXUS] token refresh cloud', e); }
+                try {
+                    if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
+                } catch (e) { console.warn('[NEXUS] ensureAuthIdentityLinked cloud', e); }
+                localStorage.setItem('nexus_firebase_email', email);
+                localStorage.setItem('nexus_google_vault_' + email, '1');
+                if (profileIn) profileIn.isGoogle = true;
+                nexusRefreshCloudBadge(false);
+                return true;
+            };
+
+            if (await attachCloud(auth.currentUser)) return { cloud: true, needsGoogle: false };
+
+            try {
+                const u = await nexusWaitForFirebaseGoogleUser(auth, email, null, 6000);
+                if (await attachCloud(u)) return { cloud: true, needsGoogle: false };
+            } catch (e) { console.warn('[NEXUS] wait Firebase cloud', e); }
+
+            nexusRefreshCloudBadge(false);
+            return { cloud: false, needsGoogle: true };
         }
 
         function nexusShouldResumeVaultShell() {
