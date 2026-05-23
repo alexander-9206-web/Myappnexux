@@ -1910,6 +1910,7 @@
                     </div>
                 </div>
                 <button type="submit" class="w-full bg-slate-900 text-white p-3.5 sm:p-4 rounded-2xl font-black uppercase text-xs sm:text-sm mt-3 sm:mt-4 shadow-lg active:scale-95 transition-transform shrink-0">Guardar Registro</button>
+                <button type="button" id="btn-delete-tx" onclick="nexusDeleteTxFromForm(event)" class="hidden w-full bg-red-50 text-red-600 p-3.5 sm:p-4 rounded-2xl font-black uppercase text-xs sm:text-sm mt-2 shadow-sm active:scale-95 transition-transform shrink-0">Eliminar transacción</button>
             </form>
         </div>
     </div>
@@ -2988,11 +2989,16 @@
                 if(action === 'reconcile_afterpay') reconcilePastAfterpay(true);
                 else if(action === 'tx_overdraft') saveTransaction(null, true);
                 else if(action === 'cc_purchase_overdraft') saveCCPurchase(null, true);
-                else if(action === 'delete_tx') deleteTx(null, payload, true);
-                else if(action === 'root_delete_tx') {
-                    const txId = String(payload || '').split('|')[0];
-                    if (typeof nexusRootDeleteTransaction === 'function' && nexusRootDeleteTransaction(txId, { source: 'accounts' })) {
+                else if(action === 'delete_tx' || action === 'root_delete_tx') {
+                    const parts = String(payload || '').split('|');
+                    const txId = parts[0];
+                    const accHint = parts[1] || null;
+                    const source = parts[2] || (state.activeTab === 'database' ? 'audit' : (state.activeTab === 'accounts' ? 'accounts' : 'root'));
+                    const meta = { source };
+                    if (accHint && accHint !== 'audit' && accHint !== 'accounts' && accHint !== 'root') meta.accountId = accHint;
+                    if (typeof nexusRootDeleteTransaction === 'function' && nexusRootDeleteTransaction(txId, meta)) {
                         if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                        if (typeof closeForm === 'function') closeForm();
                     }
                 }
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
@@ -5414,6 +5420,7 @@
             }
             nexusEnsureDeletedAccountsRegistry();
             if (typeof nexusPurgeExpiredDeletedTxArchive === 'function') nexusPurgeExpiredDeletedTxArchive();
+            if (typeof nexusPurgeDeletedTxFromState === 'function') nexusPurgeDeletedTxFromState();
             nexusApplyAccountTombstonesToState();
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
@@ -5740,7 +5747,14 @@
         function convertCurrency(amount, fromCode, toCode) { if (!amount) return 0; if(fromCode === toCode) return amount; return (amount / (LIVE_RATES[fromCode] || 1)) * (LIVE_RATES[toCode] || 1); }
         function buildTransactionSchema(baseObj) { const baseCurrency = state.settings.baseCurrency || 'USD'; return { ...baseObj, id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), original_amount: baseObj.amount, currency_code: baseObj.currency, base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency), flags: { isAfterpay: baseObj.type === 'afterpay' } }; }
         const getActiveAccounts = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.accounts || []).map(a => ({ ...a, original_balance: a.balance, original_currency: a.currency, balance: convertCurrency(a.balance, a.currency, base), limit: convertCurrency(a.limit || 0, a.currency, base), currency: base, isVirtual: true })); } return (state.accounts || []).filter(a => a.currency === state.activeCurrency); };
-        const getActiveTx = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.tx || []).map(t => ({ ...t, original_amount: t.amount, original_currency: t.currency, amount: convertCurrency(t.amount, t.currency, base), currency: base, isVirtual: true })); } return (state.tx || []).filter(t => t.currency === state.activeCurrency); };
+        const getActiveTx = () => {
+            const src = typeof nexusGetOperationalTxList === 'function' ? nexusGetOperationalTxList() : (state.tx || []);
+            if (state.activeCurrency === 'GLOBAL') {
+                const base = state.settings.baseCurrency;
+                return src.map(t => ({ ...t, original_amount: t.amount, original_currency: t.currency, amount: convertCurrency(t.amount, t.currency, base), currency: base, isVirtual: true }));
+            }
+            return src.filter(t => t.currency === state.activeCurrency);
+        };
         const getActiveLoans = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.loans || []).map(l => ({ ...l, original_total: l.total, original_balance: l.balance, original_currency: l.currency, total: convertCurrency(l.total, l.currency, base), balance: convertCurrency(l.balance, l.currency, base), currency: base, isVirtual: true })); } return (state.loans || []).filter(l => l.currency === state.activeCurrency); };
 
         function getSafeDate(dStr) {
@@ -7429,7 +7443,7 @@
                 el.classList.remove('hidden'); el.classList.add('flex');
                 
                 // APEX FIX: Interceptar Transferencias como Entradas (toAccId) o Salidas (accId) y ocultar el contrato madre Afterpay
-                const txs = state.tx.filter(t => (t.accId === id || (t.type === 'transfer' && t.toAccId === id)) && t.type !== 'afterpay').sort((a,b) => new Date(b.date) - new Date(a.date));
+                const txs = nexusGetOperationalTxList().filter(t => (t.accId === id || (t.type === 'transfer' && t.toAccId === id)) && t.type !== 'afterpay').sort((a,b) => new Date(b.date) - new Date(a.date));
                 
                 if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
                 
@@ -7460,7 +7474,7 @@
         function renderHistAccList() {
             const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return; const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
             // APEX FIX: Ocultar el contrato madre de Afterpay en el historial detallado de la cuenta
-            let txs = state.tx.filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
+            let txs = nexusGetOperationalTxList().filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
             const now = new Date();
             if(currentHistPeriod === '30d') { const past30 = new Date(now.getTime() - 30 * 86400000); txs = txs.filter(t => new Date(t.date) >= past30); } else if(currentHistPeriod === 'month') { txs = txs.filter(t => new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()); } else if(currentHistPeriod === 'year') { txs = txs.filter(t => new Date(t.date).getFullYear() === now.getFullYear()); }
             txs.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -8544,6 +8558,12 @@
                 pastNotes.forEach(n => { datalist.innerHTML += `<option value="${n}">`; });
             }
 
+            const delTxBtn = $id('btn-delete-tx');
+            if (delTxBtn) {
+                if (txId) delTxBtn.classList.remove('hidden');
+                else delTxBtn.classList.add('hidden');
+            }
+
             if(!txId) { 
                 const txProjEl = $id('f-tx-proj-id');
                 if (txProjEl && !projectId) txProjEl.value = '';
@@ -8729,6 +8749,14 @@
             if (state.deletedTxArchive.length > 500) state.deletedTxArchive.length = 500;
         }
 
+        function nexusDeleteTxFromForm(e) {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            const txId = $id('f-id') ? $id('f-id').value : '';
+            if (!txId) return;
+            const accId = $id('f-account') ? $id('f-account').value : '';
+            nexusPromptDeleteTransaction(txId, accId || null);
+        }
+
         function nexusRootDeleteTransaction(txId, opts) {
             const tx = (state.tx || []).find(t => t.id === txId);
             if (!tx) return false;
@@ -8746,8 +8774,20 @@
             nexusArchiveDeletedTx(tx, opts || {});
             deleteCloudTx(txId);
             nexusPurgeExpiredDeletedTxArchive();
+            nexusPurgeDeletedTxFromState();
             if (typeof nexusTouchLocalState === 'function') nexusTouchLocalState('tx-root-delete');
+            if (typeof nexusRunBackgroundPushNow === 'function') nexusRunBackgroundPushNow('tx-root-delete');
             return true;
+        }
+
+        function nexusPromptDeleteTransaction(txId, accIdHint) {
+            const source = state.activeTab === 'database' ? 'audit' : (state.activeTab === 'accounts' ? 'accounts' : 'root');
+            const payload = [txId, accIdHint || '', source].join('|');
+            triggerUIConfirm(
+                '¿Eliminar esta transacción por completo?\n\nDesaparece de cuentas, auditoría, informes y analítica. Solo queda en Auditoría → Transacciones eliminadas (15 días).',
+                'root_delete_tx',
+                payload
+            );
         }
 
         function refreshAfterTxDelete() {
@@ -8788,12 +8828,7 @@
         }
 
         function promptRootDeleteTransaction(txId, accIdHint) {
-            const payload = accIdHint ? (txId + '|' + accIdHint) : txId;
-            triggerUIConfirm(
-                '¿Eliminar esta transacción de raíz?\n\nDesaparece del saldo, informes, analítica y todos los módulos. Quedará en Auditoría → Transacciones eliminadas durante 15 días.',
-                'root_delete_tx',
-                payload
-            );
+            nexusPromptDeleteTransaction(txId, accIdHint);
         }
 
         function openDeletedTxArchiveModal() {
@@ -8838,12 +8873,14 @@
 
         function deleteTx(e, id, force = false) {
             if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-            if (!(state.tx || []).find(t => t.id === id)) return;
+            const exists = (state.tx || []).find(t => t.id === id) || (state.deletedTxArchive || []).some(e => e.id === id);
+            if (!exists && !(state.deletedTxIds || []).includes(id)) return;
             if (!force) {
-                triggerUIConfirm('¿Eliminar registro de la DB SSoT? Se reajustará el saldo y quedará 15 días en Transacciones eliminadas.', 'delete_tx', id);
+                nexusPromptDeleteTransaction(id);
                 return;
             }
-            if (nexusRootDeleteTransaction(id, { source: 'audit' })) refreshAfterTxDelete();
+            const source = state.activeTab === 'database' ? 'audit' : (state.activeTab === 'accounts' ? 'accounts' : 'root');
+            if (nexusRootDeleteTransaction(id, { source })) refreshAfterTxDelete();
         }
 
         // AUDITORÍA
@@ -8920,7 +8957,7 @@
             const dbSearchQ = $id('db-filter-search') ? $id('db-filter-search').value.toLowerCase().trim() : '';
 
             // APEX FIX: Mapeo Aislado Dinámico SSoT (Contrato madre Afterpay oculto, solo se ven los abonos reales)
-            let rawTxList = state.tx
+            let rawTxList = nexusGetOperationalTxList()
                 .filter(t => !t.isCCPurchase && t.type !== 'afterpay')
                 .map(t => {
                     const tx = {...t, original_amount: t.amount, original_currency: t.currency};
@@ -9161,7 +9198,7 @@
 
         function getAccountHistoryTxs() {
             if (!currentHistAccId) return [];
-            let txs = state.tx.filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
+            let txs = nexusGetOperationalTxList().filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
             const now = new Date();
             if (currentHistPeriod === '30d') {
                 const past30 = new Date(now.getTime() - 30 * 86400000);
@@ -11403,19 +11440,15 @@ ${JSON.stringify(dataToAnalyze)}`;
                 nexusPushSharedProjectIfNeeded(p);
                 saveState(); showProjectDetail(projId);
             } else if (type === 'tx') {
-                const txId = id; const projId = aux;
-                deleteTx(null, txId, true); // true = bypass confirmation interna de SSoT
-                if (projId && $id('projects-detail-view') && !$id('projects-detail-view').classList.contains('hidden')) {
-                    showProjectDetail(projId);
-                    renderProjectsTab();
-                } else {
-                    if(state.activeTab === 'database') renderDatabase();
-                    else if(state.activeTab === 'analysis') renderAnalysis();
-                    else if(state.activeTab === 'report') renderReport();
-                    else if(state.activeTab === 'finances') renderFinancesUnified();
-                    else if(state.activeTab === 'budget') renderBudgetTab();
-                    else if(state.activeTab === 'accounts') renderAccountsTab();
-                    else if(state.activeTab === 'calendar') renderCalendar();
+                const txId = id;
+                if (nexusRootDeleteTransaction(txId, { source: 'projects' })) {
+                    const projId = aux;
+                    if (projId && $id('projects-detail-view') && !$id('projects-detail-view').classList.contains('hidden')) {
+                        showProjectDetail(projId);
+                        renderProjectsTab();
+                    } else {
+                        refreshAfterTxDelete();
+                    }
                 }
             } else if (type === 'task') {
                 const taskId = id; const projId = aux;
@@ -15112,22 +15145,32 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const isBootstrap = !!options.isBootstrap;
             const restricted = nexusIsCloudPullRestricted();
 
-            const ingestDoc = (docSnap) => {
+            const ingestCoreDoc = (docSnap) => {
                 if (!isBootstrap && docSnap.metadata && docSnap.metadata.hasPendingWrites) return;
                 const data = docSnap.data();
                 hasChanges = true;
-                if (docSnap.id === 'core') {
-                    coreTouched = true;
-                    if (restricted) nexusMergeCloudTombstonesOnly(data);
-                    else nexusApplyCloudCoreDoc(data);
-                } else if (!restricted && docSnap.id.startsWith('tx_')) {
-                    const year = docSnap.id.split('_')[1];
-                    incomingTxByYear[year] = data.tx || [];
-                }
+                coreTouched = true;
+                if (restricted) nexusMergeCloudTombstonesOnly(data);
+                else nexusApplyCloudCoreDoc(data);
             };
 
+            const ingestTxYearDoc = (docSnap) => {
+                if (!isBootstrap && docSnap.metadata && docSnap.metadata.hasPendingWrites) return;
+                if (restricted || !docSnap.id.startsWith('tx_')) return;
+                const data = docSnap.data();
+                hasChanges = true;
+                const year = docSnap.id.split('_')[1];
+                incomingTxByYear[year] = nexusFilterPurgedTransactions(data.tx || []);
+            };
+
+            const docSnaps = isBootstrap
+                ? (snapshot.docs || [])
+                : (snapshot.docChanges() || []).map(change => change.doc);
+
+            docSnaps.filter(d => d && d.id === 'core').forEach(ingestCoreDoc);
+            docSnaps.filter(d => d && d.id && d.id.startsWith('tx_')).forEach(ingestTxYearDoc);
+
             if (isBootstrap) {
-                snapshot.docs.forEach(ingestDoc);
                 if (hasChanges) {
                     nexusMarkCloudBootstrapComplete();
                 } else if (snapshot.empty) {
@@ -15137,8 +15180,6 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 } else {
                     console.warn('[NEXUS] Bootstrap: documentos en nube pero sin fusión (revisa permisos o formato).');
                 }
-            } else {
-                snapshot.docChanges().forEach((change) => ingestDoc(change.doc));
             }
 
             if (hasChanges) {
@@ -15146,6 +15187,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if (Object.keys(incomingTxByYear).length > 0 && !restricted) {
                     state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
                 }
+                if (typeof nexusPurgeDeletedTxFromState === 'function') nexusPurgeDeletedTxFromState();
             }
 
             nexusEnsureSyncMeta();
@@ -15361,7 +15403,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const years = new Set([...Object.keys(localByYear || {}), ...Object.keys(remoteByYear || {})]);
             let merged = [];
             years.forEach(y => {
-                merged = merged.concat(nexusMergeEntityById(localByYear[y] || [], remoteByYear[y] || []));
+                merged = merged.concat(nexusMergeTxById(localByYear[y] || [], remoteByYear[y] || []));
             });
             return nexusFilterPurgedTransactions(merged);
         }
@@ -15488,6 +15530,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
             remoteTxs.forEach(netTx => {
                 if (state.deletedSharedTxs && state.deletedSharedTxs.includes(netTx.id)) return;
+                if ((state.deletedTxIds || []).includes(netTx.id)) return;
                 const mapped = nexusMapTxFromSharedRemote(netTx, currentAcc.id, accounts);
                 if (!mapped) return;
 
@@ -15515,10 +15558,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
         function nexusBuildMergedTxsMapForUpload(sharedAcc, remoteData) {
             const remoteList = nexusPullMapFromFirestore(remoteData || {}, 'txsMap', 'txs');
-            const localList = (state.tx || [])
+            const localList = nexusFilterPurgedTransactions((state.tx || [])
                 .filter(t => t.accId === sharedAcc.id || t.toAccId === sharedAcc.id)
-                .map(t => nexusMapTxToSharedRemote(t, state.accounts));
-            const merged = nexusSortByChronology(nexusMergeEntityById(localList, remoteList));
+                .map(t => nexusMapTxToSharedRemote(t, state.accounts)));
+            const merged = nexusSortByChronology(nexusMergeTxById(localList, nexusFilterPurgedTransactions(remoteList)));
             const txsMap = {};
             merged.forEach(t => { txsMap[t.id] = t; });
             return txsMap;
@@ -15772,6 +15815,36 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const purged = nexusGetPurgedTxIdSet();
             if (!purged.size) return txList || [];
             return (txList || []).filter(t => t && t.id && !purged.has(t.id));
+        }
+
+        /** Transacciones activas (excluye eliminadas de raíz y purgadas por cuenta). */
+        function nexusGetOperationalTxList() {
+            return nexusFilterPurgedTransactions(state.tx || []);
+        }
+
+        function nexusPurgeDeletedTxFromState() {
+            if (!state || !Array.isArray(state.tx)) return;
+            state.tx = nexusFilterPurgedTransactions(state.tx);
+        }
+
+        /** Fusión de tx en nube: nunca reinsertar IDs en deletedTxIds. */
+        function nexusMergeTxById(localArr, remoteArr) {
+            const purged = nexusGetPurgedTxIdSet();
+            const map = new Map();
+            (localArr || []).forEach(e => {
+                if (!e || !e.id || purged.has(e.id)) return;
+                map.set(e.id, e);
+            });
+            (remoteArr || []).forEach(re => {
+                if (!re || !re.id || purged.has(re.id)) return;
+                const loc = map.get(re.id);
+                if (!loc) { map.set(re.id, re); return; }
+                const lts = nexusEntityTimestamp(loc);
+                const rts = nexusEntityTimestamp(re);
+                if (rts >= lts) map.set(re.id, re);
+                else map.set(re.id, loc);
+            });
+            return Array.from(map.values());
         }
 
         function nexusTxCountsForLiveBalance(tx) {
@@ -17867,8 +17940,11 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
                         if (hasSharedChanges) {
                             state.tx = nexusSortByChronology(
-                                state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id))
+                                nexusFilterPurgedTransactions(
+                                    state.tx.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id))
+                                )
                             );
+                            if (typeof nexusPurgeDeletedTxFromState === 'function') nexusPurgeDeletedTxFromState();
                             NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] P2P tx IDB', e));
                             if (sessionUnlocked) {
                                 if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
@@ -18543,6 +18619,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             if (typeof saveState === 'function') saveState();
         }
         function deleteCloudTx(id) {
+            if (!id) return;
+            nexusEnsureDeletedAccountsRegistry();
+            if (!(state.deletedTxIds || []).includes(id)) state.deletedTxIds.push(id);
+            if (typeof nexusMarkForceLocalWin === 'function') nexusMarkForceLocalWin(180000);
             if (typeof saveState === 'function') saveState();
         }
 
