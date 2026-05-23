@@ -4945,6 +4945,60 @@
             }
         }
 
+        async function nexusVaultCollectionRef(email) {
+            const { collection } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+            const vaultId = normalizeMemberEmail(email || currentUser);
+            return collection(window.db, 'artifacts', window.appId, 'users', vaultId, 'nexus_data');
+        }
+
+        /** Tras reinstalar: perfil en nube con linkedUid aunque localStorage esté vacío. */
+        async function nexusDetectCloudLinkFromProfile(email) {
+            const e = normalizeMemberEmail(email);
+            if (!e || !window.db) return false;
+            try {
+                const p = await getProfileForVault(e);
+                return !!(p && (p.linkedUid || p.isGoogle));
+            } catch (err) {
+                console.warn('[NEXUS] nexusDetectCloudLinkFromProfile', err);
+                return false;
+            }
+        }
+
+        /** Google/Firebase listo + linkedUid antes de leer nexus_data (reglas Firestore). */
+        async function nexusEnsureCloudSessionForPull(vaultEmail) {
+            const email = normalizeMemberEmail(vaultEmail || currentUser);
+            if (!email) return { ok: false, needsGoogle: true, reason: 'no_email' };
+            if (!window.db || !window.__nexusFirebaseApp) {
+                await initCloud({ skipAnonymous: true });
+            }
+            if (!window.__nexusFirebaseApp) return { ok: false, needsGoogle: true, reason: 'no_firebase' };
+
+            if (nexusFirebaseMatchesVault(fbUser, email)) {
+                if (typeof ensureAuthIdentityLinked === 'function') {
+                    await ensureAuthIdentityLinked();
+                }
+                return { ok: true };
+            }
+
+            const restored = await nexusRestoreCloudForVault(email, userProfile);
+            if (restored.cloud) {
+                if (typeof ensureAuthIdentityLinked === 'function') {
+                    await ensureAuthIdentityLinked();
+                }
+                return { ok: true };
+            }
+            return { ok: false, needsGoogle: !!restored.needsGoogle, reason: 'auth' };
+        }
+
+        function nexusShouldBlockEmptyCloudPush() {
+            if (!state) return true;
+            nexusEnsureSyncMeta();
+            if (nexusNeedsCloudBootstrap()) return true;
+            if (nexusIsVaultLocallyEmpty() && !state._nexusSync.dirty) return true;
+            if (nexusIsVaultLocallyEmpty() && !(state._nexusSync.localRevision > 0)) return true;
+            return false;
+        }
+
         /** Estado del protocolo para diagnóstico / UI. */
         function nexusGetSyncProtocolStatus() {
             nexusEnsureSyncMeta();
@@ -5092,7 +5146,15 @@
 
             if (isBootstrap) {
                 snapshot.docs.forEach(ingestDoc);
-                nexusMarkCloudBootstrapComplete();
+                if (hasChanges) {
+                    nexusMarkCloudBootstrapComplete();
+                } else if (snapshot.empty) {
+                    state._nexusSync.awaitingCloudBootstrap = true;
+                    state._nexusSync.bootstrapCompleted = false;
+                    console.warn('[NEXUS] Bootstrap: colección nexus_data vacía en servidor para', currentUser);
+                } else {
+                    console.warn('[NEXUS] Bootstrap: documentos en nube pero sin fusión (revisa permisos o formato).');
+                }
             } else {
                 snapshot.docChanges().forEach((change) => ingestDoc(change.doc));
             }
@@ -5136,19 +5198,36 @@
         async function nexusPullVaultFromServerOnce() {
             if (!fbUser || !window.db || !currentUser || !state) return 0;
             try {
-                const { collection, getDocsFromServer } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
-                const snapshot = await getDocsFromServer(colRef);
-                if (!snapshot || snapshot.empty) return 0;
+                const { getDocsFromServer } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                if (typeof ensureAuthIdentityLinked === 'function') {
+                    await ensureAuthIdentityLinked();
+                }
+                const vaultEmail = normalizeMemberEmail(currentUser);
+                let colRef = await nexusVaultCollectionRef(vaultEmail);
+                let snapshot = await getDocsFromServer(colRef);
+                const googleEmail = normalizeMemberEmail(fbUser.email || '');
+                if (snapshot.empty && googleEmail && googleEmail !== vaultEmail) {
+                    const altSnap = await getDocsFromServer(await nexusVaultCollectionRef(googleEmail));
+                    if (!altSnap.empty) {
+                        console.warn('[NEXUS] Bóveda bajo', googleEmail, '— el vault local usa', vaultEmail);
+                        snapshot = altSnap;
+                    }
+                }
+                if (!snapshot || snapshot.empty) {
+                    console.warn('[NEXUS] Sin documentos en artifacts/' + window.appId + '/users/' + vaultEmail + '/nexus_data');
+                    return 0;
+                }
                 nexusEnsureSyncMeta();
                 state._nexusSync.awaitingCloudBootstrap = true;
                 state._nexusSync.bootstrapCompleted = false;
                 nexusQueueVaultSnapshotForPull(snapshot, true);
                 await nexusApplyVaultCloudBuffer();
                 window.__nexusVaultListenerBootstrapped = true;
+                console.log('[NEXUS] Pull servidor OK:', snapshot.size, 'docs →', vaultEmail);
                 return snapshot.size;
             } catch (e) {
-                console.warn('[NEXUS] nexusPullVaultFromServerOnce', e);
+                const code = e && (e.code || e.message) ? (e.code || e.message) : String(e);
+                console.error('[NEXUS] nexusPullVaultFromServerOnce FALLÓ:', code, '— ¿Google vinculado al mismo email de la bóveda?');
                 return 0;
             }
         }
@@ -7886,7 +7965,14 @@
         }
 
         async function fetchCloudState() {
-            if (!fbUser || !window.db || !currentUser) return Promise.resolve();
+            if (!window.db || !currentUser) return Promise.resolve();
+            const session = await nexusEnsureCloudSessionForPull(currentUser);
+            if (!session.ok) {
+                console.warn('[NEXUS] fetchCloudState: sin sesión Google para', currentUser, session);
+                window.__nexusNeedsGoogleForCloud = true;
+                return Promise.resolve();
+            }
+            if (!fbUser) return Promise.resolve();
             return new Promise(async (resolve) => {
                 let settled = false;
                 const finish = () => {
@@ -7895,10 +7981,10 @@
                     resolve();
                 };
                 try {
-                    const { collection, onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const { onSnapshot } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
                     updateCloudBadge(true, true);
 
-                    const colRef = collection(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data');
+                    const colRef = await nexusVaultCollectionRef(currentUser);
 
                     if (unsubscribeSnapshot) {
                         unsubscribeSnapshot();
@@ -7969,6 +8055,10 @@
         /** Uso interno del protocolo offline-first. Preferir nexusScheduleBackgroundPush / nexusRunBackgroundPushNow. */
         function triggerCloudSync() {
             if(!fbUser || !window.db || !currentUser) return;
+            if (typeof nexusShouldBlockEmptyCloudPush === 'function' && nexusShouldBlockEmptyCloudPush()) {
+                console.warn('[NEXUS] Push omitido: bóveda vacía o bootstrap pendiente (evita borrar nube).');
+                return;
+            }
             if (nexusShouldDeferCloudPush()) {
                 syncPending = true;
                 clearTimeout(syncTimeout);
@@ -8683,7 +8773,9 @@
 
                 await bootApp({ fastBoot: true, deferCloudProfileMerge: true });
 
-                if (bind.cloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
+                const hadCloudHint = wantsCloud || await nexusDetectCloudLinkFromProfile(vaultEmail);
+                const mustPullFromCloud = nexusIsVaultLocallyEmpty() || hadCloudHint;
+                if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
                     nexusPrepareCloudBootstrapOnLogin();
                 }
 
@@ -8694,17 +8786,22 @@
                     resetGoogleLoginButton();
                 }
 
-                if ((bind.cloud || alreadyCloud || wantsCloud) && fbUser && window.db && typeof fetchCloudState === 'function') {
+                if (mustPullFromCloud && window.db && typeof fetchCloudState === 'function') {
                     try {
                         await Promise.race([
                             fetchCloudState(),
-                            new Promise(r => setTimeout(r, 22000))
+                            new Promise(r => setTimeout(r, 28000))
                         ]);
+                        if (nexusIsVaultLocallyEmpty() && window.__nexusNeedsGoogleForCloud) {
+                            alert('Tienes datos en la nube pero falta vincular Google.\n\n1. Cierra sesión\n2. Entra con «Continuar con Google» usando el mismo correo de tu bóveda\n3. Vuelve a abrir con PIN si quieres');
+                        } else if (nexusIsVaultLocallyEmpty() && hadCloudHint) {
+                            console.warn('[NEXUS] Bóveda sigue vacía tras pull — revisa en Firebase Console: artifacts/' + window.appId + '/users/' + vaultEmail + '/nexus_data');
+                        }
                     } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                 }
-                if (bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap()) {
+                if (bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap() && !nexusIsVaultLocallyEmpty()) {
                     nexusScheduleBackgroundPush('post-login');
-                } else if (bind.needsGoogle && wantsCloud) {
+                } else if ((bind.needsGoogle || window.__nexusNeedsGoogleForCloud) && hadCloudHint) {
                     console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
                 }
                 setLoginRoutingProgress(100, 'Listo');
@@ -9063,7 +9160,7 @@
             const nativeP = isNexusNativeContainer()
                 ? nexusNativeSilentGoogleRestore(email)
                 : Promise.resolve(false);
-            const firebaseP = nexusWaitForFirebaseGoogleUser(auth, email, null, 1600).catch(e => {
+            const firebaseP = nexusWaitForFirebaseGoogleUser(auth, email, null, 5500).catch(e => {
                 console.warn('[NEXUS] wait Firebase cloud', e);
                 return null;
             });
@@ -9300,7 +9397,7 @@
                 nexusResetInactivityTimer();
                 if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
                 nexusFlushPendingCloudUi();
-                if (fbUser && window.db && (nexusNeedsCloudBootstrap() || nexusIsVaultLocallyEmpty()) && typeof fetchCloudState === 'function') {
+                if (window.db && (nexusNeedsCloudBootstrap() || nexusIsVaultLocallyEmpty()) && typeof fetchCloudState === 'function') {
                     if (typeof nexusPrepareCloudBootstrapOnLogin === 'function') nexusPrepareCloudBootstrapOnLogin();
                     fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState post-unlock', e));
                 } else if (fbUser && syncPending && typeof nexusScheduleBackgroundPush === 'function') {
