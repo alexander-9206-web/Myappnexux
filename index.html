@@ -210,6 +210,30 @@
                 border-radius: 1.5rem !important;
             }
         }
+        /* Auditoría: montos siempre visibles (fila dedicada) */
+        #tab-database .db-audit-card {
+            min-width: 0;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        #tab-database .db-audit-amt-row {
+            min-width: 0;
+            gap: 0.5rem;
+        }
+        #tab-database .db-audit-amt {
+            font-size: clamp(0.62rem, 2.6vw, 0.8rem);
+            line-height: 1.2;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            text-align: right;
+        }
+        #tab-database .db-audit-meta {
+            line-height: 1.35;
+            word-break: break-word;
+        }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
         .fixed.inset-0.flex.items-end > .theme-card::-webkit-scrollbar,
@@ -2710,10 +2734,6 @@
                 <button type="button" onclick="nexusCloseDocViewer()" class="nexus-modal-close-btn bg-white/10 text-white border border-white/20" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <iframe id="nexus-doc-viewer-frame" class="flex-1 w-full min-h-0 border-0 bg-white" title="Vista previa PDF"></iframe>
-            <div class="p-4 pb-safe flex gap-2 shrink-0 border-t border-white/10">
-                <button type="button" onclick="nexusCloseDocViewer()" class="flex-1 bg-slate-700 text-white py-3 rounded-xl font-black uppercase text-[10px]">Cerrar</button>
-                <button type="button" onclick="nexusDownloadFromDocViewer()" class="flex-1 bg-indigo-500 text-white py-3 rounded-xl font-black uppercase text-[10px]">Descargar</button>
-            </div>
         </div>
 
         <!-- Navegación web (PSE / recibos) dentro del contenedor -->
@@ -2723,10 +2743,6 @@
                 <button type="button" onclick="nexusCloseWebViewer()" class="nexus-modal-close-btn bg-white/10 text-white border border-white/20" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <iframe id="nexus-web-viewer-frame" class="flex-1 w-full min-h-0 border-0 bg-white" title="Navegación embebida" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
-            <div class="p-4 pb-safe flex gap-2 shrink-0 border-t border-white/10">
-                <button type="button" onclick="nexusCloseWebViewer()" class="flex-1 bg-slate-700 text-white py-3 rounded-xl font-black uppercase text-[10px]">Cerrar</button>
-                <button type="button" onclick="nexusOpenWebViewerExternal()" class="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-black uppercase text-[10px]">Abrir externo</button>
-            </div>
         </div>
 
         <!-- NEXUS AR — JavaScript monolítico (regenerar: node scripts/merge-nexus-monolith.mjs) -->
@@ -5523,6 +5539,43 @@
                 if(btnNew) { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
                 if(paidSelect) paidSelect.value = "0";
             }
+        }
+
+        function nexusFindAfterpayParentForPayment(payTx) {
+            if (!payTx) return null;
+            if (payTx.apParentId) {
+                return (state.tx || []).find(t => t.id === payTx.apParentId && t.type === 'afterpay') || null;
+            }
+            const note = payTx.note || '';
+            const m = note.match(/\((\d+)\/(\d+)\)/);
+            if (!m) return null;
+            const label = note.replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
+            return (state.tx || []).find(t => {
+                if (t.type !== 'afterpay') return false;
+                if (payTx.accId && t.accId !== payTx.accId) return false;
+                if (payTx.cat && t.cat !== payTx.cat) return false;
+                const tLabel = (t.note || (t.cat && t.cat.length > 2 ? t.cat.substring(2) : t.cat) || '').trim();
+                return tLabel === label || (label && tLabel.includes(label));
+            }) || null;
+        }
+
+        function nexusIsAfterpayPaymentTx(tx) {
+            if (!tx || tx.isProjected) return false;
+            const n = tx.note || '';
+            return /^\[(Abono|Pago Inicial)\]/i.test(n);
+        }
+
+        /** Afterpay interno: proyecciones y conciliación a cero no entran a auditoría. */
+        function nexusShouldShowTxInAudit(tx) {
+            if (!tx) return false;
+            if (tx.type === 'afterpay') return false;
+            if (tx.isProjected && String(tx.id || '').startsWith('proj_ap_')) return false;
+            if (tx.isProjected && /\[Pendiente\]/i.test(tx.note || '') && String(tx.id || '').startsWith('proj_ap_')) return false;
+            if (nexusIsAfterpayPaymentTx(tx)) {
+                const parent = nexusFindAfterpayParentForPayment(tx);
+                if (parent && parent.apRecon) return false;
+            }
+            return true;
         }
         
         // APEX FIX: Forzar actualización de caché y sistema (Integrado a UI Modal)
@@ -8844,11 +8897,11 @@
             // Extraemos las proyecciones (cuotas) haciendo bypass temporal de la divisa activa
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
-            let projTxs = getEnrichedTx().filter(t => t.isProjected);
+            let projTxs = getEnrichedTx().filter(t => t.isProjected && !String(t.id || '').startsWith('proj_ap_'));
             state.activeCurrency = tempCurr;
 
-            // Unimos el flujo real con las proyecciones (cuotas) y omitimos orígenes de deuda masiva
-            let combinedTxs = [...rawTxList, ...projTxs];
+            // Unimos flujo real + proyecciones (sin cuotas Afterpay internas; filtro auditoría Afterpay)
+            let combinedTxs = [...rawTxList, ...projTxs].filter(nexusShouldShowTxInAudit);
 
             let fTx = combinedTxs.filter(t => { 
                 const d = new Date(t.date); 
@@ -9028,7 +9081,23 @@
                 const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${auditVaultBadge} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink min-w-0 pl-2 justify-end"><p class="font-black text-sm ${cT} text-right truncate" title="${sign}${fmt(origAmt, origCur)}">${sign}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                const amtFull = `${sign}${fmt(origAmt, origCur)}`;
+                const titleTxt = (t.note || (t.cat ? t.cat.substring(2) : '')).replace(/</g, '&lt;');
+                const metaLine = `${dDate.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} ${String(dDate.getHours()).padStart(2, '0')}:${String(dDate.getMinutes()).padStart(2, '0')} • ${aN}${aNDest}`;
+                return `<div onclick="${editAction}" class="db-audit-card ${cursorClass} ${cardBgClass} p-3 sm:p-4 rounded-2xl shadow-sm border transition-all w-full max-w-full overflow-hidden">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                        <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-[10px] sm:text-xs"></i></div>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-[10px] sm:text-[11px] font-black uppercase ${textTitleClass} truncate leading-tight">${titleTxt}</p>
+                            <p class="db-audit-meta text-[7px] sm:text-[8px] font-bold ${textSubClass} uppercase mt-0.5">${metaLine} ${auditVaultBadge} ${pBadge} ${pCreator}</p>
+                        </div>
+                        <button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-7 h-7 sm:w-8 sm:h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid fa-trash text-[9px] sm:text-[10px]"></i></button>
+                    </div>
+                    <div class="db-audit-amt-row flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100/80">
+                        <span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Monto</span>
+                        <span class="db-audit-amt nexus-amount-fit font-black ${cT}" title="${amtFull}">${amtFull}</span>
+                    </div>
+                </div>`;
             }).join(''); 
             requestAnimationFrame(() => fitNexusAmounts($id('tab-database')));
         }
@@ -9747,27 +9816,30 @@ ${JSON.stringify(dataToAnalyze)}`;
                     
                     if(type === 'afterpay') { 
                         oldTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : (oldTx.apFreq || 'weekly'); 
-                        oldTx.apQuotas = ($id('f-ap-quotas') && parseInt($id('f-ap-quotas').value)) ? parseInt($id('f-ap-quotas').value) : (oldTx.apQuotas || 4); 
-                        const targetPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value) || 0 : (oldTx.apPaid || 0); 
+                        oldTx.apQuotas = ($id('f-ap-quotas') && parseInt($id('f-ap-quotas').value)) ? parseInt($id('f-ap-quotas').value) : (oldTx.apQuotas || 4);
+                        const isApReconEdit = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
+                        oldTx.apRecon = !!isApReconEdit;
+                        const targetPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value, 10) || 0 : (oldTx.apPaid || 0);
                         
-                        // APEX FIX: Auto-Amortización debitada de la cuenta correcta al editar
-                        if (targetPaid > (oldTx.apPaid || 0)) {
+                        if (!oldTx.apRecon && targetPaid > (oldTx.apPaid || 0)) {
                             let diff = targetPaid - (oldTx.apPaid || 0);
-                            let apAcc = state.accounts.find(a => a.id === accId); 
+                            let apAcc = state.accounts.find(a => a.id === accId);
                             if (apAcc) {
                                 let rawDeductAmt = (oldTx.original_amount || oldTx.amount) / oldTx.apQuotas;
                                 let deductAmt = rawDeductAmt;
-                                if(apAcc.currency !== oldTx.currency) deductAmt = convertCurrency(rawDeductAmt, oldTx.currency, apAcc.currency);
-                                for(let i=0; i<diff; i++) {
+                                if (apAcc.currency !== oldTx.currency) deductAmt = convertCurrency(rawDeductAmt, oldTx.currency, apAcc.currency);
+                                for (let i = 0; i < diff; i++) {
                                     oldTx.apPaid = (oldTx.apPaid || 0) + 1;
                                     if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
                                     const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: oldTx.cat, accId: apAcc.id, date: new Date().toISOString(), note: `[Abono] ${oldTx.note ? oldTx.note : oldTx.cat.substring(2).trim()} (${oldTx.apPaid}/${oldTx.apQuotas})`, currency: oldTx.currency, costType: 'fixed' });
+                                    apPayTx.apParentId = oldTx.id;
                                     if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-                                    state.tx.push(apPayTx); saveCloudTx(apPayTx);
+                                    state.tx.push(apPayTx);
+                                    saveCloudTx(apPayTx);
                                 }
                             } else { oldTx.apPaid = targetPaid; }
                         } else {
-                            oldTx.apPaid = targetPaid; 
+                            oldTx.apPaid = Math.min(Math.max(0, targetPaid), oldTx.apQuotas || 4);
                         }
                         oldTx.currency = apCurr; oldTx.original_currency = apCurr; 
                     } else { oldTx.currency = selectedCurr; oldTx.original_currency = selectedCurr; }
@@ -9808,42 +9880,44 @@ ${JSON.stringify(dataToAnalyze)}`;
                     newTx.apFreq = ($id('f-ap-freq') && $id('f-ap-freq').value) ? $id('f-ap-freq').value : 'weekly'; 
                     newTx.apQuotas = 4; // Regla estricta: Todo nuevo Afterpay genera 4 pagos
                     isApReconMode = $id('ap-mode-recon') && $id('ap-mode-recon').classList.contains('bg-white');
+                    newTx.apRecon = !!isApReconMode;
 
-                    /* LÓGICA DE AMORTIZACIÓN ESTRICTA AFTERPAY */
-                    let calcPaid = 0;
-                    let calcMoves = 0;
-                    const todayD = new Date();
-                    todayD.setHours(0,0,0,0);
-                    const pDate = new Date(`${date}T12:00:00`);
-                    
-                    const stD = newTx.apFreq === 'fortnightly' ? 14 : 7;
-                    const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
+                    if (isApReconMode) {
+                        /* Conciliar a cero: cuotas pagadas solo en Afterpay, sin auditoría ni débito en cuenta */
+                        let manualPaid = $id('f-ap-paid') ? parseInt($id('f-ap-paid').value, 10) : 0;
+                        if (Number.isNaN(manualPaid)) manualPaid = 0;
+                        newTx.apPaid = Math.min(Math.max(0, manualPaid), newTx.apQuotas);
+                        movementsToGenerate = 0;
+                        initialPaid = newTx.apPaid;
+                    } else {
+                        /* 1ª Compra: solo la cuota de hoy genera movimiento real (cuota proyectada, no total compra) */
+                        let calcPaid = 0;
+                        let calcMoves = 0;
+                        const todayD = new Date();
+                        todayD.setHours(0, 0, 0, 0);
+                        const pDate = new Date(`${date}T12:00:00`);
+                        const stD = newTx.apFreq === 'fortnightly' ? 14 : 7;
+                        const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay) : 5;
 
-                    for (let i = 0; i < 4; i++) {
-                        let d = new Date(pDate.getTime());
-                        if (newTx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); } 
-                        else { d.setDate(d.getDate() + (i * stD)); }
-                        
-                        if (i > 0) {
-                            let currentDay = d.getDay();
-                            let dist = apPayDay - currentDay;
-                            if (dist < 0) dist += 7;
-                            d.setDate(d.getDate() + dist);
+                        for (let i = 0; i < 4; i++) {
+                            let d = new Date(pDate.getTime());
+                            if (newTx.apFreq === 'monthly') { d.setMonth(d.getMonth() + i); }
+                            else { d.setDate(d.getDate() + (i * stD)); }
+                            if (i > 0) {
+                                let currentDay = d.getDay();
+                                let dist = apPayDay - currentDay;
+                                if (dist < 0) dist += 7;
+                                d.setDate(d.getDate() + dist);
+                            }
+                            d.setHours(0, 0, 0, 0);
+                            if (d < todayD) calcPaid++;
+                            else if (d.getTime() === todayD.getTime()) { calcPaid++; calcMoves++; }
                         }
-                        
-                        d.setHours(0,0,0,0);
-                        
-                        if (d < todayD) {
-                            calcPaid++; // Cuota vencida: histórico sin movimiento bancario
-                        } else if (d.getTime() === todayD.getTime()) {
-                            calcPaid++;
-                            calcMoves++; // Cuota de hoy: se debita de inmediato
-                        }
+
+                        initialPaid = calcPaid;
+                        movementsToGenerate = calcMoves;
+                        newTx.apPaid = initialPaid - movementsToGenerate;
                     }
-
-                    initialPaid = calcPaid;
-                    movementsToGenerate = isApReconMode ? 0 : calcMoves;
-                    newTx.apPaid = initialPaid - movementsToGenerate; // Asignamos histórico primero
                 } 
                 
                 const isRecurN = $id('f-is-recur') ? $id('f-is-recur').checked : false; newTx.isRecurrent = isRecurN; if(isRecurN) { newTx.recurFreq = $id('f-recur-freq').value; newTx.recurCount = parseInt($id('f-recur-count').value) || 12; }
@@ -9851,35 +9925,30 @@ ${JSON.stringify(dataToAnalyze)}`;
                 state.tx.push(newTx); saveCloudTx(newTx);
 
                 // APEX FIX: Amortización Automática (Solo genera movimientos bancarios para cobros de hoy, el resto $0)
-                if (type === 'afterpay' && initialPaid > 0) {
-                    if (isApReconMode) {
-                        newTx.apPaid = initialPaid;
-                        saveCloudTx(newTx);
-                    } else if (movementsToGenerate > 0) {
-                        let apAcc = state.accounts.find(a => a.id === accId); 
-                        if (apAcc) {
-                            let rawDeductAmt = (newTx.original_amount || newTx.amount) / newTx.apQuotas;
-                            let deductAmt = rawDeductAmt;
-                            if(apAcc.currency !== newTx.currency) deductAmt = convertCurrency(rawDeductAmt, newTx.currency, apAcc.currency);
-                            for(let i=0; i<movementsToGenerate; i++) {
-                                newTx.apPaid += 1;
-                                if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-                                
-                                let isUpfront = (newTx.apPaid === 1 && new Date(newTx.date).toDateString() === new Date().toDateString());
-                                let prefix = isUpfront ? '[Pago Inicial]' : '[Abono]';
-                                
-                                const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `${prefix} ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: newTx.currency, costType: 'fixed' });
-                                
-                                if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-                                
-                                state.tx.push(apPayTx); saveCloudTx(apPayTx);
-                            }
-                            saveCloudTx(newTx); 
-                        } else {
-                            newTx.apPaid += movementsToGenerate; 
-                            saveCloudTx(newTx);
+                if (type === 'afterpay' && !isApReconMode && movementsToGenerate > 0) {
+                    let apAcc = state.accounts.find(a => a.id === accId);
+                    if (apAcc) {
+                        let rawDeductAmt = (newTx.original_amount || newTx.amount) / newTx.apQuotas;
+                        let deductAmt = rawDeductAmt;
+                        if (apAcc.currency !== newTx.currency) deductAmt = convertCurrency(rawDeductAmt, newTx.currency, apAcc.currency);
+                        for (let i = 0; i < movementsToGenerate; i++) {
+                            newTx.apPaid += 1;
+                            if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
+                            const isUpfront = (newTx.apPaid === 1 && new Date(newTx.date).toDateString() === new Date().toDateString());
+                            const prefix = isUpfront ? '[Pago Inicial]' : '[Abono]';
+                            const apPayTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: newTx.cat, accId: apAcc.id, date: newTx.date, note: `${prefix} ${newTx.note ? newTx.note : newTx.cat.substring(2).trim()} (${newTx.apPaid}/${newTx.apQuotas})`, currency: newTx.currency, costType: 'fixed' });
+                            apPayTx.apParentId = newTx.id;
+                            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
+                            state.tx.push(apPayTx);
+                            saveCloudTx(apPayTx);
                         }
+                        saveCloudTx(newTx);
+                    } else {
+                        newTx.apPaid += movementsToGenerate;
+                        saveCloudTx(newTx);
                     }
+                } else if (type === 'afterpay' && isApReconMode) {
+                    saveCloudTx(newTx);
                 }
             }
             saveState();
