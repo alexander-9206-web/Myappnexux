@@ -124,7 +124,8 @@
             overscroll-behavior-x: none;
             -webkit-overflow-scrolling: touch;
         }
-        body { touch-action: pan-y; position: relative; }
+        body { touch-action: pan-y; position: relative; overscroll-behavior: none; }
+        html { overscroll-behavior: none; }
         main, header, .tab-content { max-width: 100%; overflow-x: hidden; }
         html.nexus-ui-locked, html.nexus-ui-locked body {
             overflow-x: hidden !important;
@@ -204,6 +205,12 @@
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireGoogleBtnWhenReady);
             else wireGoogleBtnWhenReady();
+            function bootNavLock() {
+                document.documentElement.classList.add('nexus-ui-locked');
+                if (typeof installNexusNativeNavigation === 'function') installNexusNativeNavigation();
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootNavLock);
+            else bootNavLock();
         })();
     </script>
 </head>
@@ -4040,6 +4047,7 @@
             nexusSyncGoogleLoginButton();
             showInitialLoginChoice();
             nexusWireModalAutoClose();
+            installNexusNativeNavigation();
 
             (async () => {
                 if (nexusIsManualLogoutBlocked()) {
@@ -4812,6 +4820,56 @@
             if (reason) state._nexusSync.lastTouchReason = reason;
         }
 
+        function nexusPreferLocalForSync() {
+            nexusEnsureSyncMeta();
+            if (state._nexusSync.forceLocalWinUntil && Date.now() < state._nexusSync.forceLocalWinUntil) return true;
+            if (!state._nexusSync.dirty) return false;
+            const localRev = state._nexusSync.localRevision || 0;
+            const cloudRev = state._nexusSync.lastCloudRevision || 0;
+            return localRev >= cloudRev;
+        }
+
+        /** Bloquea fusión completa desde Firebase (restauración, borrados recientes, importación). */
+        function nexusIsCloudPullRestricted() {
+            if (window.__nexusCloudPullPausedUntil && Date.now() < window.__nexusCloudPullPausedUntil) return true;
+            return nexusPreferLocalForSync();
+        }
+
+        function nexusMarkForceLocalWin(ms) {
+            nexusEnsureSyncMeta();
+            state._nexusSync.dirty = true;
+            state._nexusSync.forceLocalWinUntil = Date.now() + (ms || 120000);
+            state._nexusSync.localRevision = Math.max(state._nexusSync.localRevision || 0, Date.now());
+        }
+
+        function nexusFinalizeCoreForCloud(coreObj) {
+            const out = coreObj && typeof coreObj === 'object' ? { ...coreObj } : {};
+            delete out.tx;
+            nexusEnsureDeletedAccountsRegistry();
+            const blockedRemoteIds = new Set();
+            (state.deletedAccounts || []).forEach(t => {
+                if (t && t.remoteId) blockedRemoteIds.add(t.remoteId);
+            });
+            const tomb = nexusGetDeletedAccountMap();
+            out.accounts = (out.accounts || []).filter(a => {
+                if (!a || !a.id) return false;
+                if (tomb.has(a.id)) return false;
+                if (a.remoteId && blockedRemoteIds.has(a.remoteId)) return false;
+                return true;
+            });
+            out.deletedAccounts = nexusMergeDeletedAccountTombstones(state.deletedAccounts || [], out.deletedAccounts || []);
+            out.deletedTxIds = nexusMergeDeletedTxIdList(state.deletedTxIds || [], out.deletedTxIds || []);
+            return out;
+        }
+
+        function nexusMergeCloudTombstonesOnly(cloudData) {
+            if (!cloudData || typeof cloudData !== 'object') return;
+            nexusEnsureDeletedAccountsRegistry();
+            state.deletedAccounts = nexusMergeDeletedAccountTombstones(state.deletedAccounts || [], cloudData.deletedAccounts || []);
+            state.deletedTxIds = nexusMergeDeletedTxIdList(state.deletedTxIds || [], cloudData.deletedTxIds || []);
+            nexusApplyAccountTombstonesToState();
+        }
+
         function nexusTxTimestamp(tx) {
             if (!tx) return 0;
             const raw = tx.updatedAt ?? tx.modifiedAt;
@@ -5321,12 +5379,18 @@
                 deletedBy: email,
                 purgedTxIds: mode === 'purge' ? (purgedTxIds || []) : []
             };
-            state.deletedAccounts = (state.deletedAccounts || []).filter(t => t.accountId !== acc.id);
+            state.deletedAccounts = (state.deletedAccounts || []).filter(t => {
+                if (!t) return false;
+                if (t.accountId === acc.id) return false;
+                if (acc.remoteId && t.remoteId === acc.remoteId) return false;
+                return true;
+            });
             state.deletedAccounts.push(entry);
-            if (mode === 'purge' && purgedTxIds && purgedTxIds.length) {
+            if ((mode === 'purge' || mode === 'unlink') && purgedTxIds && purgedTxIds.length) {
                 state.deletedTxIds = nexusMergeDeletedTxIdList(state.deletedTxIds, purgedTxIds);
             }
             nexusTouchLocalState('account-delete');
+            nexusMarkForceLocalWin(180000);
         }
 
         async function nexusDeleteSharedVaultFromCloud(remoteId) {
@@ -5388,6 +5452,29 @@
                 deletedTxIds: nexusMergeDeletedTxIdList(local.deletedTxIds || [], cloud.deletedTxIds || []),
                 deletedSharedTxs: [...new Set([...(local.deletedSharedTxs || []), ...(cloud.deletedSharedTxs || [])])].slice(-200),
                 deletedSharedTasks: [...new Set([...(local.deletedSharedTasks || []), ...(cloud.deletedSharedTasks || [])])].slice(-200)
+            };
+        }
+
+        /** Subida a nube: si local manda, no reinyectar cuentas/tx antiguas desde remoto. */
+        function nexusMergeP2PCollectionsForUpload(localState, cloudPayload) {
+            const local = localState || {};
+            const cloud = cloudPayload || {};
+            if (!nexusPreferLocalForSync()) return nexusMergeP2PCollectionsFromLocal(local, cloud);
+            const finalized = nexusFinalizeCoreForCloud({
+                accounts: local.accounts || [],
+                deletedAccounts: nexusMergeDeletedAccountTombstones(local.deletedAccounts || [], cloud.deletedAccounts || []),
+                deletedTxIds: nexusMergeDeletedTxIdList(local.deletedTxIds || [], cloud.deletedTxIds || [])
+            });
+            return {
+                tasks: [...(local.tasks || [])],
+                projects: [...(local.projects || [])],
+                taskVaults: [...(local.taskVaults || [])],
+                projectVaults: [...(local.projectVaults || [])],
+                accounts: finalized.accounts || [],
+                deletedAccounts: finalized.deletedAccounts || [],
+                deletedTxIds: finalized.deletedTxIds || [],
+                deletedSharedTxs: [...(local.deletedSharedTxs || [])].slice(-200),
+                deletedSharedTasks: [...(local.deletedSharedTasks || [])].slice(-200)
             };
         }
 
@@ -5605,26 +5692,22 @@
         }
 
         function nexusShouldKeepLocalCore(cloudData) {
-            nexusEnsureSyncMeta();
-            const localRev = state._nexusSync.localRevision || 0;
-            const cloudRev = (cloudData && cloudData._nexusSync && cloudData._nexusSync.revision) || cloudData?.revision || 0;
-            if (state._nexusSync.dirty && localRev >= cloudRev) return true;
-            const localAt = state._nexusSync.lastLocalSave || 0;
-            const cloudAt = (cloudData && cloudData._nexusSync && cloudData._nexusSync.updatedAt) || cloudData?.updatedAt || 0;
-            const cloudMs = typeof cloudAt === 'number' ? cloudAt : Date.parse(cloudAt) || 0;
-            return state._nexusSync.dirty && localAt > cloudMs;
+            return nexusPreferLocalForSync();
         }
 
         function nexusApplyCloudCoreDoc(cloudData) {
             if (!cloudData || typeof cloudData !== 'object') return;
+            if (window.__nexusCloudPullPausedUntil && Date.now() < window.__nexusCloudPullPausedUntil) return;
             nexusEnsureSyncMeta();
             const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
             const currentTx = state.tx || [];
             const payload = { ...cloudData };
             delete payload.tx;
-            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, payload);
-            if (nexusShouldKeepLocalCore(cloudData)) {
-                state = { ...state, ...mergedCollections };
+            const mergeCols = nexusPreferLocalForSync()
+                ? nexusMergeP2PCollectionsForUpload(state, payload)
+                : nexusMergeP2PCollectionsFromLocal(state, payload);
+            if (nexusPreferLocalForSync()) {
+                state = { ...state, ...mergeCols };
                 state.tx = currentTx;
                 mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: true });
                 state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
@@ -5632,9 +5715,9 @@
                 nexusApplyAccountTombstonesToState();
                 return;
             }
+            const mergedCollections = mergeCols;
             const cloudRev = cloudData._nexusSync?.revision || cloudData?.revision || 0;
-            const localRev = state._nexusSync?.localRevision || 0;
-            const preferLocal = state._nexusSync?.dirty && localRev >= cloudRev;
+            const preferLocal = nexusPreferLocalForSync();
             const scalarBase = preferLocal ? { ...payload, ...state } : { ...state, ...payload };
             state = { ...scalarBase, ...mergedCollections };
             state.tx = currentTx;
@@ -5648,21 +5731,24 @@
             const local = localCore || {};
             const remote = remoteData || {};
             delete remote.tx;
-            const mergedCollections = nexusMergeP2PCollectionsFromLocal(state, remote);
+            const mergedCollections = nexusMergeP2PCollectionsForUpload(state, remote);
             nexusEnsureSyncMeta();
-            const localRev = state._nexusSync?.localRevision || 0;
-            const remoteRev = remote._nexusSync?.revision || remote?.revision || 0;
-            const preferLocal = state._nexusSync?.dirty && localRev >= remoteRev;
+            const preferLocal = nexusPreferLocalForSync();
             const scalarBase = preferLocal ? { ...remote, ...local } : { ...local, ...remote };
             const out = { ...scalarBase, ...mergedCollections };
             delete out.tx;
-            return out;
+            return nexusFinalizeCoreForCloud(out);
         }
 
         function nexusBuildMergedTxPayloadForUpload(year, localTxList, remoteData) {
-            const remoteTx = nexusFilterPurgedTransactions((remoteData && remoteData.tx) ? remoteData.tx : []);
             const localTx = nexusFilterPurgedTransactions(localTxList || []);
-            const merged = nexusSortByChronology(nexusMergeEntityById(localTx, remoteTx));
+            let merged = localTx;
+            if (!nexusPreferLocalForSync()) {
+                const remoteTx = nexusFilterPurgedTransactions((remoteData && remoteData.tx) ? remoteData.tx : []);
+                merged = nexusSortByChronology(nexusMergeEntityById(localTx, remoteTx));
+            } else {
+                merged = nexusSortByChronology(localTx);
+            }
             const pushAt = Date.now();
             const pushRev = state._nexusSync?.localRevision || pushAt;
             return {
@@ -5681,9 +5767,7 @@
                 return;
             }
             const cloudSt = (cloudData && cloudData.settings) ? cloudData.settings : {};
-            const localRev = state._nexusSync?.localRevision || 0;
-            const cloudRev = cloudData?._nexusSync?.revision || 0;
-            const preferLocal = state._nexusSync?.dirty && localRev >= cloudRev;
+            const preferLocal = nexusPreferLocalForSync();
             if (preferLocal) {
                 state.settings = { ...cloudSt, ...prev };
             } else {
@@ -7436,10 +7520,16 @@
                             
                             if (change.doc.id === 'core') {
                                 coreTouched = true;
-                                nexusApplyCloudCoreDoc(data);
+                                if (nexusIsCloudPullRestricted()) {
+                                    nexusMergeCloudTombstonesOnly(data);
+                                } else {
+                                    nexusApplyCloudCoreDoc(data);
+                                }
                             } else if (change.doc.id.startsWith('tx_')) {
-                                const year = change.doc.id.split('_')[1];
-                                incomingTxByYear[year] = data.tx || [];
+                                if (!nexusIsCloudPullRestricted()) {
+                                    const year = change.doc.id.split('_')[1];
+                                    incomingTxByYear[year] = data.tx || [];
+                                }
                             }
                         });
 
@@ -7447,7 +7537,7 @@
 
                         if (hasChanges) {
                             const localTxByYear = nexusGroupTxByYear(state.tx || []);
-                            if (Object.keys(incomingTxByYear).length > 0) {
+                            if (Object.keys(incomingTxByYear).length > 0 && !nexusIsCloudPullRestricted()) {
                                 state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
                             }
 
@@ -7531,7 +7621,8 @@
                         const coreSnap = await getDoc(coreRef);
                         if (coreSnap.exists()) remoteCore = coreSnap.data();
                     } catch (e) { console.warn('[NEXUS] lectura core previa a fusión', e); }
-                    const mergedCore = nexusBuildMergedCoreForUpload(cleanCore, remoteCore);
+                    let mergedCore = nexusBuildMergedCoreForUpload(cleanCore, remoteCore);
+                    mergedCore = nexusFinalizeCoreForCloud(mergedCore);
                     mergedCore._nexusSync = { revision: pushRev, updatedAt: pushAt, source: 'client' };
                     mergedCore.updatedAt = pushAt;
 
@@ -7706,7 +7797,8 @@
                     if (writesCount > 0) {
                         await batch.commit();
                         nexusEnsureSyncMeta();
-                        state._nexusSync.dirty = false;
+                        const keepLocalLock = !!(state._nexusSync.forceLocalWinUntil && Date.now() < state._nexusSync.forceLocalWinUntil);
+                        if (!keepLocalLock) state._nexusSync.dirty = false;
                         state._nexusSync.lastPushedRevision = pushRev;
                         state._nexusSync.lastCloudPush = pushAt;
                         state._nexusSync.lastCloudRevision = pushRev;
@@ -9312,10 +9404,32 @@
         function installNexusNativeNavigation() {
             if (window.__nexusNavInstalled) return;
             window.__nexusNavInstalled = true;
+            const base = location.pathname + location.search;
             try {
-                const base = location.pathname + location.search;
-                history.replaceState({ nexusStatic: true }, '', base);
+                history.replaceState({ nexusLock: 1 }, '', base);
             } catch (e) { /* noop */ }
+            window.addEventListener('popstate', function() {
+                try { history.pushState({ nexusLock: 1 }, '', base); } catch (e) { /* noop */ }
+            });
+            if (!window.__nexusSwipeLockInstalled) {
+                window.__nexusSwipeLockInstalled = true;
+                let _nxSx = 0, _nxSy = 0;
+                document.addEventListener('touchstart', function(e) {
+                    if (e.touches.length !== 1) return;
+                    _nxSx = e.touches[0].clientX;
+                    _nxSy = e.touches[0].clientY;
+                }, { passive: true });
+                document.addEventListener('touchmove', function(e) {
+                    if (e.touches.length !== 1) return;
+                    const dx = e.touches[0].clientX - _nxSx;
+                    const dy = e.touches[0].clientY - _nxSy;
+                    const allowH = e.target && e.target.closest && e.target.closest('[data-nexus-hscroll], .overflow-x-auto, table, .cal-grid');
+                    if (allowH && Math.abs(dx) > Math.abs(dy)) return;
+                    if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+            }
         }
 
         function refreshActiveTabView() {
@@ -11073,10 +11187,11 @@
                 delete lastCloudSyncHash['shared_' + acc.remoteId];
             }
 
-            if (acc.isShared && typeof attachP2PListener === 'function') {
+            if (acc.remoteId && typeof attachP2PListener === 'function') {
                 setTimeout(() => attachP2PListener(), 50);
             }
 
+            nexusApplyAccountTombstonesToState();
             saveState();
             nexusForceCloudPushNow();
             updateDashboard();
@@ -11104,6 +11219,7 @@
             nexusRecordAccountDeletion(acc, 'unlink', purgedTxIds);
             if (acc.remoteId) delete lastCloudSyncHash['shared_' + acc.remoteId];
             if (typeof attachP2PListener === 'function') setTimeout(() => attachP2PListener(), 50);
+            nexusApplyAccountTombstonesToState();
             saveState();
             nexusForceCloudPushNow();
             updateDashboard();
@@ -16754,8 +16870,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             saveState(); updateCatManageView(); updateDbCatFilter();
         }
         const NEXUS_BACKUP_SECTIONS = [
-            { id: 'tx', label: 'Transacciones', keys: ['tx', 'deletedSharedTxs'] },
-            { id: 'accounts', label: 'Cuentas / bóvedas', keys: ['accounts'] },
+            { id: 'tx', label: 'Transacciones', keys: ['tx', 'deletedSharedTxs', 'deletedTxIds'] },
+            { id: 'accounts', label: 'Cuentas / bóvedas', keys: ['accounts', 'deletedAccounts'] },
             { id: 'loans', label: 'Deudas y préstamos', keys: ['loans'] },
             { id: 'categories', label: 'Categorías', keys: ['categories', 'catParents'] },
             { id: 'tasks', label: 'Tareas y bóvedas P2P', keys: ['tasks', 'taskVaults', 'deletedSharedTasks'] },
@@ -16964,7 +17080,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const c = JSON.parse(JSON.stringify(core || {}));
             delete c.tx;
             delete c._nexusBackup;
-            return c;
+            return nexusFinalizeCoreForCloud(c);
         }
 
         /** Copias en Firebase: documento nuevo por copia (nunca sobrescribe backup_* anteriores). */
@@ -17247,13 +17363,22 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (!state.tx) state.tx = [];
                 if (!state.loans) state.loans = [];
 
+                nexusMarkForceLocalWin(300000);
+                nexusTouchLocalState('backup-import');
+                state._nexusSync.localRevision = Date.now();
+                nexusApplyAccountTombstonesToState();
+
                 await forcePersistVaultState();
                 nexusRefreshModulesAfterBackupImport(selection);
+
+                window.__nexusCloudPullPausedUntil = Date.now() + 300000;
+                lastCloudSyncHash = {};
+                if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
+
                 if (typeof triggerCloudSync === 'function') {
-                    lastCloudSyncHash = {};
-                    if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
                     triggerCloudSync();
                 }
+
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
                 const importedLabels = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.label).join(', ');
                 alert('✅ Copia importada (' + importedLabels + ').');
