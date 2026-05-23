@@ -3491,7 +3491,7 @@
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, autoBackupTimeout = null, LIVE_RATES = EXCHANGE_RATES;
         let saveStateDebounceTimer = null, cloudUiRefreshTimer = null, p2pAttachDebounceTimer = null, p2pListenersSessionReady = false;
-        let sharedTaskFlushTimers = {}, sharedProjectFlushTimers = {};
+        let sharedTaskFlushTimers = {}, sharedProjectFlushTimers = {}, sharedAccountFlushTimers = {};
         let p2pTaskRenderTimeout = null, p2pProjectRenderTimeout = null;
         let liveRatesLastFetch = 0; 
         let isRootAdminUnlocked = false;
@@ -7941,7 +7941,11 @@
             } 
             
             saveState();
-            if (newAcc.isShared && typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
+            if (newAcc.isShared) {
+                if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
+                if (typeof nexusScheduleFlushSharedAccountVault === 'function') nexusScheduleFlushSharedAccountVault(newAcc, 0);
+                if (typeof attachP2PListener === 'function') attachP2PListener();
+            }
             updateDashboard(); renderAccountsTab(); closeAccountModal(); 
         }
 
@@ -11893,10 +11897,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             const token = tokenInput.value.trim();
             if(!token.startsWith('nx_')) return alert("Token inválido.");
             try {
-                const b64 = token.substring(3);
-                const shareData = JSON.parse(atob(b64));
+                const shareData = nexusDecodeP2PToken(token, 'nx_');
                 if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
-                
                 if (nexusIsAccountTombstoned(null, shareData.vaultId)) {
                     return alert("Esta bóveda fue desvinculada en este dispositivo. Si el creador te comparte de nuevo, pide un token nuevo.");
                 }
@@ -11911,20 +11913,22 @@ ${JSON.stringify(dataToAnalyze)}`;
 
                 const newAcc = { 
                     id: 'acc_' + Date.now(), 
-                    name: '👥 ' + shareData.name, 
-                    currency: shareData.currency, 
+                    name: '👥 ' + (shareData.name || 'Bóveda compartida'), 
+                    currency: shareData.currency || (state.settings && state.settings.baseCurrency) || 'COP', 
                     balance: 0, 
                     type: 'liquid', 
                     isShared: true, 
                     remoteId: shareData.vaultId,
+                    owner: shareData.owner || null,
                     syncedOnce: false
                 };
                 state.accounts.push(newAcc);
                 
                 saveState();
                 if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
+                if (typeof attachP2PListener === 'function') attachP2PListener();
                 
-                alert("✅ Bóveda P2P Vinculada.\n\nDescargando historial de transacciones. Los datos aparecerán en unos segundos.");
+                alert("✅ Bóveda P2P vinculada. Sincronizando…");
                 closeLinkSharedModal();
                 updateDashboard();
                 if (state.activeTab === 'accounts') renderAccountsTab();
@@ -11935,14 +11939,26 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
         }
 
-        function generateShareTokenForAccount(accId) {
+        async function generateShareTokenForAccount(accId) {
             const acc = state.accounts.find(a => a.id === accId);
-            if(!acc) return;
-            const targetRemoteId = acc.remoteId || acc.id; 
-            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency };
-            const token = 'nx_' + btoa(JSON.stringify(payload));
-            
-            secureCopy(token, "✅ Token P2P Seguro copiado:\n\n" + token.substring(0, 20) + "...\n\nPégalo en WhatsApp o envíalo a tu socio.");
+            if(!acc || !acc.isShared) return alert('Solo las cuentas con alcance Compartida (P2P) generan token nx_.');
+            const targetRemoteId = acc.remoteId || acc.id;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
+            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda en la nube.');
+            if (typeof nexusFlushSharedAccountVault === 'function') {
+                await nexusFlushSharedAccountVault(acc);
+            }
+            const ownerEmail = normalizeMemberEmail(acc.ownerEmail || acc.owner || currentUser || (fbUser && fbUser.email) || '');
+            const payload = { vaultId: targetRemoteId, name: acc.name.replace('👥 ', ''), currency: acc.currency, owner: ownerEmail };
+            const token = nexusEncodeP2PToken('nx_', payload);
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(token);
+                } else {
+                    const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove();
+                }
+            } catch (e) { console.warn('[NEXUS] copy nx token', e); }
+            alert("✅ Token nx_... copiado.\n\nCompártelo para que otros se unan a «" + payload.name + "».\n\nEl invitado debe entrar con Google (mismo flujo que en Tareas).");
         }
         // --- FIN MOTOR P2P ---
         function copyPSECard(text) {
@@ -14592,7 +14608,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const token = $id('task-vault-token').value.trim();
             if(!token.startsWith('nxt_')) return alert("Token inválido.");
             try {
-                const data = JSON.parse(atob(token.substring(4)));
+                const data = nexusDecodeP2PToken(token, 'nxt_');
                 if(!state.taskVaults) state.taskVaults = [];
                 if(state.taskVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
@@ -14611,8 +14627,11 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
         async function generateTaskVaultToken(id) {
             const v = state.taskVaults.find(x => x.id === id); if(!v) return;
-            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner };
-            const token = 'nxt_' + btoa(JSON.stringify(payload));
+            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
+            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda.');
+            if (typeof nexusFlushSharedTaskVault === 'function') await nexusFlushSharedTaskVault(v);
+            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner || normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '') };
+            const token = nexusEncodeP2PToken('nxt_', payload);
             try {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     await navigator.clipboard.writeText(token);
@@ -14657,7 +14676,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const token = $id('project-vault-token').value.trim();
             if(!token.startsWith('nxp_')) return alert("Token inválido (debe empezar por nxp_).");
             try {
-                const data = JSON.parse(atob(token.substring(4)));
+                const data = nexusDecodeP2PToken(token, 'nxp_');
                 if(!state.projectVaults) state.projectVaults = [];
                 if(state.projectVaults.some(v => v.remoteId === data.vaultId)) return alert("Ya estás vinculado a esta bóveda.");
                 if (typeof ensureAuthIdentityLinked === 'function') await ensureAuthIdentityLinked();
@@ -14669,14 +14688,18 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 $id('project-vault-token').value = '';
                 renderProjectVaultsList();
                 populateProjectVaultSelect();
+                if (typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
                 alert("✅ Bóveda de proyectos vinculada. Sincronizando...");
             } catch(e) { alert("Error al leer token."); }
         }
 
         async function generateProjectVaultToken(id) {
             const v = state.projectVaults.find(x => x.id === id); if(!v) return;
-            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner };
-            const token = 'nxp_' + btoa(JSON.stringify(payload));
+            const authPrep = await nexusEnsureGoogleAuthForP2P(true);
+            if (!authPrep.ok) return alert(authPrep.message || 'Necesitas sesión Google para publicar la bóveda.');
+            if (typeof nexusFlushSharedProjectVault === 'function') await nexusFlushSharedProjectVault(v);
+            const payload = { vaultId: v.remoteId, name: v.name.replace('👥 ', ''), owner: v.owner || normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '') };
+            const token = nexusEncodeP2PToken('nxp_', payload);
             try {
                 if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(token);
                 else { const temp = document.createElement("textarea"); temp.value = token; document.body.appendChild(temp); temp.select(); document.execCommand("copy"); temp.remove(); }
@@ -14791,8 +14814,9 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         /** Instalación nueva / caché vacía: priorizar descarga completa desde Firebase (una sola vez). */
         function nexusNeedsCloudBootstrap() {
             nexusEnsureSyncMeta();
-            if (state._nexusSync.awaitingCloudBootstrap) return true;
             if (state._nexusSync.bootstrapCompleted) return false;
+            if (state._nexusSync.awaitingCloudBootstrap && !nexusIsVaultLocallyEmpty()) return false;
+            if (state._nexusSync.awaitingCloudBootstrap) return true;
             return nexusIsVaultLocallyEmpty();
         }
 
@@ -14853,7 +14877,8 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         function nexusShouldBlockEmptyCloudPush() {
             if (!state) return true;
             nexusEnsureSyncMeta();
-            if (nexusNeedsCloudBootstrap()) return true;
+            // Solo bloquear bootstrap si la bóveda local sigue vacía (evita atascar P2P y users/nexus_data)
+            if (nexusNeedsCloudBootstrap() && nexusIsVaultLocallyEmpty()) return true;
             if (nexusIsVaultLocallyEmpty() && !state._nexusSync.dirty) return true;
             if (nexusIsVaultLocallyEmpty() && !(state._nexusSync.localRevision > 0)) return true;
             return false;
@@ -14912,7 +14937,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         function nexusShouldDeferCloudPush() {
             if (!fbUser || !window.db || !currentUser) return true;
             if (!sessionUnlocked) return true;
-            return nexusNeedsCloudBootstrap();
+            return nexusNeedsCloudBootstrap() && nexusIsVaultLocallyEmpty();
         }
 
         /** Carril directo: datos esenciales (no pasan por cola de bóveda). */
@@ -15851,10 +15876,92 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             return nexusFindSharedProjectVault(p.sharedVaultId);
         }
 
+        function nexusFindSharedAccount(accOrRId) {
+            if (!accOrRId) return null;
+            if (typeof accOrRId === 'object') return accOrRId;
+            return (state.accounts || []).find(a => a.isShared && (a.remoteId === accOrRId || a.id === accOrRId)) || null;
+        }
+
+        /** Sube de inmediato una bóveda P2P de cuentas (nx_) — mismo patrón que tareas/proyectos. */
+        async function nexusFlushSharedAccountVault(acc) {
+            const a = nexusFindSharedAccount(acc);
+            if (!a || !a.remoteId) return;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+            if (!authPrep.ok) {
+                console.warn('[NEXUS P2P] flush cuenta: sin Google', authPrep.code);
+                return;
+            }
+            if (!window.db || !sessionUnlocked) return;
+            if (typeof nexusStampSharedEntitiesForSync === 'function') nexusStampSharedEntitiesForSync();
+            try {
+                const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', a.remoteId);
+                let remoteData = {};
+                const snap = await getDoc(sharedRef);
+                if (snap.exists()) remoteData = snap.data();
+
+                const txsMap = nexusBuildMergedTxsMapForUpload(a, remoteData);
+                const remoteDel = Array.isArray(remoteData.deletedTxs) ? remoteData.deletedTxs : [];
+                let deletedTxs = [...new Set([...(state.deletedSharedTxs || []), ...remoteDel])];
+                if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
+
+                const sharedPayload = {
+                    name: (a.name || '').replace('👥 ', ''),
+                    ...buildSharedAclFields(false),
+                    balance: a.balance,
+                    currency: a.currency,
+                    txsMap: txsMap,
+                    updatedAt: new Date().toISOString(),
+                    joinEnabled: true
+                };
+                if (deletedTxs.length > 0) sharedPayload.deletedTxs = arrayUnion(...deletedTxs);
+
+                const sharedCacheKey = 'shared_' + a.remoteId;
+                const isNewSharedVault = !snap.exists() || !lastCloudSyncHash[sharedCacheKey];
+                if (isNewSharedVault) {
+                    Object.assign(sharedPayload, buildSharedAclFields(true));
+                } else {
+                    const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
+                    const ownerUid = (fbUser && fbUser.uid) ? fbUser.uid : '';
+                    if (ownerEmail) sharedPayload.owner = ownerEmail;
+                    if (ownerUid) sharedPayload.ownerUid = ownerUid;
+                    if (ownerEmail) sharedPayload.members = arrayUnion(ownerEmail);
+                    if (ownerUid) sharedPayload.memberUids = arrayUnion(ownerUid);
+                }
+
+                const sharedStr = JSON.stringify({ b: a.balance, sig: nexusSharedPayloadSignature(Object.values(txsMap)), d: deletedTxs });
+                if (!isNewSharedVault && lastCloudSyncHash[sharedCacheKey] === sharedStr) return;
+
+                await setDoc(sharedRef, sharedPayload, { merge: true });
+                lastCloudSyncHash[sharedCacheKey] = sharedStr;
+                a.syncedOnce = true;
+            } catch (e) {
+                console.warn('[NEXUS P2P] flush cuenta compartida', e);
+                if (/permission|insufficient/i.test(String(e?.message || e?.code || ''))) {
+                    window.__nexusLastP2PError = 'permission_denied';
+                }
+            }
+        }
+
+        function nexusScheduleFlushSharedAccountVault(acc, delayMs) {
+            const a = nexusFindSharedAccount(acc);
+            if (!a || !a.remoteId) return;
+            const rId = a.remoteId;
+            clearTimeout(sharedAccountFlushTimers[rId]);
+            sharedAccountFlushTimers[rId] = setTimeout(() => {
+                nexusFlushSharedAccountVault(a).catch(e => console.warn('[NEXUS] flush account vault', e));
+            }, delayMs == null ? 60 : delayMs);
+        }
+
         async function nexusFlushSharedTaskVault(vault) {
-            if (!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
             const v = nexusFindSharedTaskVault(vault);
             if (!v || !v.remoteId) return;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+            if (!authPrep.ok) {
+                console.warn('[NEXUS P2P] flush tareas: sin Google', authPrep.code);
+                return;
+            }
+            if (!sessionUnlocked || !window.db || !currentUser) return;
             if (typeof nexusStampSharedEntitiesForSync === 'function') nexusStampSharedEntitiesForSync();
             try {
                 const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -15883,7 +15990,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 };
                 if (dTasks.length > 0) sharedPayload.deletedTasks = arrayUnion(...dTasks);
                 const taskCacheKey = 'stask_' + v.remoteId;
-                const isNewTaskVault = !lastCloudSyncHash[taskCacheKey];
+                const isNewTaskVault = !snap.exists() || !lastCloudSyncHash[taskCacheKey];
                 if (isNewTaskVault) Object.assign(sharedPayload, buildSharedAclFields(true));
                 else {
                     const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
@@ -15903,9 +16010,14 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         async function nexusFlushSharedProjectVault(vault) {
-            if (!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
             const v = nexusFindSharedProjectVault(vault);
             if (!v || !v.remoteId) return;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+            if (!authPrep.ok) {
+                console.warn('[NEXUS P2P] flush proyectos: sin Google', authPrep.code);
+                return;
+            }
+            if (!sessionUnlocked || !window.db || !currentUser) return;
             if (typeof nexusStampSharedEntitiesForSync === 'function') nexusStampSharedEntitiesForSync();
             try {
                 const { doc, getDoc, setDoc, arrayUnion } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
@@ -15931,7 +16043,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     joinEnabled: true
                 };
                 const projCacheKey = 'sproj_' + v.remoteId;
-                const isNewProjVault = !lastCloudSyncHash[projCacheKey];
+                const isNewProjVault = !snap.exists() || !lastCloudSyncHash[projCacheKey];
                 if (isNewProjVault) Object.assign(sharedPayload, buildSharedAclFields(true));
                 else {
                     const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email));
@@ -15971,6 +16083,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         function nexusFlushAllSharedVaultsImmediate() {
+            (state.accounts || []).filter(a => a.isShared && a.remoteId).forEach(a => nexusScheduleFlushSharedAccountVault(a, 0));
             (state.taskVaults || []).filter(v => v.isShared && v.remoteId).forEach(v => nexusScheduleFlushSharedTaskVault(v, 0));
             (state.projectVaults || []).filter(v => v.isShared && v.remoteId).forEach(v => nexusScheduleFlushSharedProjectVault(v, 0));
         }
@@ -17066,6 +17179,30 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             return (email || '').trim().toLowerCase();
         }
 
+        /** Decodifica tokens P2P (nx_ / nxt_ / nxp_) con soporte UTF-8 y base64 URL-safe. */
+        function nexusDecodeP2PToken(token, prefix) {
+            const raw = String(token || '').trim();
+            if (!raw.startsWith(prefix)) throw new Error('bad_prefix');
+            let b64 = raw.slice(prefix.length).replace(/\s+/g, '');
+            const variants = [b64, b64.replace(/-/g, '+').replace(/_/g, '/')];
+            for (const attempt of variants) {
+                let padded = attempt;
+                while (padded.length % 4) padded += '=';
+                try {
+                    const json = decodeURIComponent(escape(atob(padded)));
+                    const data = JSON.parse(json);
+                    if (data && !data.vaultId && data.vault_id) data.vaultId = data.vault_id;
+                    if (data && data.vaultId) return data;
+                } catch (e) { /* siguiente variante */ }
+            }
+            throw new Error('decode_failed');
+        }
+
+        function nexusEncodeP2PToken(prefix, payload) {
+            const json = JSON.stringify(payload);
+            return prefix + btoa(unescape(encodeURIComponent(json)));
+        }
+
         function nexusAcceptsGoogleFirebaseUser(user) {
             return !!(user && !user.isAnonymous && user.email && String(user.email).includes('@'));
         }
@@ -17207,10 +17344,17 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 return false;
             }
 
-            const memberEmail = normalizeMemberEmail(currentUser || authPrep.user.email);
+            const googleEmail = normalizeMemberEmail(authPrep.user.email);
+            const vaultEmail = normalizeMemberEmail(currentUser || (userProfile && userProfile.email) || '');
+            const memberEmail = googleEmail || vaultEmail;
             const memberUid = authPrep.user.uid;
             if (!memberEmail || !memberUid) {
                 window.__nexusLastP2PError = 'no_email';
+                return false;
+            }
+            if (vaultEmail && googleEmail && vaultEmail !== googleEmail) {
+                window.__nexusLastP2PError = 'email_mismatch';
+                console.warn('[NEXUS P2P] Bóveda local', vaultEmail, '≠ Google', googleEmail);
                 return false;
             }
             try {
@@ -17283,6 +17427,9 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const code = window.__nexusLastP2PError || '';
             if (code === 'google_required' || code === 'google_pending' || code === 'no_email') {
                 return 'Firebase no tiene tu sesión Google.\n\nEntra con «Continuar con Google» (el PIN solo abre la bóveda en este dispositivo).';
+            }
+            if (code === 'email_mismatch') {
+                return 'El correo de Google no coincide con tu bóveda local.\n\nCierra sesión y entra con el mismo Gmail de la bóveda, o crea una bóveda con ese correo.';
             }
             if (code === 'permission_denied') {
                 return 'Firestore rechazó el acceso.\n\n1) Publica el archivo firestore.rules en Firebase Console.\n2) Entra con Google (mismo correo).\n3) Pide al dueño que abra la app y sincronice la cuenta P2P.';
@@ -17937,14 +18084,17 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     for (const sharedAcc of (state.accounts || []).filter(a => a.isShared && a.remoteId)) {
                         const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', sharedAcc.remoteId);
                         let remoteData = {};
+                        let remoteExists = false;
                         try {
                             const snap = await getDoc(sharedRef);
-                            if (snap.exists()) remoteData = snap.data();
+                            if (snap.exists()) { remoteData = snap.data(); remoteExists = true; }
                         } catch (e) { console.warn('[NEXUS P2P] lectura previa a fusión', e); }
 
                         const txsMap = nexusBuildMergedTxsMapForUpload(sharedAcc, remoteData);
                         const mapCount = Object.keys(txsMap).length;
-                        if (mapCount === 0 && !sharedAcc.syncedOnce) continue;
+                        const sharedCacheKeyPre = 'shared_' + sharedAcc.remoteId;
+                        const isNewSharedVaultPre = !lastCloudSyncHash[sharedCacheKeyPre];
+                        if (mapCount === 0 && remoteExists && !isNewSharedVaultPre) continue;
 
                         const remoteDel = Array.isArray(remoteData.deletedTxs) ? remoteData.deletedTxs : [];
                         let deletedTxs = [...new Set([...(state.deletedSharedTxs || []), ...remoteDel])];
@@ -17963,7 +18113,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
                         const sharedStr = JSON.stringify({ b: sharedAcc.balance, sig: nexusSharedPayloadSignature(Object.values(txsMap)), d: deletedTxs });
                         const sharedCacheKey = 'shared_' + sharedAcc.remoteId;
-                        const isNewSharedVault = !lastCloudSyncHash[sharedCacheKey];
+                        const isNewSharedVault = !remoteExists || !lastCloudSyncHash[sharedCacheKey];
                         if (isNewSharedVault) {
                             Object.assign(sharedPayload, buildSharedAclFields(true));
                         } else {
