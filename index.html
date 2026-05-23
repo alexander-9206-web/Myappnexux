@@ -40,7 +40,8 @@
         .filter-chip { padding: 6px 14px; border-radius: 18px; font-size: 9px; font-weight: 900; text-transform: uppercase; background: var(--card-bg); border: 1px solid rgba(0,0,0,0.1); color: #64748b; transition: all 0.2s; white-space: nowrap;} .filter-chip.active { background: var(--app-text); color: var(--app-bg); border-color: var(--app-text); } .is-red-mode .filter-chip.active { background: var(--val-exp); color: #fff; border-color: var(--val-exp); }
         .safe-top { padding-top: env(safe-area-inset-top); } .hide-scrollbar::-webkit-scrollbar { display: none; }
         .numpad-key { background: #ffffff; border-radius: 14px; font-size: 24px; font-weight: 600; color: #0f172a; display: flex; align-items: center; justify-content: center; height: 60px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: background-color 0.05s; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; cursor: pointer; outline: none; } .numpad-key:active { background: #e2e8f0; }
-        .numpad-modal-content { animation: slideUpNumpad 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); touch-action: none; overscroll-behavior: none; } .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .numpad-modal-content { animation: none !important; touch-action: none; overscroll-behavior: none; }
+        .animate-slideUp { animation: none !important; transform: none !important; }
         .pb-safe { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
         input[readonly] { caret-color: transparent; -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
         #numpad-modal { touch-action: none; overscroll-behavior: none; }
@@ -74,21 +75,47 @@
             font-size: clamp(0.65rem, 3.2vw, 1.75rem);
         }
 
-        /* APEX FIX: Ajuste dinámico para Teclado Nativo iOS (Fricción Cero en formularios) */
+        /* APEX FIX: Formularios y modales ajustados a móvil (sin recorte) */
+        .fixed.inset-0.flex.items-end > .theme-card,
+        .fixed.inset-0.flex.items-center > .theme-card,
         .fixed.inset-0.backdrop-blur-sm > div,
         .fixed.inset-0.backdrop-blur-md > div,
+        .fixed.inset-0[class*="backdrop"] > .theme-card,
         #login-screen > div,
-        #session-lock-screen > div {
-            max-height: 85dvh !important;
+        #session-lock-screen > div,
+        #tx-modal > .theme-card,
+        #new-account-modal > .theme-card {
+            width: 100%;
+            max-width: min(100%, 42rem);
+            max-height: min(94dvh, calc(100dvh - env(safe-area-inset-top) - 6px)) !important;
             overflow-y: auto;
             overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: env(safe-area-inset-bottom);
+            padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        }
+        @media (max-width: 639px) {
+            .fixed.inset-0.flex.items-end > .theme-card,
+            .fixed.inset-0[class*="backdrop"] > .theme-card,
+            #tx-modal .theme-card,
+            #new-account-modal .theme-card {
+                padding: 1rem !important;
+                border-radius: 1.25rem 1.25rem 0 0 !important;
+                max-height: min(94dvh, calc(100dvh - env(safe-area-inset-top) - 4px)) !important;
+            }
+            #tx-modal #f-amount { font-size: 1.5rem !important; line-height: 1.2 !important; }
+            #tx-modal .space-y-6 > * + * { margin-top: 0.75rem !important; }
         }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
+        .fixed.inset-0.flex.items-end > .theme-card::-webkit-scrollbar,
         #login-screen > div::-webkit-scrollbar,
-        #session-lock-screen > div::-webkit-scrollbar { 
-            display: none; 
+        #session-lock-screen > div::-webkit-scrollbar {
+            display: none;
         }
+        /* Sin transiciones slide/fade en modales: solo navegación por botones */
+        .fixed.inset-0[id$="-modal"].transition-opacity,
+        .fixed.inset-0[id$="-modal"] .transition-opacity { transition: none !important; }
 
         /* Bloqueo: sin autenticación no se muestra el dashboard (evita arranque directo con caché vieja) */
         html.nexus-auth-pending body > header,
@@ -5020,8 +5047,25 @@
             return map;
         }
 
-        function nexusIsAccountTombstoned(accountId) {
-            return nexusGetDeletedAccountMap().has(accountId);
+        function nexusIsAccountTombstoned(accountId, remoteId) {
+            const tomb = nexusGetDeletedAccountMap();
+            if (accountId && tomb.has(accountId)) return true;
+            if (remoteId) {
+                for (const t of tomb.values()) {
+                    if (t.remoteId && t.remoteId === remoteId) return true;
+                }
+            }
+            return false;
+        }
+
+        function nexusHideModalInstant(el) {
+            if (!el) return;
+            el.classList.add('hidden');
+            el.classList.remove('opacity-0', 'transition-opacity', 'duration-200', 'duration-300');
+        }
+        function nexusShowModalInstant(el) {
+            if (!el) return;
+            el.classList.remove('hidden', 'opacity-0', 'transition-opacity', 'duration-200', 'duration-300');
         }
 
         function nexusGetPurgedTxIdSet() {
@@ -5073,7 +5117,16 @@
             nexusEnsureDeletedAccountsRegistry();
             const tomb = nexusGetDeletedAccountMap();
             if (!tomb.size) return;
-            state.accounts = (state.accounts || []).filter(a => a && a.id && !tomb.has(a.id));
+            const blockedRemoteIds = new Set();
+            for (const t of tomb.values()) {
+                if (t.remoteId) blockedRemoteIds.add(t.remoteId);
+            }
+            state.accounts = (state.accounts || []).filter(a => {
+                if (!a || !a.id) return false;
+                if (tomb.has(a.id)) return false;
+                if (a.remoteId && blockedRemoteIds.has(a.remoteId)) return false;
+                return true;
+            });
             state.tx = nexusFilterPurgedTransactions(state.tx || []);
             (state.tx || []).forEach(t => {
                 if (!t || !t.auditArchived) return;
@@ -5098,7 +5151,7 @@
                 remoteId: acc.remoteId || null,
                 accountName: acc.name || '',
                 currency: acc.currency || null,
-                mode: mode === 'purge' ? 'purge' : 'audit',
+                mode: mode === 'purge' ? 'purge' : (mode === 'unlink' ? 'unlink' : 'audit'),
                 deletedAt: Date.now(),
                 deletedBy: email,
                 purgedTxIds: mode === 'purge' ? (purgedTxIds || []) : []
@@ -5131,13 +5184,23 @@
 
         function nexusMergeAccountsRegistry(localArr, remoteArr) {
             const tombstones = nexusGetDeletedAccountMap();
+            const blockedRemoteIds = new Set();
+            for (const t of tombstones.values()) {
+                if (t.remoteId) blockedRemoteIds.add(t.remoteId);
+            }
+            const accountBlocked = (a) => {
+                if (!a || !a.id) return true;
+                if (tombstones.has(a.id)) return true;
+                if (a.remoteId && blockedRemoteIds.has(a.remoteId)) return true;
+                return false;
+            };
             const map = new Map();
             (remoteArr || []).forEach(a => {
-                if (!a || !a.id || tombstones.has(a.id)) return;
+                if (accountBlocked(a)) return;
                 map.set(a.id, { ...a });
             });
             (localArr || []).forEach(a => {
-                if (!a || !a.id || tombstones.has(a.id)) return;
+                if (accountBlocked(a)) return;
                 const ex = map.get(a.id);
                 if (!ex) { map.set(a.id, { ...a }); return; }
                 const winner = nexusMergeEntityById([ex], [a])[0] || a;
@@ -9750,7 +9813,7 @@
             if (numpadTargetId) { numpadEvaluate(); const el = $id(numpadTargetId); if(el) { let v = parseFloat(numpadCurrentValue); if(isNaN(v)) v = 0; el.dataset.raw = numpadCurrentValue !== "" ? v.toString() : ""; if (numpadCurrentValue === "") el.value = ""; else el.value = numpadFormatType === 'currency' ? fmt(v) : new Intl.NumberFormat('es-CO').format(v); el.dispatchEvent(new Event('change', { bubbles: true })); } } 
             closeNumpad(); if(navigator.vibrate) navigator.vibrate(50); 
         }
-        function closeNumpad() { const modal = $id('numpad-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); numpadTargetId = null; }, 300); }
+        function closeNumpad() { const modal = $id('numpad-modal'); if(!modal) return; nexusHideModalInstant(modal); numpadTargetId = null; }
         function updateDashboard() {
             const bC = state.settings.baseCurrency || 'COP'; let totAssets = 0; let totLiab = 0;
             let nwByCurrency = {};
@@ -10236,6 +10299,7 @@
 
         // TABS
         function renderAccountsTab() {
+            nexusApplyAccountTombstonesToState();
             const sumContainer = $id('acc-hub-summary'); const listContainer = $id('acc-hub-list'); if(!sumContainer || !listContainer) return;
             
             let totalAssets = 0, totalLiabilities = 0; 
@@ -10538,7 +10602,7 @@
         
         // APEX FIX: Restauración de funciones del modal de Historial de Cuenta
         function openAccountHistory(id) { currentHistAccId = id; const acc = state.accounts.find(a => a.id === id); if(!acc) return; const mod = $id('account-history-modal'); if(mod) mod.classList.remove('hidden'); $id('hist-acc-name').innerText = acc.name; $id('hist-acc-balance').innerText = fmt(acc.balance, acc.currency); setHistFilter('all'); }
-        function closeAccountHistory() { const mod = $id('account-history-modal'); if(mod) { mod.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); currentHistAccId = null; }, 300); } }
+        function closeAccountHistory() { nexusHideModalInstant($id('account-history-modal')); currentHistAccId = null; }
         function setHistFilter(period) { currentHistPeriod = period; $qAll('#account-history-modal .filter-chip').forEach(b => b.classList.remove('active')); const btn = $id('hf-' + period); if(btn) btn.classList.add('active'); renderHistAccList(); }
         function renderHistAccList() {
             const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return; const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
@@ -10627,12 +10691,17 @@
 
         function openAccountModal(editId) {
             const mod = $id('new-account-modal'); if(!mod) return;
-            mod.classList.remove('hidden');
             if (editId) {
                 const acc = (state.accounts || []).find(a => a.id === editId);
-                if (!acc) return alert('Cuenta no encontrada.');
+                if (!acc || nexusIsAccountTombstoned(editId, acc.remoteId)) {
+                    nexusHideModalInstant(mod);
+                    renderAccountsTab();
+                    return;
+                }
+                nexusShowModalInstant(mod);
                 fillAccountFormFromAccount(acc);
             } else {
+                nexusShowModalInstant(mod);
                 resetAccountFormForNew();
             }
             setTimeout(() => { const nm = $id('fa-name'); if(nm) nm.focus(); }, 80);
@@ -10640,7 +10709,7 @@
 
         function editAccount(id) { openAccountModal(id); }
 
-        function closeAccountModal() { const modal = $id('new-account-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        function closeAccountModal() { nexusHideModalInstant($id('new-account-modal')); }
 
         function reconcileAccountToZero() {
             const id = $id('fa-id').value;
@@ -10714,15 +10783,7 @@
             mod.classList.remove('hidden');
         }
 
-        function closeReorderModal() {
-            const mod = $id('reorder-accounts-modal');
-            if(!mod) return;
-            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => {
-                mod.classList.add('hidden');
-                mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300');
-            }, 300);
-        }
+        function closeReorderModal() { nexusHideModalInstant($id('reorder-accounts-modal')); }
 
         function renderReorderList() {
             const list = $id('reorder-accounts-list');
@@ -10867,17 +10928,25 @@
 
         function executeSharedAccountUnlink(id) {
             const acc = state.accounts.find(a => a.id === id);
-            if (!acc) return;
+            if (!acc) {
+                closeAccountModal();
+                closeUIDeleteModal();
+                renderAccountsTab();
+                return;
+            }
+            const purgedTxIds = (state.tx || []).filter(t => t && (t.accId === id || t.toAccId === id)).map(t => t.id).filter(Boolean);
             state.accounts = state.accounts.filter(a => a.id !== id);
             state.tx = (state.tx || []).filter(t => t.accId !== id && t.toAccId !== id);
+            nexusRecordAccountDeletion(acc, 'unlink', purgedTxIds);
             if (acc.remoteId) delete lastCloudSyncHash['shared_' + acc.remoteId];
             if (typeof attachP2PListener === 'function') setTimeout(() => attachP2PListener(), 50);
-            nexusTouchLocalState('shared-unlink');
             saveState();
+            nexusForceCloudPushNow();
             updateDashboard();
             renderAccountsTab();
             closeAccountModal();
-            alert('✅ Bóveda compartida desvinculada de este dispositivo.');
+            closeUIDeleteModal();
+            alert('✅ Bóveda compartida desvinculada. No volverá a sincronizarse en este dispositivo.');
         }
         
         function toggleCreditFields() { 
@@ -11066,7 +11135,12 @@
         function showLoanDetail(id) {
             const loan = state.loans.find(l => l.id === id); if (!loan) return;
             const listView = $id('loans-view-list'); const detailView = $id('loans-view-detail');
-            if(listView) { listView.classList.add('opacity-0', 'transition-opacity', 'duration-200'); setTimeout(() => { listView.classList.add('hidden'); listView.classList.remove('opacity-0', 'transition-opacity', 'duration-200'); if(detailView) { detailView.classList.remove('hidden'); detailView.classList.add('animate-slideUp'); } const detTitle = $id('det-loan-title'); if(detTitle) detTitle.innerText = loan.name; }, 200); }
+            if (listView) listView.classList.add('hidden');
+            if (detailView) {
+                detailView.classList.remove('hidden', 'animate-slideUp', 'opacity-0', 'transition-opacity', 'duration-200');
+                const detTitle = $id('det-loan-title');
+                if (detTitle) detTitle.innerText = loan.name;
+            }
             let quota = 0; const r = loan.rate / 100; if(loan.rate === 0) quota = loan.total / loan.term; else quota = (loan.total * r) / (1 - Math.pow(1 + r, -loan.term));
             const totalInterest = (quota * loan.term) - loan.total; const detPara = $id('det-loan-paragraph'); if(detPara) detPara.innerHTML = `Financiación matemática de <span class="font-black">${fmt(loan.total, loan.currency)}</span> a ${loan.term} meses. Costo (intereses): <span class="font-black text-red-600">${fmt(totalInterest, loan.currency)}</span>.`;
             let balance = loan.total; let tbody = ''; let currentDate = new Date(loan.date); const paid = loan.paidQuotas || 0;
@@ -11077,7 +11151,11 @@
             } const detTab = $id('det-loan-table'); if(detTab) detTab.innerHTML = tbody;
         }
 
-        function hideLoanDetail() { const listView = $id('loans-view-list'); const detailView = $id('loans-view-detail'); if(detailView) { detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200'); setTimeout(() => { detailView.classList.add('hidden'); detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200'); if(listView) { listView.classList.remove('hidden'); listView.classList.add('animate-slideUp'); } }, 200); } }
+        function hideLoanDetail() {
+            const listView = $id('loans-view-list'); const detailView = $id('loans-view-detail');
+            if (detailView) detailView.classList.add('hidden');
+            if (listView) listView.classList.remove('hidden', 'animate-slideUp', 'opacity-0', 'transition-opacity', 'duration-200');
+        }
         
         function deleteLoan(e, id) { 
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
@@ -11112,7 +11190,7 @@
 
         function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); if($id('fl-id')) $id('fl-id').value = ''; $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
         
-        function closeLoanForm() { const modal = $id('loan-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        function closeLoanForm() { nexusHideModalInstant($id('loan-modal')); }
         
         function saveLoan(e) { 
             e.preventDefault(); const idEl = $id('fl-id'); const id = idEl ? idEl.value : ''; const name = $id('fl-name').value; const amount = parseFloat($id('fl-amount').dataset.raw) || 0; const rate = parseFloat($id('fl-rate').dataset.raw) || 0; const term = parseInt($id('fl-term').dataset.raw) || 0; const date = $id('fl-date').value; 
@@ -11126,13 +11204,13 @@
                 state.loans.push(newLoan); 
             } 
             saveState(); updateDashboard(); closeLoanForm(); 
-            const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) { lv.classList.remove('hidden'); lv.classList.add('animate-slideUp'); } if(ld) ld.classList.add('hidden'); 
+            const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) lv.classList.remove('hidden'); if(ld) ld.classList.add('hidden'); 
             renderLoansList(); 
         }
 
         function openPendingForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('pending-modal'); if(!mod) return; mod.classList.remove('hidden'); if($id('fp-id')) $id('fp-id').value = ''; $id('fp-name').value = ''; const amtEl = $id('fp-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('fp-date').value = new Date().toISOString().split('T')[0]; if($id('fp-priority')) $id('fp-priority').value = 'medium'; if($id('fp-currency')) $id('fp-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
         
-        function closePendingForm() { const modal = $id('pending-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        function closePendingForm() { nexusHideModalInstant($id('pending-modal')); }
         
         function savePending(e) { 
             e.preventDefault(); const idEl = $id('fp-id'); const id = idEl ? idEl.value : ''; const name = $id('fp-name').value; const amount = parseFloat($id('fp-amount').dataset.raw) || 0; const date = $id('fp-date').value; const priority = $id('fp-priority') ? $id('fp-priority').value : 'medium'; 
@@ -11179,7 +11257,7 @@
                 }
             } 
             saveState(); updateDashboard(); closePendingForm(); 
-            const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) { lv.classList.remove('hidden'); lv.classList.add('animate-slideUp'); } if(ld) ld.classList.add('hidden'); 
+            const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) lv.classList.remove('hidden'); if(ld) ld.classList.add('hidden'); 
             renderLoansList(); 
             if(typeof renderTasksTab === 'function') renderTasksTab(); // Refrescar vista de tareas en segundo plano
         }
@@ -11477,7 +11555,7 @@
         // APEX FIX: Función maestra restaurada e integrada con Proyectos y Afterpay
         function openForm(type, txId = null, projectId = null) { 
             const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
-            const mod = $id('tx-modal'); if(!mod) return; mod.classList.remove('hidden'); 
+            const mod = $id('tx-modal'); if(!mod) return; nexusShowModalInstant(mod); 
             $id('f-id').value = txId || ''; $id('f-type').value = type; 
             const txProjEl = $id('f-tx-proj-id');
             if (txProjEl) txProjEl.value = projectId || '';
@@ -11682,7 +11760,7 @@
             if(!txId) setTimeout(() => checkTxAccount(), 80);
         }
 
-        function closeForm() { const modal = $id('tx-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        function closeForm() { nexusHideModalInstant($id('tx-modal')); }
         
         // APEX FIX: Restauración del Predictor Semántico (Autofill Inteligente)
         function handleNoteAutocomplete(e) {
@@ -13190,7 +13268,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function openGoalForm() { const mod = $id('goal-modal'); if(!mod) return; mod.classList.remove('hidden'); $id('g-name').value = ''; const amtEl = $id('g-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('g-date').value = ''; }
-        function closeGoalForm() { const modal = $id('goal-modal'); if(!modal) return; modal.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); }
+        function closeGoalForm() { nexusHideModalInstant($id('goal-modal')); }
         
         function saveGoal(e) {
             e.preventDefault(); const name = $id('g-name').value; const amount = parseFloat($id('g-amount').dataset.raw) || 0; const date = $id('g-date').value;
@@ -14226,7 +14304,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             window.__nexusActiveProjectId = id;
             
             const mainView = $id('projects-main-view'); const detailView = $id('projects-detail-view');
-            mainView.classList.add('hidden'); detailView.classList.remove('hidden'); detailView.classList.add('animate-slideUp');
+            mainView.classList.add('hidden'); detailView.classList.remove('hidden', 'animate-slideUp', 'opacity-0', 'transition-opacity', 'duration-200');
 
             const pTxs = (state.tx || []).filter(t => t.projectId === p.id && t.type === 'expense').sort((a,b) => new Date(b.date) - new Date(a.date));
             const spent = pTxs.reduce((sum, t) => sum + t.amount, 0);
@@ -14328,14 +14406,9 @@ ${JSON.stringify(dataToAnalyze)}`;
         function hideProjectDetail() {
             window.__nexusActiveProjectId = null;
             const mainView = $id('projects-main-view'); const detailView = $id('projects-detail-view');
-            if(detailView) {
-                detailView.classList.add('opacity-0', 'transition-opacity', 'duration-200');
-                setTimeout(() => {
-                    detailView.classList.add('hidden'); detailView.classList.remove('opacity-0', 'transition-opacity', 'duration-200');
-                    if(mainView) { mainView.classList.remove('hidden'); mainView.classList.add('animate-slideUp'); }
-                    renderProjectsTab();
-                }, 200);
-            }
+            if (detailView) detailView.classList.add('hidden');
+            if (mainView) mainView.classList.remove('hidden', 'animate-slideUp', 'opacity-0', 'transition-opacity', 'duration-200');
+            renderProjectsTab();
         }
 
         function editProject(id) {
@@ -14378,11 +14451,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             mod.classList.remove('hidden');
         }
 
-        function closeUIDeleteModal() {
-            const mod = $id('ui-delete-modal'); if(!mod) return;
-            mod.classList.add('opacity-0', 'transition-opacity', 'duration-300');
-            setTimeout(() => { mod.classList.add('hidden'); mod.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300);
-        }
+        function closeUIDeleteModal() { nexusHideModalInstant($id('ui-delete-modal')); }
 
         function confirmUIDelete() {
             const type = $id('ui-del-type').value;
@@ -14961,7 +15030,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 200); }
         }
 
-        function closeLinkSharedModal() { const m = $id('shared-account-modal'); if(m) { m.classList.add('opacity-0', 'transition-opacity', 'duration-300'); setTimeout(()=> { m.classList.add('hidden'); m.classList.remove('opacity-0', 'transition-opacity', 'duration-300'); }, 300); } }
+        function closeLinkSharedModal() { nexusHideModalInstant($id('shared-account-modal')); }
 
         async function processSharedToken() {
             const tokenInput = $id('shared-token-input');
@@ -14973,7 +15042,9 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const shareData = JSON.parse(atob(b64));
                 if(!shareData || !shareData.vaultId) throw new Error("Missing vaultId");
                 
-                // Evitar duplicar cuentas vinculadas
+                if (nexusIsAccountTombstoned(null, shareData.vaultId)) {
+                    return alert("Esta bóveda fue desvinculada en este dispositivo. Si el creador te comparte de nuevo, pide un token nuevo.");
+                }
                 if (state.accounts.find(a => a.remoteId === shareData.vaultId)) {
                     return alert("Esta bóveda ya está vinculada a tu cuenta.");
                 }
