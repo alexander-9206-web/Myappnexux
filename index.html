@@ -3718,20 +3718,28 @@
                 isRootAdminUnlocked = true;
                 _loginRoutePhase = 'app';
                 _firstSetupFirebaseUser = null;
-                sessionStorage.removeItem('nexus_pin_banner_ok');
+                sessionStorage.setItem('nexus_admin_bypass', '1');
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
 
                 setLoginRoutingProgress(85, 'Abriendo interfaz…');
-                await activateRootMaintainerSession();
-                await processLoginSuccess(auth.email, { fastEntry: true, googleLinked: true });
+                activateRootMaintainerSession().catch(e => console.warn('[NEXUS] root session founder', e));
+                await processLoginSuccess(auth.email, {
+                    fastEntry: true,
+                    googleLinked: true,
+                    founderInstant: true,
+                    skipCloudPull: true
+                });
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                 if (typeof loadRootPinHashFromCloud === 'function') {
                     loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin founder', e));
                 }
                 if (needsSetup) {
                     setTimeout(() => {
-                        switchTab('settings');
                         if (typeof showFounderSetupBannerIfNeeded === 'function') showFounderSetupBannerIfNeeded();
-                    }, 600);
+                    }, 800);
+                } else if (typeof switchTab === 'function') {
+                    state.activeTab = 'home';
+                    switchTab('home');
                 }
             } catch (e) {
                 console.error('[NEXUS] enterFounderAppFlow', e);
@@ -5463,6 +5471,7 @@
         async function bootApp(opts) {
             if (!currentUser) throw new Error('Sesión no autenticada');
             const options = opts || {};
+            const founderInstant = !!options.founderInstant;
             let localP = (userProfile && userProfile.email === currentUser) ? userProfile : loadLocalProfile(currentUser);
             if (!localP && typeof getProfileForVault === 'function' && !options.fastBoot) {
                 try {
@@ -5582,8 +5591,12 @@
             const gc = $id('global-currency'); if(gc) gc.value = state.activeCurrency;
             const chkPin = $id('set-require-pin'); if(chkPin) chkPin.checked = state.settings.requirePin === true;
             nexusApplyRequirePinAfterBoot();
+            if (founderInstant) {
+                sessionUnlocked = true;
+                nexusHideSessionLock();
+            }
             initNexus();
-            if (!sessionUnlocked) return;
+            if (!sessionUnlocked && !founderInstant) return;
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
             if (!sessionStorage.getItem('nexus_web_auto_update') && typeof checkScheduledWebUpdate === 'function') checkScheduledWebUpdate();
@@ -18320,21 +18333,101 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
         let loginSelectedEmail = null;
 
-        async function finishFounderLoginEntry(email) {
+        function nexusPrepareFounderInstantSession(email) {
+            sessionStorage.setItem('nexus_admin_bypass', '1');
+            sessionStorage.setItem('nexus_pin_banner_ok', '1');
+            loginSelectedEmail = email;
+            currentUser = email;
+            isRootAdminUnlocked = true;
+            _loginRoutePhase = 'app';
             _firstSetupFirebaseUser = null;
             hideFirstTimeSetup();
             hideLoginRoutingLoading();
-            loginSelectedEmail = email;
-            isRootAdminUnlocked = true;
-            _loginRoutePhase = 'app';
+            nexusReleaseAppShell();
+        }
+
+        /** Bootstrap + PIN root en Firebase sin bloquear la UI (tras entrar al dashboard). */
+        async function nexusRunFounderCloudSetupBackground(auth, userPin, rootPin) {
             const st = $id('first-setup-status');
-            if (st) st.textContent = 'Acceso concedido — abriendo app…';
             try {
-                await activateRootMaintainerSession();
-                await processLoginSuccess(email);
+                if (!window.db || !fbUser) await initCloud();
+                await ensureFirestoreGoogleSession(auth.email, auth.uid);
+
+                const boot = await nexusRetryAsync(() => getBootstrapInfo(), 3, 300);
+                if (boot && boot.initialized && !isBootstrapFounder(boot, auth.email, auth.uid)) {
+                    console.warn('[NEXUS] founder bg: otro administrador');
+                    return;
+                }
+
+                const bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 4, 450);
+                if (!bootRes.ok) {
+                    console.warn('[NEXUS] founder bg bootstrap', bootRes.error);
+                    if (st) st.textContent = 'Aviso: bootstrap pendiente — reintenta desde Ajustes.';
+                    return;
+                }
+
+                const rootRes = await nexusRetryAsync(() => saveRootPinToCloud(rootPin, true), 4, 450);
+                if (!rootRes.ok) {
+                    console.warn('[NEXUS] founder bg root pin', rootRes.error);
+                    if (st) st.textContent = 'Aviso: PIN root pendiente en Firebase.';
+                }
+
+                if (userProfile && userProfile.email === auth.email) {
+                    const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...userProfile }));
+                    await nexusRetryAsync(async () => {
+                        await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', auth.email), safe, { merge: true });
+                        return { ok: true };
+                    }, 4, 450);
+                }
+
+                localStorage.setItem('nexus_system_initialized', '1');
+                if (typeof syncProfileToCloud === 'function' && userProfile) {
+                    syncProfileToCloud(userProfile).catch(e => console.warn('[NEXUS] founder bg profile', e));
+                }
+                if (typeof nexusSyncDirectEssentials === 'function' && userProfile) {
+                    nexusSyncDirectEssentials(userProfile).catch(e => console.warn('[NEXUS] founder bg essentials', e));
+                }
+                if (typeof nexusScheduleBackgroundPush === 'function') {
+                    nexusScheduleBackgroundPush('founder-setup');
+                }
+                if (st) st.textContent = 'PIN y consola root sincronizados en la nube.';
+            } catch (e) {
+                console.warn('[NEXUS] founder cloud setup background', e);
+                if (st) st.textContent = 'Sincronización en segundo plano: ' + nexusFormatFirebaseError(e);
+            }
+        }
+
+        async function finishFounderLoginEntry(email, opts) {
+            const options = opts || {};
+            const vaultEmail = String(email || '').trim().toLowerCase();
+            if (!vaultEmail) return;
+
+            nexusPrepareFounderInstantSession(vaultEmail);
+
+            try {
+                if (options.instant) {
+                    activateRootMaintainerSession().catch(e => console.warn('[NEXUS] root session founder', e));
+                    await processLoginSuccess(vaultEmail, {
+                        fastEntry: true,
+                        googleLinked: true,
+                        founderInstant: true,
+                        skipCloudPull: true
+                    });
+                } else {
+                    const st = $id('first-setup-status');
+                    if (st) st.textContent = 'Acceso concedido — abriendo app…';
+                    await activateRootMaintainerSession();
+                    await processLoginSuccess(vaultEmail, { fastEntry: true, googleLinked: true });
+                }
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                 if (typeof loadRootPinHashFromCloud === 'function') {
                     loadRootPinHashFromCloud().catch(e => console.warn('[NEXUS] root pin post-founder', e));
+                }
+                if (options.instant && typeof switchTab === 'function') {
+                    state.activeTab = 'home';
+                    switchTab('home');
+                    if (typeof updateDashboard === 'function') updateDashboard();
                 }
             } catch (e) {
                 console.error('[NEXUS] finishFounderLoginEntry', e);
@@ -18361,13 +18454,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             _firstSetupBusy = true;
             setFirstSetupButtonBusy(true);
             hideLoginRoutingLoading();
-            if (st) st.textContent = 'Enviando PIN y activando administrador…';
+            if (st) st.textContent = 'Abriendo dashboard…';
 
             try {
                 if (!window.db || !fbUser) await initCloud();
                 await ensureFirestoreGoogleSession(auth.email, auth.uid);
 
-                const boot = await nexusRetryAsync(() => getBootstrapInfo(), 3, 300);
+                const boot = await getBootstrapInfo();
                 if (boot && boot.initialized && !isBootstrapFounder(boot, auth.email, auth.uid)) {
                     return alert('El sistema ya fue inicializado por otro administrador.');
                 }
@@ -18381,25 +18474,12 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                         linkedUid: auth.uid,
                         adminToken: auth.uid
                     };
+                    delete userProfile.needsFounderSetup;
                     localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
                     localStorage.setItem('nexus_system_initialized', '1');
-                    delete userProfile.needsFounderSetup;
-                    await finishFounderLoginEntry(auth.email);
+                    await finishFounderLoginEntry(auth.email, { instant: true });
+                    nexusRunFounderCloudSetupBackground(auth, userPin, rootPin);
                     return;
-                }
-
-                if (st) st.textContent = 'Sincronizando sistema (reintento automático)…';
-                const bootRes = await nexusRetryAsync(() => writeBootstrapToCloud(auth.email, auth.uid), 4, 450);
-                if (!bootRes.ok) {
-                    if (st) st.textContent = bootRes.error || 'Error bootstrap';
-                    return alert(bootRes.error || 'No se pudo inicializar el sistema.');
-                }
-                if (bootRes.existing && st) st.textContent = 'Completando configuración del fundador…';
-
-                const rootRes = await nexusRetryAsync(() => saveRootPinToCloud(rootPin, true), 4, 450);
-                if (!rootRes.ok) {
-                    if (st) st.textContent = 'Error PIN root: ' + (rootRes.error || '');
-                    return alert('No se pudo guardar el PIN root: ' + (rootRes.error || ''));
                 }
 
                 userProfile = {
@@ -18416,17 +18496,12 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     adminGrantedAt: Date.now(),
                     adminGrantedBy: 'firebase_first_bootstrap'
                 };
-                localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
-                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...userProfile }));
-                await nexusRetryAsync(async () => {
-                    await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', auth.email), safe, { merge: true });
-                    return { ok: true };
-                }, 4, 450);
-
-                localStorage.setItem('nexus_system_initialized', '1');
                 delete userProfile.needsFounderSetup;
-                await finishFounderLoginEntry(auth.email);
+                localStorage.setItem('nexus_profile_' + auth.email, JSON.stringify(sanitizeProfileForStorage(userProfile)));
+                localStorage.setItem('nexus_system_initialized', '1');
+
+                await finishFounderLoginEntry(auth.email, { instant: true });
+                nexusRunFounderCloudSetupBackground(auth, userPin, rootPin);
             } catch (e) {
                 console.error('[NEXUS] completeFirstSetup', e);
                 if (st) st.textContent = nexusFormatFirebaseError(e);
@@ -18672,15 +18747,27 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             nexusClearManualLogoutBlock();
             const options = opts || {};
             const vaultEmail = String(email).trim().toLowerCase();
+            const founderInstant = !!options.founderInstant;
+            const skipCloudPull = !!options.skipCloudPull || founderInstant;
             currentUser = vaultEmail;
-            sessionUnlocked = false;
+            sessionUnlocked = founderInstant;
             let shellReleased = false;
             const wantsCloud = !!(options.restoreCloud || options.googleLinked || nexusVaultHadCloudLink(vaultEmail, userProfile));
             const alreadyCloud = nexusFirebaseMatchesVault(fbUser, vaultEmail);
-            const quickOpen = !!(options.fastEntry || options.googleLinked || alreadyCloud);
+            const quickOpen = !!(options.fastEntry || options.googleLinked || alreadyCloud || founderInstant);
 
-            showLoginRoutingLoading(quickOpen ? 'Abriendo bóveda…' : (wantsCloud ? 'Conectando con la nube…' : 'Abriendo tu bóveda…'));
-            setLoginRoutingProgress(18, 'Preparando…');
+            if (founderInstant) {
+                sessionStorage.setItem('nexus_admin_bypass', '1');
+                sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                nexusReleaseAppShell();
+                shellReleased = true;
+                _loginRoutePhase = 'app';
+                resetGoogleLoginButton();
+                hideLoginRoutingLoading();
+            } else {
+                showLoginRoutingLoading(quickOpen ? 'Abriendo bóveda…' : (wantsCloud ? 'Conectando con la nube…' : 'Abriendo tu bóveda…'));
+                setLoginRoutingProgress(18, 'Preparando…');
+            }
 
             try {
                 if (!userProfile || !userProfile.email) {
@@ -18695,10 +18782,16 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 if (options.googleLinked && bind.cloud) {
                     localStorage.setItem('nexus_google_vault_' + vaultEmail, '1');
                     userProfile.isGoogle = true;
+                } else if (founderInstant && options.googleLinked) {
+                    bind = { cloud: !!nexusFirebaseMatchesVault(fbUser, vaultEmail), needsGoogle: false };
+                    localStorage.setItem('nexus_google_vault_' + vaultEmail, '1');
+                    userProfile.isGoogle = true;
                 } else if (wantsCloud && !alreadyCloud) {
-                    setLoginRoutingProgress(42, 'Sincronizando nube…');
-                    bind = await nexusRestoreCloudForVault(vaultEmail, userProfile);
-                } else if (!wantsCloud) {
+                    if (!founderInstant) setLoginRoutingProgress(42, 'Sincronizando nube…');
+                    bind = founderInstant
+                        ? { cloud: !!nexusFirebaseMatchesVault(fbUser, vaultEmail), needsGoogle: false }
+                        : await nexusRestoreCloudForVault(vaultEmail, userProfile);
+                } else if (!wantsCloud && !founderInstant) {
                     bind = await nexusBindFirebaseToVaultEmail(vaultEmail, userProfile);
                 }
 
@@ -18710,10 +18803,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     setLoginRoutingProgress(68, bind.cloud ? 'Cargando datos…' : 'Cargando…');
                 }
 
-                await bootApp({ fastBoot: true, deferCloudProfileMerge: true });
+                await bootApp({ fastBoot: true, deferCloudProfileMerge: true, founderInstant });
 
                 const hadCloudHint = wantsCloud || await nexusDetectCloudLinkFromProfile(vaultEmail);
-                const mustPullFromCloud = nexusIsVaultLocallyEmpty() || hadCloudHint;
+                const mustPullFromCloud = !skipCloudPull && (nexusIsVaultLocallyEmpty() || hadCloudHint);
                 if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
                     nexusPrepareCloudBootstrapOnLogin();
                 }
@@ -18723,6 +18816,11 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     shellReleased = true;
                     _loginRoutePhase = 'app';
                     resetGoogleLoginButton();
+                }
+
+                if (founderInstant) {
+                    sessionUnlocked = true;
+                    nexusHideSessionLock();
                 }
 
                 if (mustPullFromCloud && window.db && typeof fetchCloudState === 'function') {
@@ -18738,12 +18836,14 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                         }
                     } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                 }
-                if (bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap() && !nexusIsVaultLocallyEmpty()) {
+                if (!founderInstant && bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap() && !nexusIsVaultLocallyEmpty()) {
                     nexusScheduleBackgroundPush('post-login');
-                } else if ((bind.needsGoogle || window.__nexusNeedsGoogleForCloud) && hadCloudHint) {
+                } else if (!founderInstant && (bind.needsGoogle || window.__nexusNeedsGoogleForCloud) && hadCloudHint) {
                     console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
+                } else if (founderInstant && typeof nexusScheduleBackgroundPush === 'function') {
+                    nexusScheduleBackgroundPush('founder-instant');
                 }
-                setLoginRoutingProgress(100, 'Listo');
+                if (!founderInstant) setLoginRoutingProgress(100, 'Listo');
                 try {
                     if (options.googleLinked || bind.cloud) {
                         userProfile.isGoogle = true;
