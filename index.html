@@ -204,6 +204,36 @@
             align-items: stretch !important;
             flex-direction: column;
         }
+        /* Formularios/modales: fijos al centro, sin arrastre horizontal */
+        .fixed.inset-0[id$="-modal"]:not(.hidden),
+        #numpad-modal:not(.hidden),
+        #nexus-doc-viewer:not(.hidden),
+        #nexus-web-viewer:not(.hidden) {
+            touch-action: none !important;
+            overscroll-behavior: none !important;
+            -webkit-user-drag: none;
+            user-select: none;
+        }
+        .fixed.inset-0[id$="-modal"]:not(.hidden) > .theme-card,
+        #numpad-modal:not(.hidden) .numpad-modal-content,
+        #nexus-doc-viewer:not(.hidden) > div,
+        #nexus-web-viewer:not(.hidden) > div {
+            transform: none !important;
+            translate: none !important;
+            left: auto !important;
+            right: auto !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            width: 100% !important;
+            max-width: min(100%, 42rem) !important;
+            box-sizing: border-box !important;
+        }
+        .fixed.inset-0[id$="-modal"]:not(.hidden) .theme-card input,
+        .fixed.inset-0[id$="-modal"]:not(.hidden) .theme-card textarea,
+        .fixed.inset-0[id$="-modal"]:not(.hidden) .theme-card select {
+            -webkit-user-select: auto !important;
+            user-select: auto !important;
+        }
 
         /* Bloqueo: sin autenticación no se muestra el dashboard (evita arranque directo con caché vieja) */
         html.nexus-auth-pending body > header,
@@ -4860,8 +4890,32 @@
             if (reason) state._nexusSync.lastTouchReason = reason;
         }
 
+        function nexusIsVaultLocallyEmpty() {
+            if (!state) return true;
+            const hasMoney = (state.tx || []).length > 0 || (state.accounts || []).length > 0 || (state.loans || []).length > 0;
+            const hasWork = (state.tasks || []).length > 0 || (state.projects || []).length > 0;
+            const hasVaults = (state.taskVaults || []).length > 0 || (state.projectVaults || []).length > 0;
+            return !(hasMoney || hasWork || hasVaults);
+        }
+
+        /** Instalación nueva / caché vacía: priorizar descarga completa desde Firebase. */
+        function nexusNeedsCloudBootstrap() {
+            nexusEnsureSyncMeta();
+            if (state._nexusSync.awaitingCloudBootstrap) return true;
+            return nexusIsVaultLocallyEmpty();
+        }
+
+        function nexusMarkCloudBootstrapComplete() {
+            nexusEnsureSyncMeta();
+            state._nexusSync.awaitingCloudBootstrap = false;
+            if (nexusIsVaultLocallyEmpty()) {
+                state._nexusSync.dirty = false;
+            }
+        }
+
         function nexusPreferLocalForSync() {
             nexusEnsureSyncMeta();
+            if (nexusNeedsCloudBootstrap()) return false;
             if (state._nexusSync.forceLocalWinUntil && Date.now() < state._nexusSync.forceLocalWinUntil) return true;
             if (!state._nexusSync.dirty) return false;
             const localRev = state._nexusSync.localRevision || 0;
@@ -4872,7 +4926,14 @@
         /** Bloquea fusión completa desde Firebase (restauración, borrados recientes, importación). */
         function nexusIsCloudPullRestricted() {
             if (window.__nexusCloudPullPausedUntil && Date.now() < window.__nexusCloudPullPausedUntil) return true;
+            if (nexusNeedsCloudBootstrap()) return false;
             return nexusPreferLocalForSync();
+        }
+
+        function nexusShouldDeferCloudPush() {
+            if (!fbUser || !window.db || !currentUser) return true;
+            if (!sessionUnlocked) return true;
+            return nexusNeedsCloudBootstrap();
         }
 
         function nexusMarkForceLocalWin(ms) {
@@ -5232,6 +5293,10 @@
         function nexusShowModalInstant(el) {
             if (!el) return;
             el.classList.remove('hidden', 'opacity-0', 'transition-opacity', 'duration-200', 'duration-300', 'translate-y-4');
+            el.style.transform = 'none';
+            const card = el.querySelector('.theme-card');
+            if (card) card.style.transform = 'none';
+            nexusResetViewportLayers();
             nexusUpdateUiLock();
         }
 
@@ -7553,25 +7618,41 @@
                         let coreTouched = false;
                         let incomingTxByYear = {};
                         
-                        snapshot.docChanges().forEach((change) => {
-                            if (change.doc.metadata.hasPendingWrites) return;
-                            hasChanges = true;
-                            const data = change.doc.data();
-                            
-                            if (change.doc.id === 'core') {
-                                coreTouched = true;
-                                if (nexusIsCloudPullRestricted()) {
-                                    nexusMergeCloudTombstonesOnly(data);
-                                } else {
+                        if (isFirstLoad && !nexusIsCloudPullRestricted()) {
+                            snapshot.docs.forEach((docSnap) => {
+                                if (docSnap.metadata.hasPendingWrites) return;
+                                const data = docSnap.data();
+                                hasChanges = true;
+                                if (docSnap.id === 'core') {
+                                    coreTouched = true;
                                     nexusApplyCloudCoreDoc(data);
-                                }
-                            } else if (change.doc.id.startsWith('tx_')) {
-                                if (!nexusIsCloudPullRestricted()) {
-                                    const year = change.doc.id.split('_')[1];
+                                } else if (docSnap.id.startsWith('tx_')) {
+                                    const year = docSnap.id.split('_')[1];
                                     incomingTxByYear[year] = data.tx || [];
                                 }
-                            }
-                        });
+                            });
+                            nexusMarkCloudBootstrapComplete();
+                        } else {
+                            snapshot.docChanges().forEach((change) => {
+                                if (change.doc.metadata.hasPendingWrites) return;
+                                hasChanges = true;
+                                const data = change.doc.data();
+                                
+                                if (change.doc.id === 'core') {
+                                    coreTouched = true;
+                                    if (nexusIsCloudPullRestricted()) {
+                                        nexusMergeCloudTombstonesOnly(data);
+                                    } else {
+                                        nexusApplyCloudCoreDoc(data);
+                                    }
+                                } else if (change.doc.id.startsWith('tx_')) {
+                                    if (!nexusIsCloudPullRestricted()) {
+                                        const year = change.doc.id.split('_')[1];
+                                        incomingTxByYear[year] = data.tx || [];
+                                    }
+                                }
+                            });
+                        }
 
                         const shouldAttachP2p = isFirstLoad || coreTouched;
 
@@ -7611,7 +7692,13 @@
         }
 
         function triggerCloudSync() {
-            if(!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
+            if(!fbUser || !window.db || !currentUser) return;
+            if (nexusShouldDeferCloudPush()) {
+                syncPending = true;
+                clearTimeout(syncTimeout);
+                syncTimeout = setTimeout(() => triggerCloudSync(), 700);
+                return;
+            }
             
             // APEX OPTIMIZATION: Prevención de Cola Infinita (Race Condition Fix)
             if(isSyncing) {
@@ -7621,6 +7708,11 @@
             
             clearTimeout(syncTimeout);
             syncTimeout = setTimeout(async () => {
+                if (nexusShouldDeferCloudPush()) {
+                    syncPending = true;
+                    setTimeout(() => triggerCloudSync(), 700);
+                    return;
+                }
                 isSyncing = true;
                 syncPending = false;
                 updateCloudBadge(true, true);
@@ -8313,10 +8405,15 @@
                 }
 
                 if (bind.cloud && typeof fetchCloudState === 'function') {
-                    fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState background', e));
+                    try {
+                        await Promise.race([
+                            fetchCloudState(),
+                            new Promise(r => setTimeout(r, 15000))
+                        ]);
+                    } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                 }
-                if (bind.cloud && typeof triggerCloudSync === 'function') {
-                    setTimeout(() => triggerCloudSync(), 200);
+                if (bind.cloud && typeof triggerCloudSync === 'function' && !nexusNeedsCloudBootstrap()) {
+                    setTimeout(() => triggerCloudSync(), 400);
                 } else if (bind.needsGoogle && wantsCloud) {
                     console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
                 }
@@ -8910,6 +9007,11 @@
                 if ($id('session-pin-input')) $id('session-pin-input').value = '';
                 nexusResetInactivityTimer();
                 if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                if (fbUser && nexusNeedsCloudBootstrap() && typeof fetchCloudState === 'function') {
+                    fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState post-unlock', e));
+                } else if (fbUser && typeof triggerCloudSync === 'function' && syncPending) {
+                    triggerCloudSync();
+                }
             } else {
                 alert('PIN incorrecto.');
                 if ($id('session-pin-input')) $id('session-pin-input').value = '';
@@ -9002,9 +9104,14 @@
             // APEX FIX: activeCurrency predeterminado a GLOBAL
             const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, deletedAccounts: [], deletedTxIds: [], categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false, autoBackup: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
+            const isFreshVault = !savedState;
             state = savedState || defaultDemoData;
             nexusNormalizePinSettings();
             nexusEnsureSyncMeta();
+            if (isFreshVault) {
+                state._nexusSync.dirty = false;
+                state._nexusSync.awaitingCloudBootstrap = true;
+            }
             nexusEnsureDeletedAccountsRegistry();
             nexusApplyAccountTombstonesToState();
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
@@ -9023,7 +9130,7 @@
             // APEX FIX: Purga de Categorías Nativas para dejar únicamente las manuales
             const catsBefore = JSON.stringify({ c: state.categories, p: state.catParents });
             nexusRestoreCategoriesCatalog(false);
-            if (JSON.stringify({ c: state.categories, p: state.catParents }) !== catsBefore) {
+            if (JSON.stringify({ c: state.categories, p: state.catParents }) !== catsBefore && !isFreshVault) {
                 nexusTouchLocalState('categories-purge');
             }
             sanitizeUserCategoriesInState();
@@ -9488,6 +9595,13 @@
                     if (e.touches.length !== 1) return;
                     const dx = e.touches[0].clientX - _nxSx;
                     const dy = e.touches[0].clientY - _nxSy;
+                    const inOpenModal = e.target && e.target.closest && e.target.closest(
+                        '.fixed.inset-0[id$="-modal"]:not(.hidden), #numpad-modal:not(.hidden), #nexus-doc-viewer:not(.hidden), #nexus-web-viewer:not(.hidden)'
+                    );
+                    if (inOpenModal && Math.abs(dx) > 5) {
+                        e.preventDefault();
+                        return;
+                    }
                     if (_nxEdge && dx > 8 && Math.abs(dx) > Math.abs(dy)) {
                         e.preventDefault();
                         return;
