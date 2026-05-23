@@ -1982,6 +1982,27 @@
             </div>
         </div>
 
+        <!-- Modal: eliminación de cuenta (creador) — auditoría vs purga total -->
+        <div id="account-delete-options-modal" class="fixed inset-0 z-[155] hidden bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+            <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-5 animate-slideUp border border-red-100 shadow-2xl">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-black uppercase tracking-tighter text-red-600"><i class="fa-solid fa-vault mr-2"></i>Eliminar bóveda</h3>
+                    <button type="button" onclick="closeAccountDeleteOptionsModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <p id="account-delete-options-msg" class="text-[10px] text-slate-500 font-bold leading-relaxed text-center"></p>
+                <input type="hidden" id="account-delete-options-id">
+                <button type="button" onclick="confirmAccountDeleteMode('audit')" class="w-full text-left p-4 rounded-2xl border-2 border-amber-200 bg-amber-50/80 active:scale-[0.98] transition-transform">
+                    <p class="text-[10px] font-black uppercase text-amber-800"><i class="fa-solid fa-clipboard-list mr-1"></i> Opción 1 — Auditoría</p>
+                    <p class="text-[9px] text-amber-700/90 font-bold mt-1 leading-snug">Quita la cuenta del panel y de Firebase. Los movimientos quedan en auditoría sin afectar balances activos.</p>
+                </button>
+                <button type="button" onclick="confirmAccountDeleteMode('purge')" class="w-full text-left p-4 rounded-2xl border-2 border-red-300 bg-red-50/80 active:scale-[0.98] transition-transform">
+                    <p class="text-[10px] font-black uppercase text-red-700"><i class="fa-solid fa-fire mr-1"></i> Opción 2 — Purga total</p>
+                    <p class="text-[9px] text-red-600/90 font-bold mt-1 leading-snug">Elimina la cuenta y todas sus transacciones en local y en Firebase. Irreversible.</p>
+                </button>
+                <button type="button" onclick="closeAccountDeleteOptionsModal()" class="w-full bg-slate-200 text-slate-700 p-3 rounded-2xl font-black uppercase text-[10px]">Cancelar</button>
+            </div>
+        </div>
+
         <!-- APEX FIX: MODAL AUTENTICACIÓN PARA ACCIONES SENSIBLES -->
         <div id="ui-auth-modal" class="fixed inset-0 z-[200] hidden bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center">
             <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border border-indigo-100 shadow-2xl">
@@ -4764,7 +4785,7 @@
             years.forEach(y => {
                 merged = merged.concat(nexusMergeEntityById(localByYear[y] || [], remoteByYear[y] || []));
             });
-            return merged;
+            return nexusFilterPurgedTransactions(merged);
         }
 
         function nexusEntityTimestamp(ent) {
@@ -4982,11 +5003,141 @@
             return Array.from(map.values());
         }
 
-        function nexusMergeAccountsRegistry(localArr, remoteArr) {
+        function nexusEnsureDeletedAccountsRegistry() {
+            if (!state || typeof state !== 'object') return;
+            if (!Array.isArray(state.deletedAccounts)) state.deletedAccounts = [];
+            if (!Array.isArray(state.deletedTxIds)) state.deletedTxIds = [];
+        }
+
+        function nexusGetDeletedAccountMap() {
+            nexusEnsureDeletedAccountsRegistry();
             const map = new Map();
-            (remoteArr || []).forEach(a => { if (a && a.id) map.set(a.id, { ...a }); });
+            (state.deletedAccounts || []).forEach(t => {
+                if (!t || !t.accountId) return;
+                const prev = map.get(t.accountId);
+                if (!prev || (t.deletedAt || 0) >= (prev.deletedAt || 0)) map.set(t.accountId, t);
+            });
+            return map;
+        }
+
+        function nexusIsAccountTombstoned(accountId) {
+            return nexusGetDeletedAccountMap().has(accountId);
+        }
+
+        function nexusGetPurgedTxIdSet() {
+            nexusEnsureDeletedAccountsRegistry();
+            const ids = new Set(state.deletedTxIds || []);
+            (state.deletedAccounts || []).forEach(t => {
+                if (t && t.mode === 'purge' && Array.isArray(t.purgedTxIds)) {
+                    t.purgedTxIds.forEach(id => ids.add(id));
+                }
+            });
+            return ids;
+        }
+
+        function nexusFilterPurgedTransactions(txList) {
+            const purged = nexusGetPurgedTxIdSet();
+            if (!purged.size) return txList || [];
+            return (txList || []).filter(t => t && t.id && !purged.has(t.id));
+        }
+
+        function nexusTxCountsForLiveBalance(tx) {
+            if (!tx) return false;
+            if (tx.auditArchived) return false;
+            if (tx.accId && nexusIsAccountTombstoned(tx.accId)) {
+                const tomb = nexusGetDeletedAccountMap().get(tx.accId);
+                if (tomb && tomb.mode === 'audit') return false;
+            }
+            if (tx.toAccId && nexusIsAccountTombstoned(tx.toAccId)) {
+                const tomb = nexusGetDeletedAccountMap().get(tx.toAccId);
+                if (tomb && tomb.mode === 'audit') return false;
+            }
+            return true;
+        }
+
+        function nexusMergeDeletedAccountTombstones(localArr, remoteArr) {
+            const map = new Map();
+            [...(remoteArr || []), ...(localArr || [])].forEach(t => {
+                if (!t || !t.accountId) return;
+                const prev = map.get(t.accountId);
+                if (!prev || (t.deletedAt || 0) >= (prev.deletedAt || 0)) map.set(t.accountId, { ...t });
+            });
+            return Array.from(map.values()).slice(-500);
+        }
+
+        function nexusMergeDeletedTxIdList(localArr, remoteArr) {
+            return [...new Set([...(localArr || []), ...(remoteArr || [])])].slice(-4000);
+        }
+
+        function nexusApplyAccountTombstonesToState() {
+            nexusEnsureDeletedAccountsRegistry();
+            const tomb = nexusGetDeletedAccountMap();
+            if (!tomb.size) return;
+            state.accounts = (state.accounts || []).filter(a => a && a.id && !tomb.has(a.id));
+            state.tx = nexusFilterPurgedTransactions(state.tx || []);
+            (state.tx || []).forEach(t => {
+                if (!t || !t.auditArchived) return;
+                if (t.accId && tomb.has(t.accId)) { /* conservar en auditoría */ }
+            });
+        }
+
+        function nexusIsAccountVaultOwner(acc) {
+            if (!acc) return false;
+            if (!acc.isShared) return true;
+            const me = normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '');
+            const owner = normalizeMemberEmail(acc.ownerEmail || acc.owner || '');
+            if (owner && me) return owner === me;
+            return !!me;
+        }
+
+        function nexusRecordAccountDeletion(acc, mode, purgedTxIds) {
+            nexusEnsureDeletedAccountsRegistry();
+            const email = normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '');
+            const entry = {
+                accountId: acc.id,
+                remoteId: acc.remoteId || null,
+                accountName: acc.name || '',
+                currency: acc.currency || null,
+                mode: mode === 'purge' ? 'purge' : 'audit',
+                deletedAt: Date.now(),
+                deletedBy: email,
+                purgedTxIds: mode === 'purge' ? (purgedTxIds || []) : []
+            };
+            state.deletedAccounts = (state.deletedAccounts || []).filter(t => t.accountId !== acc.id);
+            state.deletedAccounts.push(entry);
+            if (mode === 'purge' && purgedTxIds && purgedTxIds.length) {
+                state.deletedTxIds = nexusMergeDeletedTxIdList(state.deletedTxIds, purgedTxIds);
+            }
+            nexusTouchLocalState('account-delete');
+        }
+
+        async function nexusDeleteSharedVaultFromCloud(remoteId) {
+            if (!remoteId || !window.db) return;
+            try {
+                const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                await deleteDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', remoteId));
+                delete lastCloudSyncHash['shared_' + remoteId];
+            } catch (e) {
+                console.warn('[NEXUS] delete shared vault cloud', e);
+            }
+        }
+
+        function nexusForceCloudPushNow() {
+            if (!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
+            clearTimeout(syncTimeout);
+            syncPending = true;
+            if (!isSyncing && typeof triggerCloudSync === 'function') triggerCloudSync();
+        }
+
+        function nexusMergeAccountsRegistry(localArr, remoteArr) {
+            const tombstones = nexusGetDeletedAccountMap();
+            const map = new Map();
+            (remoteArr || []).forEach(a => {
+                if (!a || !a.id || tombstones.has(a.id)) return;
+                map.set(a.id, { ...a });
+            });
             (localArr || []).forEach(a => {
-                if (!a || !a.id) return;
+                if (!a || !a.id || tombstones.has(a.id)) return;
                 const ex = map.get(a.id);
                 if (!ex) { map.set(a.id, { ...a }); return; }
                 const winner = nexusMergeEntityById([ex], [a])[0] || a;
@@ -5005,6 +5156,8 @@
                 taskVaults: nexusMergeVaultRegistry(local.taskVaults || [], cloud.taskVaults || []),
                 projectVaults: nexusMergeVaultRegistry(local.projectVaults || [], cloud.projectVaults || []),
                 accounts: nexusMergeAccountsRegistry(local.accounts || [], cloud.accounts || []),
+                deletedAccounts: nexusMergeDeletedAccountTombstones(local.deletedAccounts || [], cloud.deletedAccounts || []),
+                deletedTxIds: nexusMergeDeletedTxIdList(local.deletedTxIds || [], cloud.deletedTxIds || []),
                 deletedSharedTxs: [...new Set([...(local.deletedSharedTxs || []), ...(cloud.deletedSharedTxs || [])])].slice(-200),
                 deletedSharedTasks: [...new Set([...(local.deletedSharedTasks || []), ...(cloud.deletedSharedTasks || [])])].slice(-200)
             };
@@ -5248,6 +5401,7 @@
                 mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: true });
                 state._nexusSync.lastCloudRevision = cloudData._nexusSync?.revision || 0;
                 state._nexusSync.lastCloudPull = Date.now();
+                nexusApplyAccountTombstonesToState();
                 return;
             }
             const cloudRev = cloudData._nexusSync?.revision || cloudData?.revision || 0;
@@ -5259,6 +5413,7 @@
             state._nexusSync.lastCloudRevision = cloudRev;
             state._nexusSync.lastCloudPull = Date.now();
             mergeCoreSettingsFromCloud(prevSettings, cloudData, { forceKeepLocal: preferLocal });
+            nexusApplyAccountTombstonesToState();
         }
 
         function nexusBuildMergedCoreForUpload(localCore, remoteData) {
@@ -5277,8 +5432,9 @@
         }
 
         function nexusBuildMergedTxPayloadForUpload(year, localTxList, remoteData) {
-            const remoteTx = (remoteData && remoteData.tx) ? remoteData.tx : [];
-            const merged = nexusSortByChronology(nexusMergeEntityById(localTxList || [], remoteTx));
+            const remoteTx = nexusFilterPurgedTransactions((remoteData && remoteData.tx) ? remoteData.tx : []);
+            const localTx = nexusFilterPurgedTransactions(localTxList || []);
+            const merged = nexusSortByChronology(nexusMergeEntityById(localTx, remoteTx));
             const pushAt = Date.now();
             const pushRev = state._nexusSync?.localRevision || pushAt;
             return {
@@ -8125,7 +8281,7 @@
                     finish(false);
                     return;
                 }
-                const timer = setTimeout(() => finish(false), 2600);
+                const timer = setTimeout(() => finish(false), 3200);
             });
         }
 
@@ -8491,11 +8647,13 @@
             const demoTx = [];
 
             // APEX FIX: activeCurrency predeterminado a GLOBAL
-            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false, autoBackup: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
+            const defaultDemoData = { tx: demoTx, loans: demoLoans, accounts: demoAccounts, deletedAccounts: [], deletedTxIds: [], categories: DEFAULT_CATEGORIES, theme: DEFAULT_THEME, settings: { apLimit: 5000000, apPayDay: 5, baseCurrency: 'COP', requirePin: false, autoBackup: false }, context: 'day', activeTab: 'home', periodFilter: { type: 'all', cat: 'all' }, statsType: 'expense', activeCurrency: 'GLOBAL', calendarFilter: 'week', goals: [], projects: [], ui: {} };
 
             state = savedState || defaultDemoData;
             nexusNormalizePinSettings();
             nexusEnsureSyncMeta();
+            nexusEnsureDeletedAccountsRegistry();
+            nexusApplyAccountTombstonesToState();
             if(!state.taxes) state.taxes = { rates: { COP: 19, USD: 21, EUR: 20, AUD: 32.5 } };
             if(!state.taxes.withheld) state.taxes.withheld = {};
             if(!state.taxes.deductiblePct) state.taxes.deductiblePct = {};
@@ -8748,7 +8906,7 @@
         function getEnrichedTx() {
             // APEX FIX: Purga absoluta de Lump Sums (Mother TXs). Solo las amortizaciones pasarán al SSoT/Auditoría.
             // APEX FIX: Mapeo Avanzado de Aislamiento Patrimonial (Cuentas Compartidas y Terceros)
-            let rawTx = [...getActiveTx()].filter(t => t.type !== 'afterpay' && !t.isCCPurchase).map(t => {
+            let rawTx = [...getActiveTx()].filter(t => t.type !== 'afterpay' && !t.isCCPurchase && nexusTxCountsForLiveBalance(t)).map(t => {
                 const tx = {...t};
                 tx.renderType = tx.type; // Guardar el tipo original para iconos visuales
 
@@ -10616,42 +10774,110 @@
         function deleteAccount() {
             const id = $id('fa-id').value; if(!id) return; const acc = state.accounts.find(a => a.id === id); if(!acc) return;
             
-            // APEX FIX: Evitar que el usuario borre su última bóveda y rompa el motor del Dashboard
             if (state.accounts.length <= 1) {
                 return alert("⚠️ SISTEMA PROTEGIDO:\nNo puedes eliminar la única bóveda de tu sistema. Crea otra primero.");
             }
 
-            // APEX FIX: Requiere Autenticación antes de eliminar o desvincular la bóveda
             requireAuthForAction(() => {
-                if (acc.isShared) {
+                if (acc.isShared && !nexusIsAccountVaultOwner(acc)) {
                     triggerUIDelete('account_shared', id);
-                } else {
-                    triggerUIDelete('account_personal', id);
+                    return;
                 }
-            }, "Autoriza la eliminación o desvinculación de esta bóveda.");
+                if (acc.isShared && nexusIsAccountVaultOwner(acc)) {
+                    openAccountDeleteOptionsModal(acc);
+                    return;
+                }
+                openAccountDeleteOptionsModal(acc);
+            }, "Autoriza la eliminación de esta bóveda.");
         }
-        
-        function executeAccountDeletion(id) {
-            const acc = state.accounts.find(a => a.id === id); if(!acc) return;
+
+        function openAccountDeleteOptionsModal(acc) {
+            const mod = $id('account-delete-options-modal');
+            const msg = $id('account-delete-options-msg');
+            const hid = $id('account-delete-options-id');
+            if (!mod || !acc) return;
+            if (hid) hid.value = acc.id;
+            if (msg) {
+                msg.textContent = acc.isShared
+                    ? `Eres el creador de «${acc.name}». Elige cómo eliminar esta bóveda compartida en Firebase y en tus dispositivos.`
+                    : `Eliminar «${acc.name}». Elige si conservas el historial en auditoría o borras todo.`;
+            }
+            mod.classList.remove('hidden');
+        }
+
+        function closeAccountDeleteOptionsModal() {
+            const mod = $id('account-delete-options-modal');
+            if (mod) mod.classList.add('hidden');
+        }
+
+        function confirmAccountDeleteMode(mode) {
+            const id = $id('account-delete-options-id')?.value;
+            closeAccountDeleteOptionsModal();
+            if (!id) return;
+            executeAccountDeletion(id, mode);
+        }
+
+        async function executeAccountDeletion(id, mode) {
+            const acc = state.accounts.find(a => a.id === id);
+            if (!acc) return;
+            const deleteMode = mode === 'purge' ? 'purge' : 'audit';
+            const relatedTx = (state.tx || []).filter(t => t && (t.accId === id || t.toAccId === id));
+            const purgedTxIds = relatedTx.map(t => t.id).filter(Boolean);
+
+            if (deleteMode === 'audit') {
+                const now = Date.now();
+                relatedTx.forEach(t => {
+                    t.auditArchived = true;
+                    t.auditAccountId = id;
+                    t.auditAccountName = acc.name || 'Cuenta eliminada';
+                    t.updatedAt = now;
+                });
+            } else {
+                state.tx = (state.tx || []).filter(t => t.accId !== id && t.toAccId !== id);
+            }
+
             state.accounts = state.accounts.filter(a => a.id !== id);
-            
-            if (state.tx) {
-                state.tx.forEach(t => { if (t.accId === id || t.toAccId === id) deleteCloudTx(t.id); });
-                state.tx = state.tx.filter(t => t.accId !== id && t.toAccId !== id);
+            if (state.loans) state.loans = state.loans.filter(l => l.cardId !== id);
+
+            nexusRecordAccountDeletion(acc, deleteMode, purgedTxIds);
+
+            if (acc.isShared && acc.remoteId) {
+                if (nexusIsAccountVaultOwner(acc)) {
+                    await nexusDeleteSharedVaultFromCloud(acc.remoteId);
+                }
+                delete lastCloudSyncHash['shared_' + acc.remoteId];
             }
-            
-            // APEX FIX: Protección anti-crash si state.loans no ha sido inicializado en memorias antiguas
-            if (state.loans) {
-                state.loans = state.loans.filter(l => l.cardId !== id);
-            }
-            
-            // APEX FIX: Cerrar el túnel (Listener) P2P inmediatamente para evitar que vuelva a descargar los datos eliminados
+
             if (acc.isShared && typeof attachP2PListener === 'function') {
                 setTimeout(() => attachP2PListener(), 50);
             }
-            
-            saveState(); updateDashboard(); renderAccountsTab(); closeAccountModal(); if(state.activeTab === 'database') renderDatabase();
-            alert("✅ Bóveda purgada exitosamente de la memoria SSoT.");
+
+            saveState();
+            nexusForceCloudPushNow();
+            updateDashboard();
+            renderAccountsTab();
+            closeAccountModal();
+            if (state.activeTab === 'database') renderDatabase();
+
+            const msg = deleteMode === 'audit'
+                ? '✅ Cuenta eliminada. Los movimientos siguen en Auditoría sin afectar balances activos.'
+                : '✅ Cuenta y transacciones eliminadas por completo (local y nube).';
+            alert(msg);
+        }
+
+        function executeSharedAccountUnlink(id) {
+            const acc = state.accounts.find(a => a.id === id);
+            if (!acc) return;
+            state.accounts = state.accounts.filter(a => a.id !== id);
+            state.tx = (state.tx || []).filter(t => t.accId !== id && t.toAccId !== id);
+            if (acc.remoteId) delete lastCloudSyncHash['shared_' + acc.remoteId];
+            if (typeof attachP2PListener === 'function') setTimeout(() => attachP2PListener(), 50);
+            nexusTouchLocalState('shared-unlink');
+            saveState();
+            updateDashboard();
+            renderAccountsTab();
+            closeAccountModal();
+            alert('✅ Bóveda compartida desvinculada de este dispositivo.');
         }
         
         function toggleCreditFields() { 
@@ -10724,11 +10950,13 @@
                 } 
             } 
             
+            const ownerEmail = normalizeMemberEmail(currentUser || (fbUser && fbUser.email) || '');
             const newAcc = { 
                 id: id || 'acc_' + Date.now(), 
                 name, currency, balance, type, 
                 isShared, 
-                remoteId: rId, 
+                remoteId: rId,
+                ownerEmail: isShared ? ownerEmail : ownerEmail,
                 syncedOnce: isShared ? true : undefined,
                 limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
                 cutoffDay: parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0, 
@@ -11550,7 +11778,15 @@
         }
         
         function initDatabaseTab() { setDbQuickFilter('mes'); populateDbAccountFilter(); }
-        function populateDbAccountFilter() { const accSel = $id('db-filter-account'); if(accSel) { accSel.innerHTML = '<option value="all">Todas</option>'; (state.accounts || []).forEach(a => { accSel.innerHTML += `<option value="${a.id}">${a.name}</option>`; }); } }
+        function populateDbAccountFilter() {
+            const accSel = $id('db-filter-account');
+            if (!accSel) return;
+            accSel.innerHTML = '<option value="all">Todas</option>';
+            (state.accounts || []).forEach(a => { accSel.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
+            (state.deletedAccounts || []).filter(t => t && t.mode === 'audit').forEach(t => {
+                accSel.innerHTML += `<option value="audit:${t.accountId}">📋 ${t.accountName || 'Cuenta archivada'} (auditoría)</option>`;
+            });
+        }
         function setDbQuickFilter(range) {
             $qAll('#tab-database button[id^="db-qf-"]').forEach(b => { b.classList.remove('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); b.classList.add('text-slate-400'); });
             const btn = $id('db-qf-' + range); if (btn) { btn.classList.remove('text-slate-400'); btn.classList.add('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); }
@@ -11645,7 +11881,12 @@
                 
                 const origCur = t.original_currency || t.currency;
                 if(fCurr !== 'all' && origCur !== fCurr) return false;
-                if(fAcc !== 'all' && t.accId !== fAcc && t.toAccId !== fAcc) return false;
+                if (fAcc !== 'all') {
+                    if (String(fAcc).startsWith('audit:')) {
+                        const aid = String(fAcc).slice(6);
+                        if (!(t.auditArchived && t.auditAccountId === aid)) return false;
+                    } else if (t.accId !== fAcc && t.toAccId !== fAcc) return false;
+                }
                 if(fCost !== 'all' && t.costType !== fCost) return false;
                 
                 return true; 
@@ -11746,12 +11987,18 @@
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
                 
                 const sign = isOutflow ? '-' : (isInflow ? '+' : ''); // APEX FIX: Fuerza el signo correcto
-                const aN = state.accounts.find(a=>a.id===t.accId)?.name||'--'; 
+                const aN = t.auditArchived
+                    ? (t.auditAccountName || 'Cuenta archivada')
+                    : (state.accounts.find(a => a.id === t.accId)?.name || '--');
+                const auditVaultBadge = t.auditArchived
+                    ? '<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[7px] font-black uppercase border border-amber-200">Auditoría</span>'
+                    : '';
                 
-                // APEX FIX: Rastreador de cuenta destino visual para tabla de Auditoría
                 let aNDest = '';
-                if(t.type === 'transfer') {
-                    const dN = state.accounts.find(a=>a.id===t.toAccId)?.name||'--';
+                if (t.type === 'transfer') {
+                    const dN = t.auditArchived && t.toAccId === t.auditAccountId
+                        ? (t.auditAccountName || '--')
+                        : (state.accounts.find(a => a.id === t.toAccId)?.name || '--');
                     aNDest = ` <i class="fa-solid fa-arrow-right text-[7px] mx-1 text-indigo-400"></i> ${dN}`;
                 }
                 
@@ -11779,7 +12026,6 @@
                     pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">CUOTA TC</span>`;
                 }
 
-                // APEX FIX: Badge de creador para trazabilidad P2P
                 const pCreator = t.createdBy ? `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200 shadow-sm"><i class="fa-solid fa-user mr-1"></i>${t.createdBy.split(' ')[0]}</span>` : '';
                 
                 const editAction = t.isProjected ? '' : `editTransaction('${t.id}')`; 
@@ -11789,11 +12035,10 @@
                 const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
                 const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
                 
-                // APEX FIX: Alertar al usuario que elimine la deuda desde el módulo de Pasivos
                 const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
-                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink min-w-0 pl-2 justify-end"><p class="font-black text-sm ${cT} text-right truncate" title="${sign}${fmt(origAmt, origCur)}">${sign}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
+                return `<div onclick="${editAction}" class="${cursorClass} ${cardBgClass} p-4 rounded-2xl flex justify-between items-center shadow-sm border transition-all w-full"><div class="flex items-center gap-4 min-w-0"><div class="w-10 h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-xs"></i></div><div class="truncate pr-2"><p class="text-[11px] font-black uppercase ${textTitleClass} truncate flex items-center">${t.note||(t.cat?t.cat.substring(2):'')}</p><p class="text-[9px] font-bold ${textSubClass} uppercase mt-0.5 flex items-center flex-wrap gap-x-1">${dDate.toLocaleDateString('es-CO',{day:'2-digit',month:'short', year:'numeric'})} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest} ${auditVaultBadge} ${pBadge} ${pCreator}</p></div></div><div class="flex items-center gap-3 shrink min-w-0 pl-2 justify-end"><p class="font-black text-sm ${cT} text-right truncate" title="${sign}${fmt(origAmt, origCur)}">${sign}${fmt(origAmt, origCur)}</p><button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-8 h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid fa-trash text-[10px]"></i></button></div></div>`; 
             }).join(''); 
             requestAnimationFrame(() => fitNexusAmounts($id('tab-database')));
         }
@@ -14194,8 +14439,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                 state.pseLinks = state.pseLinks.filter(l => l.id !== id);
                 saveState();
                 if(typeof renderPSELinks === 'function') renderPSELinks();
-            } else if (type === 'account_shared' || type === 'account_personal') {
-                executeAccountDeletion(id);
+            } else if (type === 'account_shared') {
+                executeSharedAccountUnlink(id);
+            } else if (type === 'account_personal') {
+                const acc = state.accounts.find(a => a.id === id);
+                if (acc) openAccountDeleteOptionsModal(acc);
             } else if (type === 'task_vault') {
                 state.taskVaults = state.taskVaults.filter(v => v.id !== id);
                 state.tasks = state.tasks.filter(t => t.vaultId !== id);
