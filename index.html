@@ -1473,6 +1473,7 @@
             <div id="loans-view-detail" class="hidden space-y-6 pb-20">
                 <div class="flex items-center gap-4 mb-2"><button onclick="hideLoanDetail()" type="button" class="w-10 h-10 theme-card rounded-full shadow-sm border theme-text"><i class="fa-solid fa-arrow-left text-amber-600"></i></button><h2 id="det-loan-title" class="text-xl font-black uppercase text-amber-600 tracking-tighter truncate">Detalle</h2></div>
                 <div class="bg-amber-50 p-6 md:p-8 rounded-[2rem] border border-amber-100 shadow-sm"><p id="det-loan-paragraph" class="text-xs md:text-sm text-amber-900 font-medium leading-relaxed"></p></div>
+                <div id="det-loan-pse-actions" class="hidden"></div>
                 <div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] font-black uppercase text-slate-500">Amortización (Sist. Francés)</h3></div><div class="overflow-x-auto hide-scrollbar"><table class="w-full text-left text-xs whitespace-nowrap"><thead><tr class="uppercase text-[8px] font-black text-slate-400 border-b border-slate-100/50"><th class="px-4 py-3">Per.</th><th class="px-4 py-3 text-right">Abono</th><th class="px-4 py-3 text-right">Int.</th><th class="px-4 py-3 text-right">Cuota</th><th class="px-4 py-3 text-right text-amber-600">Saldo</th></tr></thead><tbody id="det-loan-table" class="divide-y divide-slate-50"></tbody></table></div></div>
             </div>
         </section>
@@ -1708,6 +1709,24 @@
         </div>
     </div>
 
+    <!-- MODAL PAGO PSE DESDE DEUDA (banco) -->
+    <div id="loan-pse-pay-modal" class="fixed inset-0 z-[115] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 md:p-8 space-y-4 animate-slideUp border border-emerald-100 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-start gap-3">
+                <div class="min-w-0">
+                    <h3 class="text-lg font-black uppercase text-emerald-600 tracking-tight"><i class="fa-solid fa-bolt mr-1"></i>Pago PSE</h3>
+                    <p id="loan-pse-pay-subtitle" class="text-[10px] font-bold text-slate-400 mt-1 truncate">—</p>
+                </div>
+                <button type="button" onclick="closeLoanPSEPayModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="loan-pse-pay-actions" class="space-y-2"></div>
+            <div class="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                <button type="button" id="loan-pse-btn-new-link" onclick="openNewPSEFormFromLoanPayModal()" class="w-full bg-emerald-50 text-emerald-700 border border-emerald-200 py-3 rounded-2xl font-black uppercase text-[10px] active:scale-95"><i class="fa-solid fa-link mr-1"></i>Crear nuevo enlace de pagos</button>
+                <button type="button" onclick="openPSEHub(); closeLoanPSEPayModal();" class="w-full bg-slate-100 theme-text py-3 rounded-2xl font-black uppercase text-[10px] active:scale-95">Abrir centro PSE</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL SCORE -->
     <div id="score-modal" class="fixed inset-0 z-[100] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
         <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 animate-slideUp border shadow-2xl">
@@ -1922,6 +1941,31 @@
             <form onsubmit="saveLoan(event)" class="space-y-4">
                 <input type="hidden" id="fl-id">
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre de Deuda</label><input type="text" id="fl-name" required class="form-input text-sm" placeholder="Ej: Préstamo Vehículo"></div>
+                <div>
+                    <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo de acreedor</label>
+                    <select id="fl-creditor-type" class="form-input text-sm font-bold bg-amber-50/50 border-amber-100" onchange="toggleLoanCreditorFields()">
+                        <option value="terceros">Terceros / Persona</option>
+                        <option value="banco">Banco / Entidad financiera</option>
+                    </select>
+                </div>
+                <div id="fl-terceros-wrap" class="space-y-2 animate-slideUp">
+                    <label class="text-[10px] font-black uppercase text-orange-600 ml-2"><i class="fa-solid fa-user-group mr-1"></i>Cuenta terceros (opcional)</label>
+                    <select id="fl-terceros-acc" class="form-input text-sm bg-orange-50/40 border-orange-100">
+                        <option value="">— Sin vincular —</option>
+                    </select>
+                    <p class="text-[8px] font-bold text-slate-400 ml-2 leading-relaxed">Vincula una bóveda de terceros para seguimiento aislado del pasivo.</p>
+                </div>
+                <div id="fl-banco-wrap" class="hidden space-y-2 animate-slideUp bg-emerald-50/40 p-3 rounded-2xl border border-emerald-100">
+                    <label class="text-[10px] font-black uppercase text-emerald-700 ml-1"><i class="fa-solid fa-building-columns mr-1"></i>Enlace de pago PSE</label>
+                    <select id="fl-pse-link" class="form-input text-sm font-bold bg-white border-emerald-200">
+                        <option value="">Configurar después…</option>
+                    </select>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <button type="button" onclick="openNewPSEFormFromLoanEditor()" class="flex-1 bg-emerald-500 text-white py-2.5 rounded-xl text-[9px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-plus mr-1"></i>Nuevo enlace PSE</button>
+                        <button type="button" onclick="openPSEHub()" class="flex-1 bg-white text-emerald-700 border border-emerald-200 py-2.5 rounded-xl text-[9px] font-black uppercase active:scale-95">Centro PSE</button>
+                    </div>
+                    <p class="text-[8px] font-bold text-emerald-800/70 ml-1 leading-relaxed">Al guardar, en Deudas verás el botón <b>Pagar vía PSE</b> (portal directo o NIC copiado).</p>
+                </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Total</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fl-amount" required class="form-input text-lg font-black text-center text-black cursor-pointer"></div>
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="fl-currency" class="form-input text-sm text-center bg-amber-50 border-amber-100 text-amber-900"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
@@ -2662,6 +2706,7 @@
                 </div>
                 <form onsubmit="savePSELink(event)" class="space-y-4">
                     <input type="hidden" id="f-pse-id">
+                    <input type="hidden" id="f-pse-loan-id" value="">
                     
                     <!-- APEX FIX: Selector de Tipo de Enlace Integrado -->
                     <div class="grid grid-cols-2 gap-3">
@@ -2999,6 +3044,11 @@
                     if (typeof nexusRootDeleteTransaction === 'function' && nexusRootDeleteTransaction(txId, meta)) {
                         if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
                         if (typeof closeForm === 'function') closeForm();
+                    }
+                }
+                else if(action === 'restore_deleted_tx') {
+                    if (typeof nexusRestoreArchivedTransaction === 'function' && nexusRestoreArchivedTransaction(payload)) {
+                        if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
                     }
                 }
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
@@ -7954,8 +8004,19 @@
                 let currentBalance = l.total; if(l.rate === 0) { currentBalance = l.total - (quota * paid); } else { const r = l.rate / 100; for(let j=0; j<paid; j++) currentBalance -= (quota - (currentBalance * r)); } if(currentBalance < 0.01) currentBalance = 0;
                 if (remaining > 0) { totalDebt += currentBalance; totalMonthlyPayment += quota; weightedRateSum += (l.rate * currentBalance); }
                 const isCC = !!l.isCC; const isPend = l.id.startsWith('pend_');
+                const isBancoDebt = l.creditorType === 'banco' && !isCC && !isPend;
                 const typeIcon = isCC ? '<i class="fa-solid fa-credit-card text-red-500 mr-1"></i> Tarjeta Crédito' : (isPend ? '<i class="fa-solid fa-bolt text-rose-500 mr-1"></i> Pendiente Único' : '<i class="fa-solid fa-building-columns text-blue-500 mr-1"></i> Préstamo'); 
                 const typeBadge = `<span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200 shadow-sm">${typeIcon}</span>`;
+                let creditorBadge = '';
+                if (isBancoDebt) {
+                    creditorBadge = '<span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-emerald-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>Banco · PSE</span>';
+                } else if (l.tercerosAccId) {
+                    const ta = (state.accounts || []).find(a => a.id === l.tercerosAccId);
+                    const tName = ta ? ta.name : 'Terceros';
+                    creditorBadge = `<span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-orange-200 shadow-sm"><i class="fa-solid fa-user-group mr-1"></i>${tName}</span>`;
+                } else if (!isCC && !isPend && (l.creditorType === 'terceros' || !l.creditorType)) {
+                    creditorBadge = '<span class="bg-orange-50 text-orange-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-orange-100 shadow-sm">Terceros</span>';
+                }
                 
                 let priorityBadge = '';
                 if (isPend && l.priority) {
@@ -7966,7 +8027,10 @@
                     priorityBadge = `<span class="${pBg} ${pText} px-2 py-0.5 rounded-md text-[8px] font-black uppercase border shadow-sm">Prioridad: ${pLbl}</span>`;
                 }
                 
-                const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan(event, '${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4 gap-2"><div class="min-w-0 flex-1 pr-2"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Cuota Fija</p><p class="text-sm font-black theme-val-exp truncate" title="${fmt(quota, l.currency)}">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end min-w-0 flex-1"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Saldo Actual</p><p class="text-lg font-black theme-val-exp truncate w-full text-right" title="${fmt(currentBalance, l.currency)}">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div><button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
+                const payPseBtn = isBancoDebt
+                    ? `<button type="button" onclick="openLoanPSEPayModal('${l.id}')" class="w-full bg-emerald-500 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pagar vía PSE</button>`
+                    : '';
+                const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${creditorBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan(event, '${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4 gap-2"><div class="min-w-0 flex-1 pr-2"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Cuota Fija</p><p class="text-sm font-black theme-val-exp truncate" title="${fmt(quota, l.currency)}">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end min-w-0 flex-1"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Saldo Actual</p><p class="text-lg font-black theme-val-exp truncate w-full text-right" title="${fmt(currentBalance, l.currency)}">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div>${payPseBtn}<button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
                 if (remaining > 0) htmlPending += cardHtml; else htmlPaid += cardHtml;
             });
             listPending.innerHTML = htmlPending || `<p class="text-[10px] text-slate-400 font-bold uppercase col-span-2 text-center py-6 border border-dashed rounded-2xl">No hay deudas pendientes</p>`;
@@ -8036,6 +8100,17 @@
                 const isPaidRow = i <= paid ? 'bg-emerald-50/30 opacity-60' : 'hover:bg-amber-50/50 transition-colors';
                 tbody += `<tr class="${isPaidRow} border-b border-slate-50"><td class="px-4 py-3"><div class="font-bold text-xs text-slate-700">Cuota ${i} ${i<=paid?'<i class="fa-solid fa-check text-emerald-500 ml-1"></i>':''}</div><div class="font-mono text-[9px] text-slate-400">${currentDate.toISOString().split('T')[0]}</div></td><td class="px-4 py-3 text-right font-medium text-xs text-slate-600">${fmt(principal, loan.currency)}</td><td class="px-4 py-3 text-right font-medium text-xs text-red-400">+${fmt(interest, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-slate-800 bg-slate-50/50">${fmt(quota, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-amber-600">${fmt(balance, loan.currency)}</td></tr>`;
             } const detTab = $id('det-loan-table'); if(detTab) detTab.innerHTML = tbody;
+            const pseBlock = $id('det-loan-pse-actions');
+            if (pseBlock) {
+                const isBancoDetail = loan.creditorType === 'banco' && !loan.id.startsWith('pend_') && !loan.isCC;
+                if (isBancoDetail) {
+                    pseBlock.classList.remove('hidden');
+                    pseBlock.innerHTML = `<button type="button" onclick="openLoanPSEPayModal('${loan.id}')" class="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pagar vía PSE</button>`;
+                } else {
+                    pseBlock.classList.add('hidden');
+                    pseBlock.innerHTML = '';
+                }
+            }
         }
 
         function hideLoanDetail() {
@@ -8050,6 +8125,152 @@
             saveState(); 
             renderLoansList(); 
             updateDashboard(); 
+        }
+
+        let currentLoanPsePayId = null;
+
+        function toggleLoanCreditorFields() {
+            const type = $id('fl-creditor-type') ? $id('fl-creditor-type').value : 'terceros';
+            const tw = $id('fl-terceros-wrap');
+            const bw = $id('fl-banco-wrap');
+            if (tw) tw.classList.toggle('hidden', type !== 'terceros');
+            if (bw) bw.classList.toggle('hidden', type !== 'banco');
+        }
+
+        function populateLoanCreditorSelects() {
+            const tercerosSel = $id('fl-terceros-acc');
+            if (tercerosSel) {
+                const prev = tercerosSel.value;
+                tercerosSel.innerHTML = '<option value="">— Sin vincular —</option>';
+                (state.accounts || []).filter(a => a && a.type === 'terceros').forEach(a => {
+                    tercerosSel.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+                });
+                if (prev) tercerosSel.value = prev;
+            }
+            const pseSel = $id('fl-pse-link');
+            if (pseSel) {
+                const prevPse = pseSel.value;
+                pseSel.innerHTML = '<option value="">Configurar después…</option>';
+                (state.pseLinks || []).forEach(p => {
+                    if (!p || !p.id) return;
+                    const ref = p.reference ? (' • ' + p.reference) : '';
+                    pseSel.innerHTML += `<option value="${p.id}">${p.name}${ref}</option>`;
+                });
+                if (prevPse) pseSel.value = prevPse;
+            }
+        }
+
+        function nexusBindPseLinkToLoan(loanId, pseLinkId, loanNameHint) {
+            if (!pseLinkId) return;
+            let loan = loanId ? (state.loans || []).find(l => l.id === loanId) : null;
+            if (!loan && loanNameHint) {
+                loan = (state.loans || []).find(l => l.creditorType === 'banco' && l.name === loanNameHint);
+            }
+            if (!loan) return;
+            loan.creditorType = 'banco';
+            loan.pseLinkId = pseLinkId;
+            const link = (state.pseLinks || []).find(p => p.id === pseLinkId);
+            if (link) {
+                link.loanId = loan.id;
+                link.type = link.type || 'debt';
+            }
+            saveState();
+        }
+
+        function openNewPSEFormFromLoanEditor() {
+            const loanId = $id('fl-id') ? $id('fl-id').value : '';
+            const loanName = ($id('fl-name') ? $id('fl-name').value : '').trim();
+            if (!loanName) return alert('Escribe primero el nombre de la deuda.');
+            const loanField = $id('f-pse-loan-id');
+            if (loanField) loanField.value = loanId || '';
+            window.__nexusPseLinkForLoanName = loanId ? null : loanName;
+            if ($id('fl-creditor-type')) $id('fl-creditor-type').value = 'banco';
+            toggleLoanCreditorFields();
+            openNewPSEForm(null, loanName);
+            const typeSel = $id('f-pse-type');
+            if (typeSel) typeSel.value = 'debt';
+            if (typeof togglePSENotifications === 'function') togglePSENotifications();
+        }
+
+        function openNewPSEFormFromLoanPayModal() {
+            if (!currentLoanPsePayId) return;
+            const loan = (state.loans || []).find(l => l.id === currentLoanPsePayId);
+            if (!loan) return;
+            const loanField = $id('f-pse-loan-id');
+            if (loanField) loanField.value = loan.id;
+            openNewPSEForm(null, loan.name);
+            const typeSel = $id('f-pse-type');
+            if (typeSel) typeSel.value = 'debt';
+            if (typeof togglePSENotifications === 'function') togglePSENotifications();
+        }
+
+        function closeLoanPSEPayModal() {
+            nexusHideModalInstant($id('loan-pse-pay-modal'));
+            currentLoanPsePayId = null;
+        }
+
+        function nexusEscapeJsStr(s) {
+            return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        }
+
+        function openLoanPSEPayModal(loanId) {
+            const loan = (state.loans || []).find(l => l.id === loanId);
+            if (!loan) return;
+            if (!state.pseLinks) state.pseLinks = [];
+            currentLoanPsePayId = loanId;
+            const mod = $id('loan-pse-pay-modal');
+            const actions = $id('loan-pse-pay-actions');
+            const sub = $id('loan-pse-pay-subtitle');
+            if (sub) sub.innerText = loan.name;
+            if (!actions || !mod) return;
+
+            const linked = loan.pseLinkId ? state.pseLinks.find(p => p.id === loan.pseLinkId) : null;
+            const nameKey = (loan.name || '').trim().toLowerCase();
+            const related = state.pseLinks.filter(p => {
+                if (!p) return false;
+                if (linked && p.id === linked.id) return false;
+                const pn = (p.name || '').trim().toLowerCase();
+                return pn === nameKey || pn.includes(nameKey) || nameKey.includes(pn);
+            });
+
+            let html = '';
+            if (linked) {
+                const safeRef = nexusEscapeJsStr(linked.reference || '');
+                const safeUrl = nexusEscapeJsStr(linked.url || '');
+                if (linked.reference && linked.url) {
+                    html += `<button type="button" onclick="copyAndPayPSE('${safeRef}', '${safeUrl}')" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pago directo (enlace vinculado)</button>`;
+                } else if (linked.url) {
+                    html += `<button type="button" onclick="redirigirPagoDirecto('${safeUrl}')" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-arrow-up-right-from-square"></i> Ir al portal vinculado</button>`;
+                }
+                html += `<p class="text-[8px] font-bold text-emerald-700/80 uppercase text-center">${linked.name}${linked.refName ? ' · ' + linked.refName : ''}</p>`;
+            } else {
+                html += `<p class="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3 uppercase">Sin enlace vinculado. Crea uno nuevo o elige abajo.</p>`;
+            }
+
+            related.forEach(p => {
+                const safeRef = nexusEscapeJsStr(p.reference || '');
+                const safeUrl = nexusEscapeJsStr(p.url || '');
+                const label = (p.name || 'Enlace') + (p.refName ? ' · ' + p.refName : '');
+                if (p.reference && p.url) {
+                    html += `<button type="button" onclick="loanUsePseLinkForDebt('${loanId}', '${p.id}'); copyAndPayPSE('${safeRef}', '${safeUrl}')" class="w-full bg-white border border-emerald-200 text-emerald-800 p-3 rounded-xl font-black uppercase text-[9px] active:scale-95 text-left">${label}<span class="block text-[8px] font-mono text-slate-500 mt-1">${p.reference}</span></button>`;
+                } else if (p.url) {
+                    html += `<button type="button" onclick="loanUsePseLinkForDebt('${loanId}', '${p.id}'); redirigirPagoDirecto('${safeUrl}')" class="w-full bg-white border border-slate-200 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] active:scale-95 text-left"><i class="fa-solid fa-building-columns mr-1"></i>${label}</button>`;
+                }
+            });
+
+            if (!html) {
+                html = '<p class="text-center text-[10px] font-bold text-slate-400 py-4 uppercase">No hay enlaces PSE. Crea uno abajo.</p>';
+            }
+            actions.innerHTML = html;
+            mod.classList.remove('hidden');
+        }
+
+        function loanUsePseLinkForDebt(loanId, pseLinkId) {
+            nexusBindPseLinkToLoan(loanId, pseLinkId);
+            const loan = (state.loans || []).find(l => l.id === loanId);
+            if (loan) loan.pseLinkId = pseLinkId;
+            const pseSel = $id('fl-pse-link');
+            if (pseSel) pseSel.value = pseLinkId;
         }
 
         function editLoan(id) {
@@ -8072,24 +8293,68 @@
                 const termEl = $id('fl-term'); termEl.value = l.term; termEl.dataset.raw = l.term;
                 $id('fl-date').value = l.date.split('T')[0];
                 if($id('fl-currency')) $id('fl-currency').value = l.currency || state.activeCurrency;
+                populateLoanCreditorSelects();
+                if ($id('fl-creditor-type')) $id('fl-creditor-type').value = l.creditorType || 'terceros';
+                if ($id('fl-terceros-acc')) $id('fl-terceros-acc').value = l.tercerosAccId || '';
+                if ($id('fl-pse-link')) $id('fl-pse-link').value = l.pseLinkId || '';
+                toggleLoanCreditorFields();
             }
         }
 
-        function openLoanForm() { const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab(); const mod = $id('loan-modal'); if(!mod) return; mod.classList.remove('hidden'); if($id('fl-id')) $id('fl-id').value = ''; $id('fl-name').value = ''; const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = ''; const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = ''; $id('fl-date').value = new Date().toISOString().split('T')[0]; if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency; }
+        function openLoanForm() {
+            const m = $id('fab-menu'); if(m && !m.classList.contains('hidden')) toggleFab();
+            const mod = $id('loan-modal'); if(!mod) return;
+            mod.classList.remove('hidden');
+            if($id('fl-id')) $id('fl-id').value = '';
+            $id('fl-name').value = '';
+            const amtEl = $id('fl-amount'); amtEl.value = ''; amtEl.dataset.raw = '';
+            const rateEl = $id('fl-rate'); rateEl.value = ''; rateEl.dataset.raw = '';
+            const termEl = $id('fl-term'); termEl.value = ''; termEl.dataset.raw = '';
+            $id('fl-date').value = new Date().toISOString().split('T')[0];
+            if($id('fl-currency')) $id('fl-currency').value = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
+            populateLoanCreditorSelects();
+            if ($id('fl-creditor-type')) $id('fl-creditor-type').value = 'terceros';
+            if ($id('fl-terceros-acc')) $id('fl-terceros-acc').value = '';
+            if ($id('fl-pse-link')) $id('fl-pse-link').value = '';
+            toggleLoanCreditorFields();
+        }
         
         function closeLoanForm() { nexusHideModalInstant($id('loan-modal')); }
         
         function saveLoan(e) { 
             e.preventDefault(); const idEl = $id('fl-id'); const id = idEl ? idEl.value : ''; const name = $id('fl-name').value; const amount = parseFloat($id('fl-amount').dataset.raw) || 0; const rate = parseFloat($id('fl-rate').dataset.raw) || 0; const term = parseInt($id('fl-term').dataset.raw) || 0; const date = $id('fl-date').value; 
             if(!name || amount <= 0 || term <= 0) return alert("Monto y plazo mayores a cero."); 
-            const currency = $id('fl-currency') ? $id('fl-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency); 
+            const currency = $id('fl-currency') ? $id('fl-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
+            const creditorType = $id('fl-creditor-type') ? $id('fl-creditor-type').value : 'terceros';
+            const tercerosAccId = ($id('fl-terceros-acc') && $id('fl-terceros-acc').value) ? $id('fl-terceros-acc').value : null;
+            const pseLinkId = (creditorType === 'banco' && $id('fl-pse-link') && $id('fl-pse-link').value) ? $id('fl-pse-link').value : null;
+            const creditorPatch = {
+                creditorType,
+                tercerosAccId: creditorType === 'terceros' ? tercerosAccId : null,
+                pseLinkId: creditorType === 'banco' ? pseLinkId : null
+            };
             if(id) { 
                 const l = state.loans.find(x => x.id === id); 
-                if(l) { l.name = name; l.total = amount; l.rate = rate; l.term = term; l.date = new Date(`${date}T12:00:00`).toISOString(); l.currency = currency; } 
+                if(l) {
+                    l.name = name; l.total = amount; l.rate = rate; l.term = term;
+                    l.date = new Date(`${date}T12:00:00`).toISOString(); l.currency = currency;
+                    Object.assign(l, creditorPatch);
+                    if (pseLinkId) nexusBindPseLinkToLoan(l.id, pseLinkId);
+                }
             } else { 
-                const newLoan = { id: 'loan_' + Date.now(), name, total: amount, balance: amount, rate, term, paidQuotas: 0, date: new Date(`${date}T12:00:00`).toISOString(), currency: currency, isBNPL: false }; 
-                state.loans.push(newLoan); 
-            } 
+                const newLoan = {
+                    id: 'loan_' + Date.now(), name, total: amount, balance: amount, rate, term,
+                    paidQuotas: 0, date: new Date(`${date}T12:00:00`).toISOString(),
+                    currency: currency, isBNPL: false, ...creditorPatch
+                };
+                state.loans.push(newLoan);
+                if (pseLinkId) nexusBindPseLinkToLoan(newLoan.id, pseLinkId);
+                if (window.__nexusPseLinkForLoanName && !pseLinkId) {
+                    const pendingLink = (state.pseLinks || []).find(p => p.name === window.__nexusPseLinkForLoanName);
+                    if (pendingLink) nexusBindPseLinkToLoan(newLoan.id, pendingLink.id);
+                }
+            }
+            window.__nexusPseLinkForLoanName = null;
             saveState(); updateDashboard(); closeLoanForm(); 
             const lv = $id('loans-view-list'); const ld = $id('loans-view-detail'); if(lv) lv.classList.remove('hidden'); if(ld) ld.classList.add('hidden'); 
             renderLoansList(); 
@@ -8727,6 +8992,97 @@
             }
         }
 
+        /** Reaplica el efecto en saldo al restaurar desde papelera (misma lógica que saveTransaction). */
+        function nexusApplyTxBalanceEffect(tx) {
+            if (!tx) return;
+            const touch = (acc) => {
+                if (!acc) return;
+                if (acc.isShared && acc.syncedOnce && typeof nexusApplySharedTxOnBalance === 'function') {
+                    nexusApplySharedTxOnBalance(acc, tx);
+                    return;
+                }
+                if (tx.type === 'transfer') {
+                    if (tx.accId === acc.id) { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                    if (tx.toAccId === acc.id) { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
+                    if (tx.type === 'income') { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                    if (tx.type === 'expense') { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                }
+            };
+            if (tx.type === 'transfer') {
+                touch(state.accounts.find(a => a.id === tx.accId));
+                touch(state.accounts.find(a => a.id === tx.toAccId));
+            } else {
+                touch(state.accounts.find(a => a.id === tx.accId));
+            }
+        }
+
+        function nexusCanRestoreArchivedTx(tx) {
+            if (!tx) return { ok: false, reason: 'Registro inválido.' };
+            if (tx.type === 'transfer') {
+                const orig = (state.accounts || []).find(a => a.id === tx.accId);
+                const dest = (state.accounts || []).find(a => a.id === tx.toAccId);
+                if (!orig || !dest) return { ok: false, reason: 'La cuenta origen o destino ya no existe. Crea la bóveda antes de restaurar.' };
+                return { ok: true };
+            }
+            if (!tx.accId) return { ok: false, reason: 'Sin bóveda asociada.' };
+            const acc = (state.accounts || []).find(a => a.id === tx.accId);
+            if (!acc) return { ok: false, reason: 'La bóveda «' + (tx.accId || '') + '» ya no existe. Crea la cuenta antes de restaurar.' };
+            return { ok: true };
+        }
+
+        function nexusRestoreArchivedTransaction(txId) {
+            if (!txId) return false;
+            nexusEnsureDeletedAccountsRegistry();
+            const entry = (state.deletedTxArchive || []).find(e => e && e.id === txId);
+            if (!entry || !entry.tx) {
+                alert('⚠️ No se encontró esta transacción en la papelera (puede haber expirado).');
+                return false;
+            }
+            const tx = JSON.parse(JSON.stringify(entry.tx));
+            const check = nexusCanRestoreArchivedTx(tx);
+            if (!check.ok) {
+                alert('⚠️ No se puede restaurar.\n\n' + check.reason);
+                return false;
+            }
+            const alreadyLive = (state.tx || []).some(t => t.id === txId);
+            if (!alreadyLive) {
+                delete tx.auditArchived;
+                delete tx.auditAccountId;
+                delete tx.auditAccountName;
+                tx.updatedAt = Date.now();
+                if (typeof nexusTouchEntityUpdatedAt === 'function') nexusTouchEntityUpdatedAt(tx, 'tx');
+                nexusApplyTxBalanceEffect(tx);
+                state.tx.push(tx);
+                if (typeof saveCloudTx === 'function') saveCloudTx(tx);
+                const acc = (state.accounts || []).find(a => a.id === tx.accId);
+                const dest = (state.accounts || []).find(a => a.id === tx.toAccId);
+                if (acc && acc.isShared && acc.remoteId && typeof nexusPushSharedP2PInstant === 'function') {
+                    nexusPushSharedP2PInstant('accounts', acc.remoteId);
+                }
+                if (dest && dest.isShared && dest.remoteId && typeof nexusPushSharedP2PInstant === 'function') {
+                    nexusPushSharedP2PInstant('accounts', dest.remoteId);
+                }
+            }
+            state.deletedTxIds = (state.deletedTxIds || []).filter(id => id !== txId);
+            if (state.deletedSharedTxs) state.deletedSharedTxs = state.deletedSharedTxs.filter(id => id !== txId);
+            state.deletedTxArchive = (state.deletedTxArchive || []).filter(e => e.id !== txId);
+            if (typeof nexusTouchLocalState === 'function') nexusTouchLocalState('tx-restore');
+            if (typeof nexusMarkForceLocalWin === 'function') nexusMarkForceLocalWin(120000);
+            if (typeof nexusRunBackgroundPushNow === 'function') nexusRunBackgroundPushNow('tx-restore');
+            saveState();
+            return true;
+        }
+
+        function promptRestoreDeletedTransaction(txId) {
+            if (!txId) return;
+            triggerUIConfirm(
+                '¿Restaurar esta transacción?\n\nVolverá a Cuentas, Auditoría e informes. Se reajustará el saldo de la bóveda asociada.',
+                'restore_deleted_tx',
+                txId
+            );
+        }
+
         function nexusArchiveDeletedTx(tx, meta) {
             nexusEnsureDeletedAccountsRegistry();
             nexusPurgeExpiredDeletedTxArchive();
@@ -8867,7 +9223,12 @@
                 const accName = e.accountName || '—';
                 const note = (t.note || (t.cat && t.cat.length > 2 ? t.cat.substring(2) : t.cat) || 'Sin descripción');
                 const safeNote = String(note).replace(/</g, '&lt;');
-                return `<div class="theme-card p-4 rounded-2xl border border-rose-100/80 shadow-sm"><div class="flex justify-between items-start gap-2"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div></div>`;
+                const safeId = String(e.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const canRestore = nexusCanRestoreArchivedTx(t).ok;
+                const restoreBtn = canRestore
+                    ? `<button type="button" onclick="event.stopPropagation(); promptRestoreDeletedTransaction('${safeId}')" class="shrink-0 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl text-[8px] font-black uppercase active:scale-95 hover:bg-emerald-100 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Restaurar</button>`
+                    : `<span class="shrink-0 text-[7px] font-bold text-slate-400 uppercase px-2 py-1" title="Bóveda no disponible">Sin bóveda</span>`;
+                return `<div class="theme-card p-4 rounded-2xl border border-rose-100/80 shadow-sm"><div class="flex justify-between items-start gap-2"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div><div class="flex justify-end mt-2 pt-2 border-t border-rose-50">${restoreBtn}</div></div>`;
             }).join('');
         }
 
@@ -10455,10 +10816,13 @@ ${JSON.stringify(dataToAnalyze)}`;
                     if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
                     if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
                     if($id('f-pse-time')) $id('f-pse-time').value = link.time || '09:00';
+                    if ($id('f-pse-loan-id')) $id('f-pse-loan-id').value = link.loanId || '';
                     if(titleEl) titleEl.innerText = "Editar Enlace";
                 }
             } else {
                 $id('f-pse-id').value = '';
+                const loanField = $id('f-pse-loan-id');
+                if (loanField && !loanField.value) loanField.value = '';
                 
                 if (prefillName) {
                     $id('f-pse-name').value = prefillName;
@@ -10523,6 +10887,20 @@ ${JSON.stringify(dataToAnalyze)}`;
             } else {
                 currentPseId = 'pse_' + Date.now();
                 state.pseLinks.push({ id: currentPseId, name, type, refName, reference, url, icon, freq, cutoff, payday, time: timeAlarm });
+            }
+
+            const loanIdFromForm = $id('f-pse-loan-id') ? $id('f-pse-loan-id').value : '';
+            if (loanIdFromForm || window.__nexusPseLinkForLoanName) {
+                nexusBindPseLinkToLoan(loanIdFromForm, currentPseId, window.__nexusPseLinkForLoanName || name);
+            }
+            if ($id('f-pse-loan-id')) $id('f-pse-loan-id').value = '';
+            window.__nexusPseLinkForLoanName = null;
+            const loanMod = $id('loan-modal');
+            if (loanMod && !loanMod.classList.contains('hidden') && typeof populateLoanCreditorSelects === 'function') {
+                populateLoanCreditorSelects();
+                if ($id('fl-pse-link')) $id('fl-pse-link').value = currentPseId;
+                if ($id('fl-creditor-type')) $id('fl-creditor-type').value = 'banco';
+                toggleLoanCreditorFields();
             }
 
             // APEX FIX: Generación/Actualización de Tarea Automática Multidía (Soporta -3, -2, -1 y Día Cero)
