@@ -1147,16 +1147,13 @@
                     <h3 class="text-[11px] font-black uppercase text-amber-700 tracking-widest mb-2"><i class="fa-solid fa-eraser mr-2"></i> Reset total</h3>
                     <p class="text-[9px] text-amber-900/80 font-bold mb-4 leading-relaxed">Borra todos los registros (movimientos, tareas, metas, proyectos, presupuestos). Conserva tus <b>cuentas</b> y <b>deudas</b> en estructura vacía (saldos y cuotas en cero) para volver a cargar información. Mantiene PIN, sesión y perfil.</p>
                     <div id="soft-reset-confirm-zone" class="hidden space-y-3 mb-4 animate-slideUp">
-                        <p class="text-[10px] text-amber-800 font-bold uppercase">Confirma con tu PIN y escribe <b>RESET</b>:</p>
-                        <div class="flex gap-2">
-                            <input type="password" id="soft-reset-pin" maxlength="4" inputmode="numeric" class="form-input text-center text-amber-800 font-black w-1/4 bg-white border-amber-200 tracking-[0.5em]" placeholder="PIN">
-                            <input type="text" id="soft-reset-keyword" class="form-input text-center text-amber-800 font-black uppercase flex-1 bg-white border-amber-200" placeholder="Escriba RESET">
-                        </div>
+                        <p class="text-[10px] text-amber-800 font-bold uppercase">Identidad verificada. Escribe <b>RESET</b> para confirmar:</p>
+                        <input type="text" id="soft-reset-keyword" class="form-input text-center text-amber-800 font-black uppercase w-full bg-white border-amber-200" placeholder="Escriba RESET" autocomplete="off">
                         <div class="flex gap-2 mt-2">
-                            <button onclick="executeSoftReset()" type="button" class="flex-1 bg-amber-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Confirmar reset</button>
+                            <button id="btn-execute-soft-reset" onclick="executeSoftReset()" type="button" disabled class="flex-1 bg-amber-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform opacity-50 cursor-not-allowed">Confirmar reset</button>
                             <button onclick="cancelSoftReset()" type="button" class="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform">Cancelar</button>
                         </div>
-                        <p id="soft-reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">PIN o palabra RESET incorrectos.</p>
+                        <p id="soft-reset-error-msg" class="text-[9px] text-red-500 font-bold hidden">Debes escribir RESET exactamente.</p>
                     </div>
                     <button id="btn-init-soft-reset" onclick="initSoftReset()" type="button" class="w-full bg-amber-600 text-white py-4 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-transform">Reset total</button>
                 </div>
@@ -7206,6 +7203,7 @@
 
         // TABS
         function renderAccountsTab() {
+            if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             nexusApplyAccountTombstonesToState();
             const sumContainer = $id('acc-hub-summary'); const listContainer = $id('acc-hub-list'); if(!sumContainer || !listContainer) return;
             
@@ -7969,8 +7967,7 @@
             
             saveState();
             if (newAcc.isShared) {
-                if (typeof nexusPushSharedP2PNow === 'function') nexusPushSharedP2PNow();
-                if (typeof nexusScheduleFlushSharedAccountVault === 'function') nexusScheduleFlushSharedAccountVault(newAcc, 0);
+                if (typeof nexusPushSharedP2PInstant === 'function') nexusPushSharedP2PInstant('accounts', newAcc.remoteId || newAcc.id);
                 if (typeof attachP2PListener === 'function') attachP2PListener();
                 setTimeout(() => generateShareTokenForAccount(newAcc.id), wasNew ? 400 : 120);
             }
@@ -9897,7 +9894,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                     }
                 }
             }
-            saveState(); updateDashboard(); closeForm(); 
+            saveState();
+            if (acc && acc.isShared && acc.remoteId && typeof nexusPushSharedP2PInstant === 'function') {
+                nexusPushSharedP2PInstant('accounts', acc.remoteId);
+            }
+            if (destAcc && destAcc.isShared && destAcc.remoteId && typeof nexusPushSharedP2PInstant === 'function') {
+                nexusPushSharedP2PInstant('accounts', destAcc.remoteId);
+            }
+            updateDashboard(); closeForm(); 
             
             // APEX FIX: Ruteo de refresco global
             if(state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase(); 
@@ -10545,6 +10549,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function renderTasksTab() {
+            if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             if (typeof clearNativeAppBadge === 'function') clearNativeAppBadge(); // renderTasksTab clear badge
             if(!state.tasks) state.tasks = [];
             
@@ -10929,7 +10934,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 state.tasks.push(newTask);
             }
             saveState();
-            if (vaultId && vaultId !== 'personal') nexusScheduleFlushSharedTaskVault(vaultId, 0);
+            if (vaultId && vaultId !== 'personal') nexusPushSharedP2PInstant('tasks', vaultId);
             renderTasksTab(); closeTaskForm(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
 
@@ -10954,7 +10959,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                     syncNativeTaskAlarm(t);
                 }
                 saveState();
-                if (t.vaultId && t.vaultId !== 'personal') nexusScheduleFlushSharedTaskVault(t.vaultId, 0);
+                if (t.vaultId && t.vaultId !== 'personal') nexusPushSharedP2PInstant('tasks', t.vaultId);
                 renderTasksTab(); updateDashboard(); 
                 if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
             }
@@ -10973,7 +10978,7 @@ ${JSON.stringify(dataToAnalyze)}`;
 
             state.tasks = state.tasks.filter(t => t.id !== id);
             saveState();
-            if (sharedVaultId) nexusScheduleFlushSharedTaskVault(sharedVaultId, 0);
+            if (sharedVaultId) nexusPushSharedP2PInstant('tasks', sharedVaultId);
             renderTasksTab(); updateDashboard();
             if($id('projects-main-view') && $id('projects-main-view').classList.contains('hidden')) renderProjectsTab();
             
@@ -11046,6 +11051,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function renderProjectsTab() {
+            if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             if(!state.projects) state.projects = [];
             if(!state.projectVaults) state.projectVaults = [];
             const mainView = $id('projects-main-view'); const detailView = $id('projects-detail-view');
@@ -11353,7 +11359,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if(state.tx) state.tx.forEach(t => { if(t.projectId === id) delete t.projectId; });
                 if(state.tasks) state.tasks.forEach(t => { if(t.projectId === id) delete t.projectId; });
                 saveState();
-                if (vault) nexusScheduleFlushSharedProjectVault(vault, 0);
+                if (vault) nexusPushSharedP2PInstant('projects', vault.remoteId || vault.id);
                 renderProjectsTab(); hideProjectDetail();
             } else if (type === 'phase') {
                 const projId = id; const phaseIdx = parseInt(aux);
@@ -14419,14 +14425,32 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             switchTab('database');
         }
         // --- RESET SUAVE: Solo registros (conserva cuentas y tareas) ---
+        function nexusEnableSoftResetConfirmButton() {
+            const confirmBtn = $id('btn-execute-soft-reset');
+            if (!confirmBtn) return;
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+        function nexusDisableSoftResetConfirmButton() {
+            const confirmBtn = $id('btn-execute-soft-reset');
+            if (!confirmBtn) return;
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
         function initSoftReset() {
-            const btn = $id('btn-init-soft-reset');
-            const zone = $id('soft-reset-confirm-zone');
-            if (btn) btn.classList.add('hidden');
-            if (zone) zone.classList.remove('hidden');
-            const kw = $id('soft-reset-keyword'); if (kw) kw.value = '';
-            const pin = $id('soft-reset-pin'); if (pin) pin.value = '';
-            const err = $id('soft-reset-error-msg'); if (err) err.classList.add('hidden');
+            requireAuthForAction(() => {
+                const btn = $id('btn-init-soft-reset');
+                const zone = $id('soft-reset-confirm-zone');
+                if (btn) btn.classList.add('hidden');
+                if (zone) zone.classList.remove('hidden');
+                const kw = $id('soft-reset-keyword');
+                if (kw) { kw.value = ''; setTimeout(() => kw.focus(), 120); }
+                const err = $id('soft-reset-error-msg');
+                if (err) err.classList.add('hidden');
+                nexusEnableSoftResetConfirmButton();
+            }, 'Confirma tu identidad (PIN o biometría) para habilitar el reset total.');
         }
 
         function cancelSoftReset() {
@@ -14434,6 +14458,9 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             const zone = $id('soft-reset-confirm-zone');
             if (btn) btn.classList.remove('hidden');
             if (zone) zone.classList.add('hidden');
+            nexusDisableSoftResetConfirmButton();
+            const kw = $id('soft-reset-keyword'); if (kw) kw.value = '';
+            const err = $id('soft-reset-error-msg'); if (err) err.classList.add('hidden');
         }
 
         async function runSoftResetCore() {
@@ -14475,17 +14502,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         async function executeSoftReset() {
-            const kw = ($id('soft-reset-keyword')?.value || '').trim().toUpperCase();
-            const pin = ($id('soft-reset-pin')?.value || '').trim();
-            const err = $id('soft-reset-error-msg');
-
-            if (kw !== 'RESET') {
-                if (err) err.classList.remove('hidden');
-                return;
+            const confirmBtn = $id('btn-execute-soft-reset');
+            if (confirmBtn && confirmBtn.disabled) {
+                return alert('Primero verifica tu identidad con PIN o biometría (pulsa «Reset total» de nuevo).');
             }
-
-            const pinOk = await verifyPrivilegedPin(pin);
-            if (!pinOk) {
+            const kw = ($id('soft-reset-keyword')?.value || '').trim().toUpperCase();
+            const err = $id('soft-reset-error-msg');
+            if (kw !== 'RESET') {
                 if (err) err.classList.remove('hidden');
                 return;
             }
@@ -14666,7 +14689,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 renderTaskVaultsList();
                 populateTaskVaultSelects();
                 if (typeof attachTaskP2PListener === 'function') attachTaskP2PListener();
-                alert("✅ Bóveda de tareas vinculada. Sincronizando...");
+                if (typeof nexusHydrateSharedTaskVaultFromCloud === 'function') {
+                    await nexusHydrateSharedTaskVaultFromCloud(data.vaultId);
+                }
+                alert("✅ Bóveda de tareas vinculada. Sincronizando en tiempo real…");
             } catch(e) { alert("Error al leer token."); }
         }
 
@@ -14727,7 +14753,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 renderProjectVaultsList();
                 populateProjectVaultSelect();
                 if (typeof attachProjectP2PListener === 'function') attachProjectP2PListener();
-                alert("✅ Bóveda de proyectos vinculada. Sincronizando...");
+                if (typeof nexusHydrateSharedProjectVaultFromCloud === 'function') {
+                    await nexusHydrateSharedProjectVaultFromCloud(data.vaultId);
+                }
+                alert("✅ Bóveda de proyectos vinculada. Sincronizando en tiempo real…");
             } catch(e) { alert("Error al leer token."); }
         }
 
@@ -15108,7 +15137,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             } else if (typeof nexusScheduleBackgroundPull === 'function') {
                 nexusScheduleBackgroundPull('post-push');
             }
-            if (!nexusIsCloudPullRestricted() && typeof scheduleP2PListenersAttach === 'function') {
+            if (typeof scheduleP2PListenersAttach === 'function') {
                 scheduleP2PListenersAttach(true);
             }
         }
@@ -15984,7 +16013,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             clearTimeout(sharedAccountFlushTimers[rId]);
             sharedAccountFlushTimers[rId] = setTimeout(() => {
                 nexusFlushSharedAccountVault(a).catch(e => console.warn('[NEXUS] flush account vault', e));
-            }, delayMs == null ? 60 : delayMs);
+            }, delayMs == null ? 0 : delayMs);
         }
 
         async function nexusFlushSharedTaskVault(vault) {
@@ -16103,7 +16132,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             clearTimeout(sharedTaskFlushTimers[rId]);
             sharedTaskFlushTimers[rId] = setTimeout(() => {
                 nexusFlushSharedTaskVault(v).catch(e => console.warn('[NEXUS] flush task vault', e));
-            }, delayMs == null ? 60 : delayMs);
+            }, delayMs == null ? 0 : delayMs);
         }
 
         function nexusScheduleFlushSharedProjectVault(vault, delayMs) {
@@ -16113,7 +16142,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             clearTimeout(sharedProjectFlushTimers[rId]);
             sharedProjectFlushTimers[rId] = setTimeout(() => {
                 nexusFlushSharedProjectVault(v).catch(e => console.warn('[NEXUS] flush project vault', e));
-            }, delayMs == null ? 60 : delayMs);
+            }, delayMs == null ? 0 : delayMs);
         }
 
         function nexusFlushAllSharedVaultsImmediate() {
@@ -16124,7 +16153,171 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
         function nexusPushSharedProjectIfNeeded(project) {
             const vault = nexusFindSharedProjectVaultForProject(project);
-            if (vault) nexusScheduleFlushSharedProjectVault(vault, 0);
+            if (vault) nexusPushSharedP2PInstant('projects', vault.remoteId || vault.id);
+        }
+
+        /** Empuje inmediato a Firestore P2P (invalida caché de firma y flush sin debounce). */
+        function nexusPushSharedP2PInstant(kind, vaultOrRemoteId) {
+            if (!vaultOrRemoteId || vaultOrRemoteId === 'personal') return;
+            const rid = String(vaultOrRemoteId);
+            if (lastCloudSyncHash) {
+                if (kind === 'tasks') delete lastCloudSyncHash['stask_' + rid];
+                else if (kind === 'projects') delete lastCloudSyncHash['sproj_' + rid];
+                else if (kind === 'accounts') delete lastCloudSyncHash['shared_' + rid];
+            }
+            if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
+            if (kind === 'tasks') {
+                const v = nexusFindSharedTaskVault(rid);
+                if (v && typeof nexusFlushSharedTaskVault === 'function') {
+                    nexusFlushSharedTaskVault(v).catch(e => console.warn('[NEXUS] instant task P2P', e));
+                }
+            } else if (kind === 'projects') {
+                const v = nexusFindSharedProjectVault(rid);
+                if (v && typeof nexusFlushSharedProjectVault === 'function') {
+                    nexusFlushSharedProjectVault(v).catch(e => console.warn('[NEXUS] instant project P2P', e));
+                }
+            } else if (kind === 'accounts') {
+                const a = nexusFindSharedAccount(rid) || (state.accounts || []).find(x => x.id === rid && x.isShared && x.remoteId);
+                if (a && typeof nexusFlushSharedAccountVault === 'function') {
+                    nexusFlushSharedAccountVault(a).catch(e => console.warn('[NEXUS] instant account P2P', e));
+                }
+            }
+        }
+
+        function nexusApplySharedTaskVaultData(rId, data) {
+            if (!data || !rId) return { hasChanges: false, reminderTasks: [], removedTaskIds: [] };
+            const currentVault = (state.taskVaults || []).find(v => v.remoteId === rId);
+            if (!currentVault) return { hasChanges: false, reminderTasks: [], removedTaskIds: [] };
+            let hasChanges = false;
+            const reminderTasks = [];
+            const removedTaskIds = [];
+            if (data.deletedTasks && Array.isArray(data.deletedTasks)) {
+                if (!state.deletedSharedTasks) state.deletedSharedTasks = [];
+                data.deletedTasks.forEach(delId => {
+                    if ((state.tasks || []).find(t => t.id === delId)) {
+                        removedTaskIds.push(delId);
+                        state.tasks = state.tasks.filter(t => t.id !== delId);
+                        hasChanges = true;
+                    }
+                    if (!state.deletedSharedTasks.includes(delId)) state.deletedSharedTasks.push(delId);
+                });
+            }
+            const incomingTasks = nexusPullMapFromFirestore(data, 'tasksMap', 'tasks');
+            incomingTasks.forEach(netTask => {
+                if (state.deletedSharedTasks && state.deletedSharedTasks.includes(netTask.id)) return;
+                const mappedTask = { ...netTask, vaultId: rId };
+                if (!state.tasks) state.tasks = [];
+                const idx = state.tasks.findIndex(t => t.id === mappedTask.id);
+                if (idx === -1) {
+                    state.tasks.push(mappedTask);
+                    reminderTasks.push(mappedTask);
+                    hasChanges = true;
+                } else {
+                    const winner = nexusMergeEntityById([state.tasks[idx]], [mappedTask])[0];
+                    if (JSON.stringify(state.tasks[idx]) !== JSON.stringify(winner)) {
+                        state.tasks[idx] = winner;
+                        reminderTasks.push(winner);
+                        hasChanges = true;
+                    }
+                }
+            });
+            if (!currentVault.syncedOnce) {
+                currentVault.syncedOnce = true;
+                hasChanges = true;
+                (state.tasks || []).filter(t => t.vaultId === rId).forEach(t => {
+                    if (!reminderTasks.some(x => x.id === t.id)) reminderTasks.push(t);
+                });
+            }
+            return { hasChanges, reminderTasks, removedTaskIds };
+        }
+
+        async function nexusHydrateSharedTaskVaultFromCloud(vaultId) {
+            if (!window.db || !vaultId) return;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+            if (!authPrep.ok) {
+                console.warn('[NEXUS P2P] hydrate tareas:', authPrep.code, authPrep.message);
+                return;
+            }
+            try {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', vaultId);
+                const snap = await getDoc(sharedRef);
+                if (!snap.exists()) return;
+                const applied = nexusApplySharedTaskVaultData(vaultId, snap.data());
+                if (!applied.hasChanges) return;
+                state.tasks = nexusSortByChronology(
+                    (state.tasks || []).filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)),
+                    'dueDate'
+                );
+                NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] hydrate task IDB', e));
+                nexusRefreshSharedTaskReminders(applied.reminderTasks, applied.removedTaskIds);
+                if (sessionUnlocked) {
+                    if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+                    if (state.activeTab === 'tasks' && typeof renderTasksTab === 'function') renderTasksTab();
+                    updateDashboard();
+                }
+            } catch (e) {
+                console.warn('[NEXUS P2P] hydrate task vault', e);
+            }
+        }
+
+        function nexusApplySharedProjectVaultData(rId, data) {
+            if (!data || !rId) return { hasChanges: false, changedProjectIds: [] };
+            const currentVault = (state.projectVaults || []).find(v => v.remoteId === rId);
+            if (!currentVault) return { hasChanges: false, changedProjectIds: [] };
+            let hasChanges = false;
+            const changedProjectIds = [];
+            const incoming = nexusPullMapFromFirestore(data, 'projectsMap', 'projects');
+            incoming.forEach(netProj => {
+                const mapped = { ...netProj, sharedVaultId: rId };
+                if (!state.projects) state.projects = [];
+                const idx = state.projects.findIndex(p => p.id === mapped.id);
+                if (idx === -1) {
+                    state.projects.push(mapped);
+                    changedProjectIds.push(mapped.id);
+                    hasChanges = true;
+                } else {
+                    const winner = nexusMergeEntityById([state.projects[idx]], [mapped])[0];
+                    if (JSON.stringify(state.projects[idx]) !== JSON.stringify(winner)) {
+                        state.projects[idx] = winner;
+                        changedProjectIds.push(winner.id);
+                        hasChanges = true;
+                    }
+                }
+            });
+            if (!currentVault.syncedOnce) {
+                currentVault.syncedOnce = true;
+                hasChanges = true;
+            }
+            return { hasChanges, changedProjectIds };
+        }
+
+        async function nexusHydrateSharedProjectVaultFromCloud(vaultId) {
+            if (!window.db || !vaultId) return;
+            const authPrep = await nexusEnsureGoogleAuthForP2P(false);
+            if (!authPrep.ok) {
+                console.warn('[NEXUS P2P] hydrate proyectos:', authPrep.code, authPrep.message);
+                return;
+            }
+            try {
+                const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const sharedRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', vaultId);
+                const snap = await getDoc(sharedRef);
+                if (!snap.exists()) return;
+                const applied = nexusApplySharedProjectVaultData(vaultId, snap.data());
+                if (!applied.hasChanges) return;
+                state.projects = nexusSortByChronology(
+                    (state.projects || []).filter((p, i, self) => i === self.findIndex(x => x.id === p.id)),
+                    'createdAt'
+                );
+                NexusIDB.saveState(currentUser, state).catch(e => console.warn('[NEXUS] hydrate project IDB', e));
+                if (sessionUnlocked) {
+                    if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+                    if (state.activeTab === 'projects' && typeof renderProjectsTab === 'function') renderProjectsTab();
+                }
+            } catch (e) {
+                console.warn('[NEXUS P2P] hydrate project vault', e);
+            }
         }
 
         function nexusRefreshSharedTaskReminders(changedTasks, removedIds) {
@@ -17589,11 +17782,10 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_vaults', rId);
                     
                     window.sharedUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
-                        if (!docSnap.exists() || docSnap.metadata.hasPendingWrites) return;
+                        if (!docSnap.exists()) return;
 
                         const currentAcc = state.accounts.find(a => a.id === aId);
                         if (!currentAcc) return;
-                        if (nexusIsCloudPullRestricted()) return;
 
                         const data = docSnap.data();
                         let hasSharedChanges = false;
@@ -17662,58 +17854,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_tasks', rId);
 
                     window.sharedTaskUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
-                        if (!docSnap.exists() || docSnap.metadata.hasPendingWrites) return;
+                        if (!docSnap.exists()) return;
 
-                        const currentVault = state.taskVaults.find(v => v.remoteId === rId);
-                        if (!currentVault) return;
-                        if (nexusIsCloudPullRestricted()) return;
+                        const applied = nexusApplySharedTaskVaultData(rId, docSnap.data());
+                        if (!applied.hasChanges) return;
 
-                        const data = docSnap.data();
-                        let hasChanges = false;
-
-                        const reminderTasks = [];
-                        const removedTaskIds = [];
-                        if (data.deletedTasks && Array.isArray(data.deletedTasks)) {
-                            if (!state.deletedSharedTasks) state.deletedSharedTasks = [];
-                            data.deletedTasks.forEach(delId => {
-                                if (state.tasks.find(t => t.id === delId)) {
-                                    removedTaskIds.push(delId);
-                                    state.tasks = state.tasks.filter(t => t.id !== delId);
-                                    hasChanges = true;
-                                }
-                                if (!state.deletedSharedTasks.includes(delId)) state.deletedSharedTasks.push(delId);
-                            });
-                        }
-
-                        const incomingTasks = nexusPullMapFromFirestore(data, 'tasksMap', 'tasks');
-                        incomingTasks.forEach(netTask => {
-                            if (state.deletedSharedTasks && state.deletedSharedTasks.includes(netTask.id)) return;
-                            const mappedTask = { ...netTask, vaultId: rId };
-                            const idx = state.tasks.findIndex(t => t.id === mappedTask.id);
-                            if (idx === -1) {
-                                state.tasks.push(mappedTask);
-                                reminderTasks.push(mappedTask);
-                                hasChanges = true;
-                            } else {
-                                const winner = nexusMergeEntityById([state.tasks[idx]], [mappedTask])[0];
-                                if (JSON.stringify(state.tasks[idx]) !== JSON.stringify(winner)) {
-                                    state.tasks[idx] = winner;
-                                    reminderTasks.push(winner);
-                                    hasChanges = true;
-                                }
-                            }
-                        });
-
-                        const firstVaultSync = !currentVault.syncedOnce;
-                        if (firstVaultSync) {
-                            currentVault.syncedOnce = true;
-                            hasChanges = true;
-                            (state.tasks || []).filter(t => t.vaultId === rId).forEach(t => {
-                                if (!reminderTasks.some(x => x.id === t.id)) reminderTasks.push(t);
-                            });
-                        }
-
-                        if (hasChanges) {
+                        const { reminderTasks, removedTaskIds } = applied;
+                        {
                             state.tasks = nexusSortByChronology(
                                 state.tasks.filter((t, index, self) => index === self.findIndex(tx => tx.id === t.id)),
                                 'dueDate'
@@ -17726,7 +17873,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                                 p2pTaskRenderTimeout = setTimeout(() => {
                                     if (state.activeTab === 'tasks') renderTasksTab();
                                     updateDashboard();
-                                }, 50);
+                                }, 0);
                             }
                         }
                     }, (error) => console.error("[APEX P2P] Error snapshot tareas", error));
@@ -17752,35 +17899,11 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     if (window.sharedProjectUnsubscribers[rId]) return;
                     const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_shared_projects', rId);
                     window.sharedProjectUnsubscribers[rId] = onSnapshot(docRef, (docSnap) => {
-                        if (!docSnap.exists() || docSnap.metadata.hasPendingWrites) return;
-                        const currentVault = state.projectVaults.find(v => v.remoteId === rId);
-                        if (!currentVault) return;
-                        if (nexusIsCloudPullRestricted()) return;
-                        const data = docSnap.data();
-                        let hasChanges = false;
-                        const incoming = nexusPullMapFromFirestore(data, 'projectsMap', 'projects');
-                        const changedProjectIds = [];
-                        incoming.forEach(netProj => {
-                            const mapped = { ...netProj, sharedVaultId: rId };
-                            const idx = state.projects.findIndex(p => p.id === mapped.id);
-                            if (idx === -1) {
-                                state.projects.push(mapped);
-                                changedProjectIds.push(mapped.id);
-                                hasChanges = true;
-                            } else {
-                                const winner = nexusMergeEntityById([state.projects[idx]], [mapped])[0];
-                                if (JSON.stringify(state.projects[idx]) !== JSON.stringify(winner)) {
-                                    state.projects[idx] = winner;
-                                    changedProjectIds.push(winner.id);
-                                    hasChanges = true;
-                                }
-                            }
-                        });
-                        if (!currentVault.syncedOnce) {
-                            currentVault.syncedOnce = true;
-                            hasChanges = true;
-                        }
-                        if (hasChanges) {
+                        if (!docSnap.exists()) return;
+                        const applied = nexusApplySharedProjectVaultData(rId, docSnap.data());
+                        if (!applied.hasChanges) return;
+                        const changedProjectIds = applied.changedProjectIds;
+                        {
                             state.projects = nexusSortByChronology(
                                 state.projects.filter((p, i, self) => i === self.findIndex(x => x.id === p.id)),
                                 'createdAt'
@@ -17797,7 +17920,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                                         && changedProjectIds.includes(activeId)) {
                                         showProjectDetail(activeId);
                                     }
-                                }, 50);
+                                }, 0);
                             }
                         }
                     }, (error) => console.error("[APEX P2P] Error snapshot proyectos", error));
@@ -18406,6 +18529,8 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     
                     // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
                     if (sessionUnlocked) {
+                        if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
+                        if (typeof nexusFlushAllSharedVaultsImmediate === 'function') nexusFlushAllSharedVaultsImmediate();
                         if (fbUser && window.db) {
                             if (!unsubscribeSnapshot && typeof fetchCloudState === 'function') fetchCloudState();
                             else if (typeof nexusScheduleBackgroundPull === 'function') nexusScheduleBackgroundPull('visibility');
