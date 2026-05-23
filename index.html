@@ -3078,9 +3078,12 @@
             refreshAdminFirebaseRadar: 'Radar de usuarios en Firebase',
             loadAdminGlobalUsers: 'Listar usuarios globales (admin)',
             activateRootMaintainerSession: 'Desbloquear consola root',
-            fetchCloudState: 'Sincronizar estado desde Firebase',
-            triggerCloudSync: 'Subir cambios a Firebase',
-            saveState: 'Guardar bóveda local e iniciar sync',
+            fetchCloudState: 'Escuchar Firebase (pull diferido offline-first)',
+            triggerCloudSync: 'Motor interno: subida diferida de bóveda',
+            nexusScheduleBackgroundPush: 'Programar subida en background',
+            nexusScheduleBackgroundPull: 'Programar fusión desde Firebase',
+            nexusSyncDirectEssentials: 'Sync directo PIN y API keys',
+            saveState: 'Guardar bóveda local (IndexedDB) y sync diferida',
             bootApp: 'Cargar bóveda tras autenticación',
             initNexus: 'Inicializar interfaz tras login',
             openAIAuditor: 'Auditoría financiera con IA',
@@ -4872,13 +4875,39 @@
 
 
         // ============================================================================
-        // --- MOTOR DE SINCRONIZACIÓN NEXUS (LWW + prioridad offline) ---
+        // --- PROTOCOLO OFFLINE-FIRST (SSoT local → Firebase en background) ---
+        // Bóveda completa (core, tx_*, P2P): lectura/escritura diferida bidireccional.
+        // Carril directo: PIN, perfil de acceso, API keys (consulta inmediata).
         // ============================================================================
+        const NEXUS_SYNC_PROTOCOL = {
+            mode: 'offline-first',
+            pushDebounceMs: 1400,
+            pullDebounceMs: 900,
+            directLanes: ['profile', 'pin', 'api-keys', 'auth-link', 'root-pin']
+        };
+        let nexusBackgroundPushTimer = null;
+        let nexusBackgroundPullTimer = null;
+        window.__nexusCloudVaultBuffer = null;
+        window.__nexusVaultListenerBootstrapped = false;
+
         function nexusEnsureSyncMeta() {
             if (!state || typeof state !== 'object') return;
             if (!state._nexusSync || typeof state._nexusSync !== 'object') {
-                state._nexusSync = { localRevision: 0, lastLocalSave: 0, dirty: false, lastCloudRevision: 0, lastCloudPull: 0, lastCloudPush: 0 };
+                state._nexusSync = {
+                    protocol: NEXUS_SYNC_PROTOCOL.mode,
+                    localRevision: 0,
+                    lastLocalSave: 0,
+                    dirty: false,
+                    lastCloudRevision: 0,
+                    lastCloudPull: 0,
+                    lastCloudPush: 0,
+                    lastBackgroundPull: 0,
+                    lastBackgroundPush: 0,
+                    pendingPullReason: null,
+                    pendingPushReason: null
+                };
             }
+            if (!state._nexusSync.protocol) state._nexusSync.protocol = NEXUS_SYNC_PROTOCOL.mode;
         }
 
         function nexusTouchLocalState(reason) {
@@ -4913,6 +4942,21 @@
             }
         }
 
+        function nexusNotifyCloudDataReady() {
+            if (sessionUnlocked) {
+                if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+            } else {
+                window.__nexusPendingCloudUiRefresh = true;
+            }
+        }
+
+        function nexusFlushPendingCloudUi() {
+            if (!window.__nexusPendingCloudUiRefresh) return;
+            window.__nexusPendingCloudUiRefresh = false;
+            if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
+            else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+        }
+
         function nexusPreferLocalForSync() {
             nexusEnsureSyncMeta();
             if (nexusNeedsCloudBootstrap()) return false;
@@ -4934,6 +4978,159 @@
             if (!fbUser || !window.db || !currentUser) return true;
             if (!sessionUnlocked) return true;
             return nexusNeedsCloudBootstrap();
+        }
+
+        /** Carril directo: datos esenciales (no pasan por cola de bóveda). */
+        function nexusIsDirectSyncLane(lane) {
+            return NEXUS_SYNC_PROTOCOL.directLanes.includes(lane);
+        }
+
+        /**
+         * Sincronización directa: PIN, biometría, API keys y metadatos de perfil.
+         * No usa el motor diferido de core/tx/P2P.
+         */
+        async function nexusSyncDirectEssentials(profileIn) {
+            if (!window.db || !currentUser) return;
+            const profile = profileIn || userProfile;
+            if (!profile || !profile.email) return;
+            try {
+                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const ref = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', profile.email);
+                const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...profile }));
+                const patch = {
+                    email: profile.email,
+                    name: safe.name || profile.email.split('@')[0],
+                    alias: safe.alias || '',
+                    phone: safe.phone || '',
+                    useBiometrics: !!safe.useBiometrics,
+                    pinHash: safe.pinHash || null,
+                    isAdmin: !!safe.isAdmin,
+                    role: safe.role || (safe.isAdmin ? 'admin' : 'user'),
+                    lastSeen: Date.now(),
+                    essentialsUpdatedAt: Date.now()
+                };
+                if (state && state.settings) {
+                    normalizeAiSettings();
+                    hydrateAiKeysFromAllSources();
+                    if (state.settings.aiApiKeys) patch.aiApiKeys = { ...state.settings.aiApiKeys };
+                    if (state.settings.aiModels) patch.aiModels = { ...state.settings.aiModels };
+                    if (state.settings.aiProvider) patch.aiProvider = state.settings.aiProvider;
+                    if ((state.settings.geminiApiKey || '').trim()) patch.geminiApiKey = state.settings.geminiApiKey.trim();
+                }
+                await setDoc(ref, patch, { merge: true });
+                nexusEnsureSyncMeta();
+                state._nexusSync.lastDirectEssentialsPush = Date.now();
+            } catch (e) {
+                console.warn('[NEXUS] nexusSyncDirectEssentials', e);
+            }
+        }
+
+        /** Programa subida diferida de bóveda (core, tx, compartidos). */
+        function nexusScheduleBackgroundPush(reason) {
+            if (!fbUser || !window.db || !currentUser) return;
+            nexusEnsureSyncMeta();
+            state._nexusSync.pendingPushReason = reason || 'background';
+            clearTimeout(nexusBackgroundPushTimer);
+            nexusBackgroundPushTimer = setTimeout(() => {
+                nexusBackgroundPushTimer = null;
+                if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            }, NEXUS_SYNC_PROTOCOL.pushDebounceMs);
+        }
+
+        /** Fuerza subida inmediata de bóveda (borrados, desvinculaciones). */
+        function nexusRunBackgroundPushNow(reason) {
+            clearTimeout(nexusBackgroundPushTimer);
+            nexusBackgroundPushTimer = null;
+            nexusEnsureSyncMeta();
+            state._nexusSync.pendingPushReason = reason || 'immediate';
+            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+        }
+
+        /** Procesa snapshot de bóveda almacenado (pull diferido bidireccional). */
+        function nexusProcessVaultSnapshot(snapshot, opts) {
+            const options = opts || {};
+            let hasChanges = false;
+            let coreTouched = false;
+            const incomingTxByYear = {};
+            const isBootstrap = !!options.isBootstrap;
+            const restricted = nexusIsCloudPullRestricted();
+
+            const ingestDoc = (docSnap) => {
+                if (docSnap.metadata && docSnap.metadata.hasPendingWrites) return;
+                const data = docSnap.data();
+                hasChanges = true;
+                if (docSnap.id === 'core') {
+                    coreTouched = true;
+                    if (restricted) nexusMergeCloudTombstonesOnly(data);
+                    else nexusApplyCloudCoreDoc(data);
+                } else if (!restricted && docSnap.id.startsWith('tx_')) {
+                    const year = docSnap.id.split('_')[1];
+                    incomingTxByYear[year] = data.tx || [];
+                }
+            };
+
+            if (isBootstrap) {
+                snapshot.docs.forEach(ingestDoc);
+                nexusMarkCloudBootstrapComplete();
+            } else {
+                snapshot.docChanges().forEach((change) => ingestDoc(change.doc));
+            }
+
+            if (hasChanges) {
+                const localTxByYear = nexusGroupTxByYear(state.tx || []);
+                if (Object.keys(incomingTxByYear).length > 0 && !restricted) {
+                    state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
+                }
+            }
+
+            nexusEnsureSyncMeta();
+            state._nexusSync.lastBackgroundPull = Date.now();
+            state._nexusSync.pendingPullReason = null;
+
+            return { hasChanges, coreTouched, isBootstrap };
+        }
+
+        function nexusApplyVaultCloudBuffer(doneCb) {
+            const buf = window.__nexusCloudVaultBuffer;
+            if (!buf || !buf.snapshot || !currentUser || !state) {
+                if (doneCb) doneCb();
+                return Promise.resolve();
+            }
+            const { hasChanges, coreTouched, isBootstrap } = nexusProcessVaultSnapshot(buf.snapshot, { isBootstrap: buf.isFirstLoad });
+            window.__nexusCloudVaultBuffer = null;
+
+            const finish = () => {
+                if (coreTouched || isBootstrap) scheduleP2PListenersAttach(!!coreTouched);
+                if (doneCb) doneCb();
+            };
+
+            if (!hasChanges) {
+                if (isBootstrap) nexusNotifyCloudDataReady();
+                finish();
+                return Promise.resolve();
+            }
+
+            return NexusIDB.saveState(currentUser, state).then(() => {
+                if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
+                nexusNotifyCloudDataReady();
+                console.log('[NEXUS] Pull diferido aplicado (offline-first → Firebase).');
+                finish();
+            }).catch(e => {
+                console.warn('[NEXUS] nexusApplyVaultCloudBuffer IDB', e);
+                finish();
+            });
+        }
+
+        /** Programa fusión desde Firebase (no bloquea UI). */
+        function nexusScheduleBackgroundPull(reason) {
+            if (!fbUser || !window.db || !currentUser) return;
+            nexusEnsureSyncMeta();
+            state._nexusSync.pendingPullReason = reason || 'background';
+            clearTimeout(nexusBackgroundPullTimer);
+            nexusBackgroundPullTimer = setTimeout(() => {
+                nexusBackgroundPullTimer = null;
+                nexusApplyVaultCloudBuffer();
+            }, NEXUS_SYNC_PROTOCOL.pullDebounceMs);
         }
 
         function nexusMarkForceLocalWin(ms) {
@@ -5294,8 +5491,15 @@
             if (!el) return;
             el.classList.remove('hidden', 'opacity-0', 'transition-opacity', 'duration-200', 'duration-300', 'translate-y-4');
             el.style.transform = 'none';
+            el.style.left = '0';
+            el.style.right = '0';
             const card = el.querySelector('.theme-card');
-            if (card) card.style.transform = 'none';
+            if (card) {
+                card.style.transform = 'none';
+                card.style.translate = 'none';
+                card.style.marginLeft = 'auto';
+                card.style.marginRight = 'auto';
+            }
             nexusResetViewportLayers();
             nexusUpdateUiLock();
         }
@@ -5512,8 +5716,10 @@
         function nexusForceCloudPushNow() {
             if (!fbUser || !sessionUnlocked || !window.db || !currentUser) return;
             clearTimeout(syncTimeout);
+            clearTimeout(nexusBackgroundPushTimer);
             syncPending = true;
-            if (!isSyncing && typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (typeof nexusRunBackgroundPushNow === 'function') nexusRunBackgroundPushNow('force');
+            else if (!isSyncing && typeof triggerCloudSync === 'function') triggerCloudSync();
         }
 
         function nexusMergeAccountsRegistry(localArr, remoteArr) {
@@ -5790,9 +5996,8 @@
             nexusInvalidateSharedSyncCache();
             scheduleP2PListenersAttach(true);
             nexusFlushAllSharedVaultsImmediate();
-            if (typeof triggerCloudSync === 'function') {
-                clearTimeout(syncTimeout);
-                syncTimeout = setTimeout(() => triggerCloudSync(), 120);
+            if (typeof nexusScheduleBackgroundPush === 'function') {
+                nexusScheduleBackgroundPush('p2p');
             }
         }
 
@@ -5802,7 +6007,10 @@
 
         function nexusApplyCloudCoreDoc(cloudData) {
             if (!cloudData || typeof cloudData !== 'object') return;
-            if (window.__nexusCloudPullPausedUntil && Date.now() < window.__nexusCloudPullPausedUntil) return;
+            if (window.__nexusCloudPullPausedUntil && Date.now() < window.__nexusCloudPullPausedUntil) {
+                nexusMergeCloudTombstonesOnly(cloudData);
+                return;
+            }
             nexusEnsureSyncMeta();
             const prevSettings = state.settings ? JSON.parse(JSON.stringify(state.settings)) : {};
             const currentTx = state.tx || [];
@@ -5836,7 +6044,10 @@
             const local = localCore || {};
             const remote = remoteData || {};
             delete remote.tx;
-            const mergedCollections = nexusMergeP2PCollectionsForUpload(state, remote);
+            const mergedCollections = nexusMergeP2PCollectionsForUpload(
+                { ...state, ...local, accounts: local.accounts || state.accounts, tasks: local.tasks || state.tasks, projects: local.projects || state.projects },
+                remote
+            );
             nexusEnsureSyncMeta();
             const preferLocal = nexusPreferLocalForSync();
             const scalarBase = preferLocal ? { ...remote, ...local } : { ...local, ...remote };
@@ -6050,7 +6261,8 @@
             }
             normalizeAiSettings();
             if (typeof saveState === 'function') saveState();
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            nexusSyncDirectEssentials(userProfile).catch(e => console.warn('[NEXUS] persistAi direct keys', e));
+            if (typeof nexusScheduleBackgroundPush === 'function') nexusScheduleBackgroundPush('ai-settings');
             renderAiSettingsUI();
             if (typeof updateAIAuditorKeyStatus === 'function') updateAIAuditorKeyStatus();
             const st = $id('ai-save-status');
@@ -6640,12 +6852,7 @@
         }
 
         async function syncProfileToCloud(profile) {
-            if (!window.db || !profile || !profile.email) return;
-            try {
-                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-                const safe = sanitizeProfileForStorage(await ensureProfilePinHash({ ...profile }));
-                await setDoc(doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', profile.email), safe, { merge: true });
-            } catch (e) { console.warn('[NEXUS] syncProfile', e); }
+            return nexusSyncDirectEssentials(profile);
         }
 
         // APEX FIX: Motor de Biometría Híbrido (iOS Nativo + WebAuthn)
@@ -7192,6 +7399,7 @@
 
                         const currentAcc = state.accounts.find(a => a.id === aId);
                         if (!currentAcc) return;
+                        if (nexusIsCloudPullRestricted()) return;
 
                         const data = docSnap.data();
                         let hasSharedChanges = false;
@@ -7264,6 +7472,7 @@
 
                         const currentVault = state.taskVaults.find(v => v.remoteId === rId);
                         if (!currentVault) return;
+                        if (nexusIsCloudPullRestricted()) return;
 
                         const data = docSnap.data();
                         let hasChanges = false;
@@ -7352,6 +7561,7 @@
                         if (!docSnap.exists() || docSnap.metadata.hasPendingWrites) return;
                         const currentVault = state.projectVaults.find(v => v.remoteId === rId);
                         if (!currentVault) return;
+                        if (nexusIsCloudPullRestricted()) return;
                         const data = docSnap.data();
                         let hasChanges = false;
                         const incoming = nexusPullMapFromFirestore(data, 'projectsMap', 'projects');
@@ -7606,76 +7816,29 @@
                     }
                     p2pListenersSessionReady = false;
                     
-                    let isFirstLoad = true; // APEX FIX: Candado atómico para primer render
+                    let isFirstLoad = true;
+                    window.__nexusVaultListenerBootstrapped = false;
                     
-                    // Listener WebSockets optimizado para atrapar los "Shards" anuales y el "Core"
+                    // Offline-first: el listener solo encola; la fusión corre en background pull.
                     unsubscribeSnapshot = onSnapshot(colRef, (snapshot) => {
                         if (isSyncing && !isFirstLoad) {
                             updateCloudBadge(true, true);
                             return;
                         }
-                        let hasChanges = false;
-                        let coreTouched = false;
-                        let incomingTxByYear = {};
-                        
-                        if (isFirstLoad && !nexusIsCloudPullRestricted()) {
-                            snapshot.docs.forEach((docSnap) => {
-                                if (docSnap.metadata.hasPendingWrites) return;
-                                const data = docSnap.data();
-                                hasChanges = true;
-                                if (docSnap.id === 'core') {
-                                    coreTouched = true;
-                                    nexusApplyCloudCoreDoc(data);
-                                } else if (docSnap.id.startsWith('tx_')) {
-                                    const year = docSnap.id.split('_')[1];
-                                    incomingTxByYear[year] = data.tx || [];
-                                }
-                            });
-                            nexusMarkCloudBootstrapComplete();
-                        } else {
-                            snapshot.docChanges().forEach((change) => {
-                                if (change.doc.metadata.hasPendingWrites) return;
-                                hasChanges = true;
-                                const data = change.doc.data();
-                                
-                                if (change.doc.id === 'core') {
-                                    coreTouched = true;
-                                    if (nexusIsCloudPullRestricted()) {
-                                        nexusMergeCloudTombstonesOnly(data);
-                                    } else {
-                                        nexusApplyCloudCoreDoc(data);
-                                    }
-                                } else if (change.doc.id.startsWith('tx_')) {
-                                    if (!nexusIsCloudPullRestricted()) {
-                                        const year = change.doc.id.split('_')[1];
-                                        incomingTxByYear[year] = data.tx || [];
-                                    }
-                                }
-                            });
-                        }
+                        const firstPass = isFirstLoad;
+                        window.__nexusCloudVaultBuffer = {
+                            snapshot: snapshot,
+                            isFirstLoad: firstPass,
+                            receivedAt: Date.now()
+                        };
 
-                        const shouldAttachP2p = isFirstLoad || coreTouched;
-
-                        if (hasChanges) {
-                            const localTxByYear = nexusGroupTxByYear(state.tx || []);
-                            if (Object.keys(incomingTxByYear).length > 0 && !nexusIsCloudPullRestricted()) {
-                                state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
-                            }
-
-                            if (currentUser) {
-                                NexusIDB.saveState(currentUser, state).then(() => {
-                                    if (typeof rescheduleAllTaskReminders === 'function') rescheduleAllTaskReminders();
-                                    if (sessionUnlocked) scheduleCloudUiRefresh();
-                                    if (isFirstLoad) { isFirstLoad = false; resolve(); }
-                                });
-                            }
-                            console.log('[APEX SYS] Firestore fusionado (LWW, prioridad offline).');
-                        } else if (isFirstLoad) {
+                        if (firstPass) {
                             isFirstLoad = false;
-                            resolve();
+                            window.__nexusVaultListenerBootstrapped = true;
+                            nexusApplyVaultCloudBuffer(() => resolve());
+                        } else {
+                            nexusScheduleBackgroundPull('firestore-listener');
                         }
-                        
-                        if (shouldAttachP2p) scheduleP2PListenersAttach(!!coreTouched);
 
                         updateCloudBadge(true, false);
                     }, (error) => {
@@ -7691,6 +7854,7 @@
             });
         }
 
+        /** Uso interno del protocolo offline-first. Preferir nexusScheduleBackgroundPush / nexusRunBackgroundPushNow. */
         function triggerCloudSync() {
             if(!fbUser || !window.db || !currentUser) return;
             if (nexusShouldDeferCloudPush()) {
@@ -7950,16 +8114,21 @@
             }, 300); // APEX OPTIMIZATION: Latencia de subida reducida a 300ms para sensación de tiempo real estricta
         }
 
-        function saveCloudTx(tx) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
-        function deleteCloudTx(id) { /* Deprecado en Firebase: El motor ahora guarda el estado SSoT completo instantáneamente */ }
+        function saveCloudTx(tx) {
+            if (typeof saveState === 'function') saveState();
+        }
+        function deleteCloudTx(id) {
+            if (typeof saveState === 'function') saveState();
+        }
 
         async function loadOlderTransactions() { /* Placeholder SSoT */ }
 
         window.addEventListener('online', () => {
             if (!sessionUnlocked || !currentUser) return;
-            console.log('[APEX SYS] Conexión restaurada → subiendo cambios locales primero');
+            console.log('[NEXUS] Online → sync diferida (push local, luego pull remoto)');
             nexusTouchLocalState('online');
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (typeof nexusScheduleBackgroundPush === 'function') nexusScheduleBackgroundPush('online');
+            if (typeof nexusScheduleBackgroundPull === 'function') nexusScheduleBackgroundPull('online');
         });
         window.addEventListener('offline', () => {
             console.warn('[APEX SYS] Sin conexión: cambios guardados en local');
@@ -7989,7 +8158,10 @@
                     
                     // APEX FIX: App Real Behavior - Retenemos la última interfaz visualizada (Eliminamos el salto forzado de 60s)
                     if (sessionUnlocked) {
-                        if (fbUser && window.db && !unsubscribeSnapshot) fetchCloudState();
+                        if (fbUser && window.db) {
+                            if (!unsubscribeSnapshot && typeof fetchCloudState === 'function') fetchCloudState();
+                            else if (typeof nexusScheduleBackgroundPull === 'function') nexusScheduleBackgroundPull('visibility');
+                        }
                         if (typeof checkDailyBriefing === 'function') checkDailyBriefing();
                     }
                 } else if (document.visibilityState === "hidden") {
@@ -8412,8 +8584,8 @@
                         ]);
                     } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                 }
-                if (bind.cloud && typeof triggerCloudSync === 'function' && !nexusNeedsCloudBootstrap()) {
-                    setTimeout(() => triggerCloudSync(), 400);
+                if (bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap()) {
+                    nexusScheduleBackgroundPush('post-login');
                 } else if (bind.needsGoogle && wantsCloud) {
                     console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
                 }
@@ -8528,7 +8700,7 @@
             sessionStorage.setItem('nexus_pin_banner_ok', '1');
             
             await processLoginSuccess(email);
-            if (typeof triggerCloudSync === 'function') triggerCloudSync();
+            if (typeof nexusScheduleBackgroundPush === 'function') nexusScheduleBackgroundPush('first-setup');
         }
 
         // ============================================================================
@@ -8979,6 +9151,7 @@
             if (!nexusIsRequirePinEnabled() || bypass) {
                 sessionUnlocked = true;
                 nexusHideSessionLock();
+                nexusFlushPendingCloudUi();
                 return;
             }
             if (!userProfile || !profileHasPin(userProfile)) {
@@ -8987,6 +9160,7 @@
                 if (chk) chk.checked = false;
                 sessionUnlocked = true;
                 nexusHideSessionLock();
+                nexusFlushPendingCloudUi();
                 return;
             }
             sessionUnlocked = false;
@@ -9007,10 +9181,11 @@
                 if ($id('session-pin-input')) $id('session-pin-input').value = '';
                 nexusResetInactivityTimer();
                 if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                nexusFlushPendingCloudUi();
                 if (fbUser && nexusNeedsCloudBootstrap() && typeof fetchCloudState === 'function') {
                     fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState post-unlock', e));
-                } else if (fbUser && typeof triggerCloudSync === 'function' && syncPending) {
-                    triggerCloudSync();
+                } else if (fbUser && syncPending && typeof nexusScheduleBackgroundPush === 'function') {
+                    nexusScheduleBackgroundPush('post-unlock');
                 }
             } else {
                 alert('PIN incorrecto.');
@@ -9307,11 +9482,8 @@
                 if (!currentUser || !sessionUnlocked || !state) return;
                 if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
                 NexusIDB.saveState(currentUser, state).then(() => {
-                    if (needsSharedPush && typeof triggerCloudSync === 'function') {
-                        clearTimeout(syncTimeout);
-                        syncTimeout = setTimeout(() => triggerCloudSync(), 150);
-                    } else if (typeof triggerCloudSync === 'function') {
-                        triggerCloudSync();
+                    if (typeof nexusScheduleBackgroundPush === 'function') {
+                        nexusScheduleBackgroundPush(needsSharedPush ? 'save-shared' : 'save');
                     }
                 }).catch(e => console.warn('[NEXUS] saveState IDB', e));
             }, 200);
@@ -17560,8 +17732,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                 lastCloudSyncHash = {};
                 if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
 
-                if (typeof triggerCloudSync === 'function') {
-                    triggerCloudSync();
+                if (typeof nexusRunBackgroundPushNow === 'function') {
+                    nexusRunBackgroundPushNow('backup-import');
+                } else if (typeof nexusScheduleBackgroundPush === 'function') {
+                    nexusScheduleBackgroundPush('backup-import');
                 }
 
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
