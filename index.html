@@ -859,7 +859,16 @@
                     <button onclick="exportDatabasePDF()" type="button" class="bg-red-50 text-red-600 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-1 shrink-0" title="Exportar PDF"><i class="fa-solid fa-file-pdf text-sm"></i> PDF</button>
                     <button onclick="openAuditInformes()" type="button" class="bg-purple-50 text-purple-700 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-purple-100 flex items-center gap-1 shrink-0" title="Comparativa gastos vs ingresos"><i class="fa-solid fa-chart-column text-sm"></i> Informes</button>
                     <button onclick="openAIAuditor()" type="button" class="bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-indigo-100 flex items-center gap-1 shrink-0" title="Auditor IA"><i class="fa-solid fa-wand-magic-sparkles text-sm"></i> IA</button>
+                    <button onclick="openAuditDeleteChoice()" type="button" class="bg-red-50 text-red-700 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-red-100 flex items-center gap-1 shrink-0" title="Eliminar simple o múltiple"><i class="fa-solid fa-trash text-sm"></i> Eliminar</button>
                     <button onclick="openDeletedTxArchiveModal()" type="button" class="bg-rose-50 text-rose-700 px-3 py-2 rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 border border-rose-100 flex items-center gap-1 shrink-0" title="Papelera 15 días"><i class="fa-solid fa-trash-can text-sm"></i> Eliminadas</button>
+                </div>
+                <div id="db-audit-bulk-bar" class="hidden flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-red-50 border border-red-200">
+                    <p class="text-[9px] font-black uppercase text-red-800"><span id="db-audit-sel-count">0</span> seleccionados</p>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button type="button" onclick="nexusAuditSelectAllDeletable()" class="bg-white text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95">Seleccionar todo</button>
+                        <button type="button" onclick="promptBulkDeleteAuditRecords()" class="bg-red-600 text-white px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95"><i class="fa-solid fa-trash mr-1"></i>Borrar selección</button>
+                        <button type="button" onclick="exitAuditBulkDeleteMode()" class="bg-slate-100 text-slate-600 px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95">Cancelar</button>
+                    </div>
                 </div>
                 <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 min-w-0">
                     <select id="db-currency" onchange="renderDatabase()" class="text-[8px] font-black uppercase bg-purple-100 text-purple-700 px-2 py-1 rounded-lg outline-none cursor-pointer shrink-0">
@@ -868,6 +877,7 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 nexus-amount-box min-w-0 flex-1 text-right">Flujo: <span id="db-total" class="nexus-amount-fit theme-text inline-block max-w-full">$0</span></p>
                 </div>
             </div>
+            <p id="db-audit-page-hint" class="text-[8px] font-bold text-slate-400 uppercase text-center hidden"></p>
             <div id="db-list" class="flex flex-col gap-3 pb-20"></div>
         </section>
 
@@ -1204,6 +1214,19 @@
                     </div>
 
                     <div class="pt-4 border-t border-slate-100">
+                        <h4 class="text-[10px] font-black uppercase text-slate-700 mb-2">Auditoría en pantalla</h4>
+                        <p class="text-[8px] text-slate-400 mb-2 leading-relaxed">Los totales y proyecciones se calculan con todos los registros filtrados. Solo se pintan bloques en pantalla para no saturar el dispositivo.</p>
+                        <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Registros por bloque</label>
+                        <select id="set-audit-page-size" class="form-input text-xs mt-1 w-full max-w-xs bg-slate-50 font-bold text-slate-700" onchange="updateSettings()">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="30">30</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+
+                    <div class="pt-4 border-t border-slate-100">
                         <div class="flex items-center justify-between mb-2"><div><h4 class="text-[10px] font-black uppercase text-slate-700">Copias de seguridad</h4><p class="text-[8px] text-slate-400 mb-2">Auto-backup silencioso (copia completa). Exportar/Importar permiten elegir secciones. En Xcode: NEXUS-AR/Resources/Backups/</p></div><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="set-auto-backup" class="sr-only peer" onchange="updateSettings()"><div class="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div></label></div>
                         <div class="grid grid-cols-2 gap-2 mt-2"><div><label class="text-[8px] font-black text-slate-400 ml-2">Hora (HH:MM)</label><input type="time" id="set-backup-time" class="form-input text-xs mt-1" onchange="updateSettings()"></div><div><label class="text-[8px] font-black text-slate-400 ml-2">Sufijo Archivo</label><input type="text" id="set-backup-folder" placeholder="Ej: iCloud" class="form-input text-xs mt-1" onchange="updateSettings()"></div></div>
                         
@@ -1212,7 +1235,7 @@
                             <button type="button" onclick="openBackupSelectModal('export')" class="bg-slate-800 text-white p-3 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-download mr-1"></i> Exportar ahora</button>
                             <button type="button" onclick="openBackupImportWizard()" class="bg-slate-100 text-slate-700 p-3 rounded-xl font-black uppercase text-[9px] border border-slate-200 shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-file-import mr-1"></i> Restaurar JSON</button>
                         </div>
-                        <input type="file" id="restore-backup-file" accept=".json" class="hidden" onchange="importBackup(event)">
+                        <input type="file" id="restore-backup-file" accept=".json,application/json,text/json" class="hidden" onchange="importBackup(event)">
                     </div>
                 </div>
 
@@ -1775,6 +1798,22 @@
                 </div>
             </div>
             <div id="hist-acc-list" class="space-y-2 max-h-[50vh] overflow-y-auto hide-scrollbar"></div>
+        </div>
+    </div>
+
+    <!-- MODAL: eliminar en auditoría (simple vs múltiple) -->
+    <div id="audit-delete-choice-modal" class="fixed inset-0 z-[121] hidden bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center">
+        <div class="theme-card w-full max-w-sm rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 md:p-8 space-y-4 animate-slideUp border border-red-100 shadow-2xl">
+            <div class="flex justify-between items-start gap-3">
+                <div>
+                    <h3 class="text-lg font-black uppercase text-red-600 tracking-tight">Eliminar en auditoría</h3>
+                    <p id="audit-delete-choice-subtitle" class="text-[10px] font-bold text-slate-400 mt-1">Elige cómo quieres borrar registros.</p>
+                </div>
+                <button type="button" onclick="closeAuditDeleteChoiceModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <button type="button" id="audit-delete-simple-btn" onclick="executeAuditDeleteSimple()" class="w-full bg-red-600 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-sm active:scale-95"><i class="fa-solid fa-trash mr-1"></i> Eliminación simple (este registro)</button>
+            <button type="button" onclick="enterAuditBulkDeleteMode()" class="w-full bg-white text-red-700 border-2 border-red-200 p-4 rounded-2xl font-black uppercase text-[10px] active:scale-95"><i class="fa-solid fa-check-double mr-1"></i> Selección múltiple</button>
+            <button type="button" onclick="closeAuditDeleteChoiceModal()" class="w-full bg-slate-100 theme-text p-3 rounded-xl font-black uppercase text-[10px]">Cancelar</button>
         </div>
     </div>
 
@@ -3276,6 +3315,15 @@
                         const r = nexusBulkRestoreArchivedTransactions(ids);
                         if (r.fail > 0) alert('Restauradas: ' + r.ok + '. No restauradas: ' + r.fail + ' (bóveda inexistente).');
                         if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                    }
+                }
+                else if(action === 'audit_bulk_delete_tx') {
+                    const ids = String(payload || '').split(',').filter(Boolean);
+                    if (typeof nexusBulkDeleteAuditRecords === 'function') {
+                        const n = nexusBulkDeleteAuditRecords(ids);
+                        if (typeof exitAuditBulkDeleteMode === 'function') exitAuditBulkDeleteMode();
+                        if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                        if (n > 0) alert('✅ ' + n + ' registro(s) enviados a la papelera (15 días).');
                     }
                 }
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
@@ -7394,6 +7442,7 @@
 
         function switchTab(id) {
             id = id || 'home';
+            const prevTab = state.activeTab;
             try {
                 sessionStorage.setItem('nexus_last_active_tab', id);
                 localStorage.setItem('nexus_last_active_tab', id);
@@ -7403,6 +7452,11 @@
                 try { document.title = 'NEXUS AR · ' + modMeta.name; } catch (e) {}
             }
             const isSameTab = (state.activeTab === id);
+            if (prevTab === 'database' && id !== 'database') {
+                if (dbAuditScrollObserver) { dbAuditScrollObserver.disconnect(); dbAuditScrollObserver = null; }
+                dbAuditSelectMode = false;
+                if (state.ui) state.ui.dbAuditSelected = [];
+            }
             state.activeTab = id;
 
             const menu = $id('fab-menu'); const btn = $id('fab-toggle-btn');
@@ -10563,7 +10617,310 @@
         // AUDITORÍA
         let dbSortOrder = 'desc';
         let dbShowDuplicates = false;
-        let currentFilteredTx = []; // APEX FIX: Caché de la vista actual para PDF
+        let currentFilteredTx = []; // Caché completa filtrada (PDF, totales, proyecciones)
+        let dbAuditRenderedCount = 20;
+        let dbAuditSelectMode = false;
+        let dbAuditPendingDeleteId = null;
+        let dbAuditScrollObserver = null;
+
+        function nexusGetAuditPageSize() {
+            const n = parseInt(state?.settings?.auditPageSize, 10);
+            if (!Number.isNaN(n) && n >= 5 && n <= 100) return n;
+            return 20;
+        }
+        function nexusEnsureAuditSelection() {
+            if (!state.ui) state.ui = {};
+            if (!Array.isArray(state.ui.dbAuditSelected)) state.ui.dbAuditSelected = [];
+        }
+        function nexusGetAuditSelectedSet() {
+            nexusEnsureAuditSelection();
+            return new Set(state.ui.dbAuditSelected || []);
+        }
+        function nexusIsAuditRowDeletable(t) {
+            if (!t || !t.id) return false;
+            if (t.isProjected || t.apAuditRole || t.loanAuditRole) return false;
+            if (typeof nexusIsAfterpayAuditSynthetic === 'function' && nexusIsAfterpayAuditSynthetic(t)) return false;
+            if (typeof nexusIsDebtAuditSynthetic === 'function' && nexusIsDebtAuditSynthetic(t)) return false;
+            return true;
+        }
+        function nexusUpdateAuditBulkBar() {
+            const bar = $id('db-audit-bulk-bar');
+            const cnt = $id('db-audit-sel-count');
+            const sel = nexusGetAuditSelectedSet();
+            if (bar) bar.classList.toggle('hidden', !dbAuditSelectMode);
+            if (cnt) cnt.innerText = String(sel.size);
+        }
+        function openAuditDeleteChoice(txId) {
+            dbAuditPendingDeleteId = txId || null;
+            const mod = $id('audit-delete-choice-modal');
+            const sub = $id('audit-delete-choice-subtitle');
+            const simpleBtn = $id('audit-delete-simple-btn');
+            if (sub) {
+                sub.textContent = txId
+                    ? 'Puedes borrar solo este movimiento o activar selección múltiple.'
+                    : 'Activa selección múltiple o toca la papelera en cada fila para borrado simple.';
+            }
+            if (simpleBtn) {
+                if (txId) { simpleBtn.classList.remove('hidden'); simpleBtn.disabled = false; }
+                else { simpleBtn.classList.add('hidden'); }
+            }
+            if (mod) nexusShowModalInstant(mod);
+        }
+        function closeAuditDeleteChoiceModal() {
+            nexusHideModalInstant($id('audit-delete-choice-modal'));
+            dbAuditPendingDeleteId = null;
+        }
+        function executeAuditDeleteSimple() {
+            const id = dbAuditPendingDeleteId;
+            closeAuditDeleteChoiceModal();
+            if (!id) return;
+            if (typeof nexusPromptDeleteTransaction === 'function') nexusPromptDeleteTransaction(id, null);
+            else deleteDatabaseRecord(id);
+        }
+        function enterAuditBulkDeleteMode() {
+            const seedId = dbAuditPendingDeleteId;
+            closeAuditDeleteChoiceModal();
+            dbAuditSelectMode = true;
+            nexusEnsureAuditSelection();
+            state.ui.dbAuditSelected = seedId ? [seedId] : [];
+            nexusUpdateAuditBulkBar();
+            renderDatabase();
+        }
+        function exitAuditBulkDeleteMode() {
+            dbAuditSelectMode = false;
+            nexusEnsureAuditSelection();
+            state.ui.dbAuditSelected = [];
+            nexusUpdateAuditBulkBar();
+            renderDatabase();
+        }
+        function nexusGetAuditTxById(id) {
+            return (currentFilteredTx || []).find(x => x.id === id) || (state.tx || []).find(x => x.id === id);
+        }
+        function nexusToggleAuditSelect(id, checked) {
+            if (!nexusIsAuditRowDeletable(nexusGetAuditTxById(id))) return;
+            nexusEnsureAuditSelection();
+            const arr = state.ui.dbAuditSelected;
+            const idx = arr.indexOf(id);
+            if (checked && idx === -1) arr.push(id);
+            else if (!checked && idx > -1) arr.splice(idx, 1);
+            nexusUpdateAuditBulkBar();
+        }
+        function nexusAuditSelectAllDeletable() {
+            nexusEnsureAuditSelection();
+            const deletable = (currentFilteredTx || []).filter(nexusIsAuditRowDeletable).map(t => t.id);
+            const sel = nexusGetAuditSelectedSet();
+            const allOn = deletable.length > 0 && deletable.every(id => sel.has(id));
+            state.ui.dbAuditSelected = allOn ? [] : deletable;
+            nexusUpdateAuditBulkBar();
+            renderDatabase();
+        }
+        function promptBulkDeleteAuditRecords() {
+            const ids = [...nexusGetAuditSelectedSet()];
+            if (!ids.length) return alert('Selecciona al menos un registro eliminable (no proyecciones ni cronogramas).');
+            triggerUIConfirm(
+                '¿Eliminar ' + ids.length + ' registro(s) de auditoría?\n\nVan a la papelera 15 días. Las proyecciones del cronograma no se borran desde aquí.',
+                'audit_bulk_delete_tx',
+                ids.join(',')
+            );
+        }
+        function nexusBulkDeleteAuditRecords(ids) {
+            if (!ids || !ids.length) return 0;
+            let n = 0;
+            ids.forEach(id => {
+                if (typeof nexusRootDeleteTransaction === 'function' && nexusRootDeleteTransaction(id, { source: 'audit' })) n++;
+            });
+            return n;
+        }
+        function nexusBuildAuditDupTrackerPrefix(txs, endIdx) {
+            const dupTracker = {};
+            for (let i = 0; i < endIdx; i++) {
+                const t = txs[i];
+                const sig = `${t.note || ''}|${t.cat || ''}|${t.original_amount || t.amount}|${t.date ? t.date.split('T')[0] : ''}`;
+                dupTracker[sig] = (dupTracker[sig] || 0) + 1;
+            }
+            return dupTracker;
+        }
+        function nexusBuildAuditCardHtml(t, ctx) {
+            const fAcc = ctx.fAcc;
+            const dupTracker = ctx.dupTracker;
+            const origCur = t.original_currency || t.currency;
+            const origAmt = t.original_amount || t.amount;
+            const rType = t.renderType || t.type;
+            const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAcc);
+            const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAcc);
+            let isPar = false;
+            if (dbShowDuplicates) {
+                const sig = `${t.note || ''}|${t.cat || ''}|${origAmt}|${t.date ? t.date.split('T')[0] : ''}`;
+                dupTracker[sig] = (dupTracker[sig] || 0) + 1;
+                if (dupTracker[sig] % 2 === 0) isPar = true;
+            }
+            let cT = '', iB = '', iClass = '';
+            if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
+            else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
+            else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pago inicial proyectado]') || t.note.includes('[Pendiente]') || t.note.includes('[Amortizado]') || t.note.includes('[Compra BNPL]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+            else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
+            else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
+            else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
+            const sign = isOutflow ? '-' : (isInflow ? '+' : '');
+            const aN = t.auditArchived ? (t.auditAccountName || 'Cuenta archivada') : (state.accounts.find(a => a.id === t.accId)?.name || '--');
+            const auditVaultBadge = t.auditArchived ? '<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[7px] font-black uppercase border border-amber-200">Auditoría</span>' : '';
+            let aNDest = '';
+            if (t.type === 'transfer') {
+                const dN = t.auditArchived && t.toAccId === t.auditAccountId ? (t.auditAccountName || '--') : (state.accounts.find(a => a.id === t.toAccId)?.name || '--');
+                aNDest = ` <i class="fa-solid fa-arrow-right text-[7px] mx-1 text-indigo-400"></i> ${dN}`;
+            }
+            let pBadge = '';
+            if (t.isProjected) {
+                const isPast = new Date(t.date) <= new Date();
+                let bTxt = isPast ? 'PENDIENTE' : 'PROYECTADO';
+                let bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-amber-100 text-amber-600 border-amber-200';
+                if (t.apAuditRole === 'purchase') { bTxt = 'COMPRA BNPL'; bCls = 'bg-purple-100 text-purple-600 border-purple-200'; }
+                else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) { bTxt = 'COMPRA TC'; bCls = 'bg-orange-100 text-orange-600 border-orange-200'; }
+                else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) { bTxt = 'AMORTIZADO'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200'; }
+                else if (t.loanAuditRole === 'projected' || (t.note && t.note.includes('[Pendiente]') && (t.cat || '').includes('Pago'))) { bTxt = isPast ? 'CUOTA DEUDA VENCIDA' : 'CUOTA DEUDA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-orange-100 text-orange-600 border-orange-200'; }
+                else if (t.apAuditRole === 'first_projected' || (t.note && t.note.includes('[Pago inicial proyectado]'))) { bTxt = 'PAGO INICIAL PROY.'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200'; }
+                else if (nexusIsAfterpayProjectedQuota(t) || (t.note && t.note.includes('[Pendiente]'))) { bTxt = isPast ? 'CUOTA VENCIDA' : 'CUOTA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-teal-100 text-teal-600 border-teal-200'; }
+                if (t.cat === '⚡ Pendiente Único' && t.priority) {
+                    bTxt = `PRIORIDAD ${t.priority === 'high' ? 'ALTA' : (t.priority === 'medium' ? 'MEDIA' : 'BAJA')}`;
+                    if (t.priority === 'high') bCls = 'bg-red-100 text-red-600 border-red-200';
+                    else if (t.priority === 'medium') bCls = 'bg-amber-100 text-amber-600 border-amber-200';
+                    else if (t.priority === 'low') bCls = 'bg-emerald-100 text-emerald-600 border-emerald-200';
+                }
+                pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`;
+            } else if (rType === 'afterpay') {
+                pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`;
+            } else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
+                pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>AMORTIZADO</span>`;
+            } else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) {
+                pBadge = `<span class="text-[8px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full ml-2 border border-orange-200">COMPRA TC</span>`;
+            } else if (t.loanAuditRole === 'projected' || (t.isProjected && String(t.id||'').startsWith('proj_loan_'))) {
+                pBadge = `<span class="text-[8px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-2 border border-amber-200">CUOTA PROYECTADA</span>`;
+            } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) {
+                pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`;
+            } else if (t.note && t.note.includes('[Pago Inicial]')) {
+                pBadge = `<span class="text-[8px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full ml-2 border border-indigo-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>PAGO INICIAL</span>`;
+            } else if (t.note && t.note.includes('[TC]')) {
+                pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">CUOTA TC</span>`;
+            }
+            const pCreator = t.createdBy ? `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200 shadow-sm"><i class="fa-solid fa-user mr-1"></i>${t.createdBy.split(' ')[0]}</span>` : '';
+            const isAuditScheduleRow = t.isProjected || t.apAuditRole || t.loanAuditRole || nexusIsAfterpayAuditSynthetic(t) || nexusIsDebtAuditSynthetic(t);
+            const deletable = nexusIsAuditRowDeletable(t);
+            const isSelected = nexusGetAuditSelectedSet().has(t.id);
+            const editAction = (dbAuditSelectMode || isAuditScheduleRow) ? '' : `editTransaction('${t.id}')`;
+            const cardBgClass = isPar ? 'bg-red-50 border-red-300' : (isSelected ? 'bg-red-50/40 border-red-300' : 'theme-card border-slate-100/50 hover:border-blue-300');
+            const cursorClass = (dbAuditSelectMode && deletable) ? 'cursor-pointer' : (isAuditScheduleRow ? 'cursor-default' : 'cursor-pointer');
+            const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
+            const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
+            const safeId = String(t.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            let deleteAction;
+            if (isAuditScheduleRow) {
+                deleteAction = (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || t.apAuditRole)
+                    ? `alert('Cronograma Afterpay: gestiona la compra y cuotas en el módulo Afterpay.')`
+                    : `alert('Cronograma de deuda/TC: gestiona el pasivo en Deudas o la compra en la tarjeta.')`;
+            } else if (dbAuditSelectMode && deletable) {
+                deleteAction = `nexusToggleAuditSelect('${safeId}', ${isSelected ? 'false' : 'true'}); renderDatabase();`;
+            } else {
+                deleteAction = `openAuditDeleteChoice('${safeId}')`;
+            }
+            const dDate = new Date(t.date);
+            const amtFull = `${sign}${fmt(origAmt, origCur)}`;
+            const titleTxt = (t.note || (t.cat ? t.cat.substring(2) : '')).replace(/</g, '&lt;');
+            const metaLine = `${dDate.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} ${String(dDate.getHours()).padStart(2,'0')}:${String(dDate.getMinutes()).padStart(2,'0')} • ${aN}${aNDest}`;
+            const cardClick = dbAuditSelectMode && deletable
+                ? `onclick="nexusToggleAuditSelect('${safeId}', ${!isSelected}); renderDatabase();"`
+                : `onclick="${editAction}"`;
+            const checkHtml = (dbAuditSelectMode && deletable)
+                ? `<input type="checkbox" class="w-4 h-4 accent-red-600 shrink-0 mt-1" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); nexusToggleAuditSelect('${safeId}', this.checked); renderDatabase();">`
+                : '';
+            return `<div ${cardClick} class="db-audit-card ${cursorClass} ${cardBgClass} p-3 sm:p-4 rounded-2xl shadow-sm border transition-all w-full max-w-full overflow-hidden">
+                <div class="flex items-start gap-2.5 min-w-0">
+                    ${checkHtml}
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-[10px] sm:text-xs"></i></div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[10px] sm:text-[11px] font-black uppercase ${textTitleClass} truncate leading-tight">${titleTxt}</p>
+                        <p class="db-audit-meta text-[7px] sm:text-[8px] font-bold ${textSubClass} uppercase mt-0.5">${metaLine} ${auditVaultBadge} ${pBadge} ${pCreator}</p>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-7 h-7 sm:w-8 sm:h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid ${dbAuditSelectMode && deletable ? 'fa-check' : 'fa-trash'} text-[9px] sm:text-[10px]"></i></button>
+                </div>
+                <div class="db-audit-amt-row flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100/80">
+                    <span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Monto</span>
+                    <span class="db-audit-amt nexus-amount-fit font-black ${cT}" title="${amtFull}">${amtFull}</span>
+                </div>
+            </div>`;
+        }
+        function nexusRenderAuditListSlice(fromIdx, toIdx, append) {
+            const lC = $id('db-list');
+            if (!lC || !currentFilteredTx.length) return;
+            const fAccEl = $id('db-filter-account');
+            const fAcc = fAccEl ? fAccEl.value : 'all';
+            const dupTracker = nexusBuildAuditDupTrackerPrefix(currentFilteredTx, fromIdx);
+            const slice = currentFilteredTx.slice(fromIdx, toIdx);
+            const html = slice.map(t => nexusBuildAuditCardHtml(t, { fAcc, dupTracker })).join('');
+            if (append) {
+                const sentinel = $id('db-audit-load-sentinel');
+                if (sentinel) sentinel.insertAdjacentHTML('beforebegin', html);
+                else lC.insertAdjacentHTML('beforeend', html);
+            } else {
+                lC.innerHTML = html;
+            }
+            requestAnimationFrame(() => fitNexusAmounts($id('tab-database')));
+        }
+        function nexusUpdateAuditPageHint(visible, total) {
+            const hint = $id('db-audit-page-hint');
+            if (!hint) return;
+            if (visible < total) {
+                hint.classList.remove('hidden');
+                hint.textContent = `Mostrando ${visible} de ${total} registros (bloques de ${nexusGetAuditPageSize()}). Desplázate para cargar más — totales y proyecciones ya incluyen los ${total}.`;
+            } else {
+                hint.classList.add('hidden');
+                hint.textContent = '';
+            }
+        }
+        function nexusAuditLoadMore() {
+            const total = currentFilteredTx.length;
+            if (dbAuditRenderedCount >= total) return;
+            const from = dbAuditRenderedCount;
+            dbAuditRenderedCount = Math.min(dbAuditRenderedCount + nexusGetAuditPageSize(), total);
+            nexusRenderAuditListSlice(from, dbAuditRenderedCount, true);
+            nexusUpdateAuditPageHint(dbAuditRenderedCount, total);
+            const sentinel = $id('db-audit-load-sentinel');
+            if (sentinel) {
+                if (dbAuditRenderedCount >= total) sentinel.remove();
+                else sentinel.innerHTML = `<p class="text-center text-[9px] font-black uppercase text-purple-500 py-3"><i class="fa-solid fa-spinner fa-spin mr-1"></i> ${total - dbAuditRenderedCount} más al desplazarte</p>`;
+            }
+            nexusBindAuditInfiniteScroll();
+        }
+        function nexusBindAuditInfiniteScroll() {
+            if (dbAuditScrollObserver) { dbAuditScrollObserver.disconnect(); dbAuditScrollObserver = null; }
+            const sentinel = $id('db-audit-load-sentinel');
+            if (!sentinel || dbAuditRenderedCount >= currentFilteredTx.length) return;
+            dbAuditScrollObserver = new IntersectionObserver((entries) => {
+                if (entries.some(e => e.isIntersecting)) nexusAuditLoadMore();
+            }, { root: null, rootMargin: '120px', threshold: 0.05 });
+            dbAuditScrollObserver.observe(sentinel);
+        }
+        function nexusPaintAuditList() {
+            const lC = $id('db-list');
+            if (!lC) return;
+            const total = currentFilteredTx.length;
+            if (!total) {
+                if (dbShowDuplicates) {
+                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border border-rose-100 shadow-sm bg-rose-50/30"><p class="text-[10px] font-black uppercase tracking-widest text-rose-400">No hay duplicados exactos</p></div>`;
+                } else {
+                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`;
+                }
+                nexusUpdateAuditPageHint(0, 0);
+                return;
+            }
+            dbAuditRenderedCount = Math.min(nexusGetAuditPageSize(), total);
+            nexusRenderAuditListSlice(0, dbAuditRenderedCount, false);
+            if (dbAuditRenderedCount < total) {
+                lC.insertAdjacentHTML('beforeend', `<div id="db-audit-load-sentinel" class="py-2"><p class="text-center text-[9px] font-black uppercase text-purple-500 py-3"><i class="fa-solid fa-arrow-down mr-1"></i> Desplázate — ${total - dbAuditRenderedCount} pendientes en pantalla</p></div>`);
+            }
+            nexusUpdateAuditPageHint(dbAuditRenderedCount, total);
+            nexusUpdateAuditBulkBar();
+            nexusBindAuditInfiniteScroll();
+        }
 
         function toggleDbSort() { dbSortOrder = dbSortOrder === 'desc' ? 'asc' : 'desc'; const btn = $id('db-sort-btn'); if (btn) { btn.innerHTML = dbSortOrder === 'desc' ? '<i class="fa-solid fa-arrow-down-short-wide"></i> DESC' : '<i class="fa-solid fa-arrow-up-wide-short"></i> ASC'; } renderDatabase(); }
         
@@ -10795,143 +11152,12 @@
                 fTx.sort((a,b) => dbSortOrder === 'desc' ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date)); 
             }
             
-            const dcEl = $id('db-count'); if(dcEl) dcEl.innerText = fTx.length; 
-            
-            currentFilteredTx = fTx; // APEX FIX: Guardado de estado de filtro para PDF
-            
-            const lC = $id('db-list'); if(!lC) return; 
-            if(fTx.length === 0) { 
-                if (dbShowDuplicates) {
-                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border border-rose-100 shadow-sm bg-rose-50/30"><p class="text-[10px] font-black uppercase tracking-widest text-rose-400">No hay duplicados exactos</p></div>`; 
-                } else {
-                    lC.innerHTML = `<div class="text-center p-8 theme-card rounded-2xl border shadow-sm"><p class="text-[10px] font-black uppercase tracking-widest text-slate-400">No hay registros</p></div>`; 
-                }
-                return; 
-            } 
-            
-            const dupTracker = {}; 
-
-            lC.innerHTML = fTx.map(t => { 
-                const origCur = t.original_currency || t.currency;
-                const origAmt = t.original_amount || t.amount;
-                const rType = t.renderType || t.type; // APEX FIX: Extrae tipo visual base
-                
-                // APEX FIX: Polaridad estricta para cuentas aisladas (Terceros/P2P) y Transferencias
-                const isOutflow = rType === 'expense' || rType === 'afterpay' || (rType === 'transfer' && t.accId === fAcc);
-                const isInflow = rType === 'income' || (rType === 'transfer' && t.toAccId === fAcc);
-
-                let isPar = false;
-                if (dbShowDuplicates) {
-                    const sig = `${t.note || ''}|${t.cat || ''}|${origAmt}|${t.date ? t.date.split('T')[0] : ''}`;
-                    dupTracker[sig] = (dupTracker[sig] || 0) + 1;
-                    if (dupTracker[sig] % 2 === 0) isPar = true;
-                }
-
-                let cT = '', iB = '', iClass = '';
-                if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
-                else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pago inicial proyectado]') || t.note.includes('[Pendiente]') || t.note.includes('[Amortizado]') || t.note.includes('[Compra BNPL]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
-                else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
-                else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
-                else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
-                
-                const sign = isOutflow ? '-' : (isInflow ? '+' : ''); // APEX FIX: Fuerza el signo correcto
-                const aN = t.auditArchived
-                    ? (t.auditAccountName || 'Cuenta archivada')
-                    : (state.accounts.find(a => a.id === t.accId)?.name || '--');
-                const auditVaultBadge = t.auditArchived
-                    ? '<span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[7px] font-black uppercase border border-amber-200">Auditoría</span>'
-                    : '';
-                
-                let aNDest = '';
-                if (t.type === 'transfer') {
-                    const dN = t.auditArchived && t.toAccId === t.auditAccountId
-                        ? (t.auditAccountName || '--')
-                        : (state.accounts.find(a => a.id === t.toAccId)?.name || '--');
-                    aNDest = ` <i class="fa-solid fa-arrow-right text-[7px] mx-1 text-indigo-400"></i> ${dN}`;
-                }
-                
-                let pBadge = ''; 
-                if (t.isProjected) {
-                    const isPast = new Date(t.date) <= new Date(); 
-                    let bTxt = isPast ? 'PENDIENTE' : 'PROYECTADO'; 
-                    let bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-amber-100 text-amber-600 border-amber-200'; 
-                    if (t.apAuditRole === 'purchase') {
-                        bTxt = 'COMPRA BNPL'; bCls = 'bg-purple-100 text-purple-600 border-purple-200';
-                    } else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) {
-                        bTxt = 'COMPRA TC'; bCls = 'bg-orange-100 text-orange-600 border-orange-200';
-                    } else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
-                        bTxt = 'AMORTIZADO'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
-                    } else if (t.loanAuditRole === 'projected' || (t.note && t.note.includes('[Pendiente]') && (t.cat || '').includes('Pago'))) {
-                        bTxt = isPast ? 'CUOTA DEUDA VENCIDA' : 'CUOTA DEUDA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-orange-100 text-orange-600 border-orange-200';
-                    } else if (t.apAuditRole === 'first_projected' || (t.note && t.note.includes('[Pago inicial proyectado]'))) {
-                        bTxt = 'PAGO INICIAL PROY.'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
-                    } else if (nexusIsAfterpayProjectedQuota(t) || (t.note && t.note.includes('[Pendiente]'))) {
-                        bTxt = isPast ? 'CUOTA VENCIDA' : 'CUOTA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-teal-100 text-teal-600 border-teal-200';
-                    }
-                    
-                    if (t.cat === '⚡ Pendiente Único' && t.priority) {
-                        bTxt = `PRIORIDAD ${t.priority === 'high' ? 'ALTA' : (t.priority === 'medium' ? 'MEDIA' : 'BAJA')}`;
-                        if (t.priority === 'high') bCls = 'bg-red-100 text-red-600 border-red-200';
-                        else if (t.priority === 'medium') bCls = 'bg-amber-100 text-amber-600 border-amber-200';
-                        else if (t.priority === 'low') bCls = 'bg-emerald-100 text-emerald-600 border-emerald-200';
-                    }
-                    
-                    pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; 
-                } else if (rType === 'afterpay') {
-                    pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`; 
-                } else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
-                    pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>AMORTIZADO</span>`;
-                } else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) {
-                    pBadge = `<span class="text-[8px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full ml-2 border border-orange-200">COMPRA TC</span>`;
-                } else if (t.loanAuditRole === 'projected' || (t.isProjected && String(t.id||'').startsWith('proj_loan_'))) {
-                    pBadge = `<span class="text-[8px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-2 border border-amber-200">CUOTA PROYECTADA</span>`;
-                } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
-                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`; 
-                } else if (t.note && t.note.includes('[Pago Inicial]')) {
-                    pBadge = `<span class="text-[8px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full ml-2 border border-indigo-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>PAGO INICIAL</span>`;
-                } else if (t.note && t.note.includes('[TC]')) {
-                    pBadge = `<span class="text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full ml-2 border border-red-200">CUOTA TC</span>`;
-                }
-
-                const pCreator = t.createdBy ? `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200 shadow-sm"><i class="fa-solid fa-user mr-1"></i>${t.createdBy.split(' ')[0]}</span>` : '';
-                
-                const isAuditScheduleRow = t.isProjected || t.apAuditRole || t.loanAuditRole || nexusIsAfterpayAuditSynthetic(t) || nexusIsDebtAuditSynthetic(t);
-                const editAction = isAuditScheduleRow ? '' : `editTransaction('${t.id}')`; 
-                
-                const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50 hover:border-blue-300';
-                const cursorClass = isAuditScheduleRow ? 'cursor-default' : 'cursor-pointer'; 
-                const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
-                const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
-                
-                const deleteAction = isAuditScheduleRow
-                    ? ((nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || t.apAuditRole)
-                        ? `alert('Cronograma Afterpay: gestiona la compra y cuotas en el módulo Afterpay.')`
-                        : `alert('Cronograma de deuda/TC: gestiona el pasivo en Deudas o la compra en la tarjeta.')`)
-                    : `deleteDatabaseRecord('${t.id}')`;
-
-                const dDate = new Date(t.date);
-                const amtFull = `${sign}${fmt(origAmt, origCur)}`;
-                const titleTxt = (t.note || (t.cat ? t.cat.substring(2) : '')).replace(/</g, '&lt;');
-                const metaLine = `${dDate.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })} ${String(dDate.getHours()).padStart(2, '0')}:${String(dDate.getMinutes()).padStart(2, '0')} • ${aN}${aNDest}`;
-                return `<div onclick="${editAction}" class="db-audit-card ${cursorClass} ${cardBgClass} p-3 sm:p-4 rounded-2xl shadow-sm border transition-all w-full max-w-full overflow-hidden">
-                    <div class="flex items-start gap-2.5 min-w-0">
-                        <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${iB} shrink-0"><i class="fa-solid ${iClass} text-[10px] sm:text-xs"></i></div>
-                        <div class="min-w-0 flex-1">
-                            <p class="text-[10px] sm:text-[11px] font-black uppercase ${textTitleClass} truncate leading-tight">${titleTxt}</p>
-                            <p class="db-audit-meta text-[7px] sm:text-[8px] font-bold ${textSubClass} uppercase mt-0.5">${metaLine} ${auditVaultBadge} ${pBadge} ${pCreator}</p>
-                        </div>
-                        <button type="button" onclick="event.stopPropagation(); ${deleteAction}" class="text-slate-300 hover:text-red-500 w-7 h-7 sm:w-8 sm:h-8 bg-slate-50 hover:bg-white rounded-full flex items-center justify-center transition-colors shrink-0"><i class="fa-solid fa-trash text-[9px] sm:text-[10px]"></i></button>
-                    </div>
-                    <div class="db-audit-amt-row flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100/80">
-                        <span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Monto</span>
-                        <span class="db-audit-amt nexus-amount-fit font-black ${cT}" title="${amtFull}">${amtFull}</span>
-                    </div>
-                </div>`;
-            }).join(''); 
-            requestAnimationFrame(() => fitNexusAmounts($id('tab-database')));
+            const dcEl = $id('db-count');
+            currentFilteredTx = fTx;
+            if (dcEl) dcEl.innerText = String(fTx.length);
+            nexusPaintAuditList();
         }
-        function deleteDatabaseRecord(id) { deleteTx(null, id, true); }
+        function deleteDatabaseRecord(id) { openAuditDeleteChoice(id); }
 
         function exportDatabaseExcel() {
             if (!currentFilteredTx || !currentFilteredTx.length) return alert('No hay datos filtrados para exportar.');
@@ -14159,6 +14385,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const tsEl = $id('set-text-size'); if(tsEl) tsEl.value = state.settings.textSize || '16px';
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
             const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
+            const apsEl = $id('set-audit-page-size'); if(apsEl) apsEl.value = String(state.settings.auditPageSize || 20);
             
             if (typeof renderAiSettingsUI === 'function') renderAiSettingsUI();
 
@@ -14650,6 +14877,12 @@ ${JSON.stringify(dataToAnalyze)}`;
             const tsEl = $id('set-text-size'); if(tsEl) state.settings.textSize = tsEl.value;
             const hdEl = $id('set-hide-decimals'); if(hdEl) state.settings.hideDecimals = hdEl.checked;
             const wvEl = $id('set-wealth-view'); if(wvEl) state.settings.wealthView = wvEl.value;
+            const apsEl = $id('set-audit-page-size');
+            if (apsEl) {
+                const psz = parseInt(apsEl.value, 10);
+                state.settings.auditPageSize = (!Number.isNaN(psz) && psz >= 5 && psz <= 100) ? psz : 20;
+                if (state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase();
+            }
             
             /* Claves IA: solo vía persistAiSettings() — evita borrar password vacío al cambiar otros ajustes */
 
@@ -15506,6 +15739,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                 return (Array.isArray(src.projects) && src.projects.length > 0) ||
                     (Array.isArray(src.projectVaults) && src.projectVaults.length > 0);
             }
+            if (sectionId === 'categories') {
+                return (Array.isArray(src.categories?.global) && src.categories.global.length > 0) ||
+                    (Array.isArray(src.catParents?.global) && src.catParents.global.length > 0);
+            }
             return sec.keys.some(k => {
                 const v = src[k];
                 if (v === undefined || v === null) return false;
@@ -15697,17 +15934,70 @@ ${JSON.stringify(dataToAnalyze)}`;
             return imported;
         }
 
-        function isValidNexusBackupPayload(imported) {
-            if (!imported || typeof imported !== 'object') return false;
-            if (imported._nexusBackup) return true;
-            const hasArr = (k) => Array.isArray(imported[k]) && imported[k].length > 0;
+        function nexusLooksLikeVaultState(obj) {
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+            if (obj._nexusBackup) return true;
+            const hasArr = (k) => Array.isArray(obj[k]) && obj[k].length > 0;
+            const hasCatParents = Array.isArray(obj.catParents?.global) && obj.catParents.global.length > 0;
+            const hasCategories = Array.isArray(obj.categories?.global) && obj.categories.global.length > 0;
             return !!(
                 hasArr('accounts') || hasArr('pseLinks') || hasArr('tx') || hasArr('tasks') ||
                 hasArr('loans') || hasArr('projects') || hasArr('goals') || hasArr('projectVaults') ||
-                (imported.settings && typeof imported.settings === 'object' && Object.keys(imported.settings).length) ||
-                (imported.budgets && typeof imported.budgets === 'object' && Object.keys(imported.budgets).length) ||
-                (imported.categories && imported.categories.global && imported.categories.global.length)
+                hasArr('deletedTxArchive') ||
+                (obj.settings && typeof obj.settings === 'object' && Object.keys(obj.settings).length) ||
+                (obj.budgets && typeof obj.budgets === 'object' && Object.keys(obj.budgets).length) ||
+                hasCategories || hasCatParents
             );
+        }
+
+        /** Desenvuelve JSON exportado, auto-backup {state}, Firebase {data}, etc. */
+        function unwrapNexusBackupPayload(raw) {
+            if (!raw || typeof raw !== 'object') return null;
+            if (typeof raw === 'string') {
+                try { return unwrapNexusBackupPayload(JSON.parse(raw)); } catch (e) { return null; }
+            }
+            if (nexusLooksLikeVaultState(raw)) return raw;
+            const candidates = [];
+            if (raw.kind === 'nexus_backup_v2' && raw.data) candidates.push(raw.data);
+            if (raw.state) candidates.push(raw.state);
+            if (raw.data) candidates.push(raw.data);
+            if (raw.payload) candidates.push(raw.payload);
+            if (raw.nexus_data) candidates.push(raw.nexus_data);
+            if (raw.vault && typeof raw.vault === 'object' && !Array.isArray(raw.vault)) candidates.push(raw.vault);
+            for (let i = 0; i < candidates.length; i++) {
+                const c = candidates[i];
+                if (nexusLooksLikeVaultState(c)) return c;
+            }
+            for (let j = 0; j < candidates.length; j++) {
+                const inner = candidates[j];
+                if (inner && inner.state && nexusLooksLikeVaultState(inner.state)) return inner.state;
+                if (inner && inner.data && nexusLooksLikeVaultState(inner.data)) return inner.data;
+            }
+            return null;
+        }
+
+        function isValidNexusBackupPayload(imported) {
+            return nexusLooksLikeVaultState(imported);
+        }
+
+        function parseNexusBackupFileText(text) {
+            let cleaned = (text || '').toString().replace(/^\uFEFF/, '').trim();
+            if (!cleaned) throw new Error('Archivo vacío');
+            let raw;
+            try {
+                raw = JSON.parse(cleaned);
+            } catch (e) {
+                throw new Error('JSON inválido. Revisa que sea un .json de Nexus (no otro formato).');
+            }
+            if (typeof raw === 'string') {
+                raw = JSON.parse(raw.trim());
+            }
+            const unwrapped = unwrapNexusBackupPayload(raw);
+            if (!unwrapped) {
+                const topKeys = raw && typeof raw === 'object' ? Object.keys(raw).slice(0, 10).join(', ') : '—';
+                throw new Error('Formato no reconocido. Claves detectadas: ' + topKeys + '. Si es copia automática o de Firebase, actualiza la app; si es nexus_vault_*.json, reexporta desde Ajustes.');
+            }
+            return normalizeBackupImportPayload(unwrapped);
         }
 
         function getBackupSectionCountHint(sectionId, src) {
@@ -15881,6 +16171,7 @@ ${JSON.stringify(dataToAnalyze)}`;
         function openBackupImportWizard() {
             pendingBackupImport = null;
             openBackupSelectModal('import');
+            setTimeout(() => { if (typeof pickBackupFileForImport === 'function') pickBackupFileForImport(); }, 200);
         }
 
         function openBackupImportSelectModal(importData) {
@@ -16068,25 +16359,22 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function importBackup(event) {
-            const file = event.target.files[0];
+            const file = event && event.target && event.target.files && event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    let text = (e.target.result || '').toString().replace(/^\uFEFF/, '').trim();
-                    if (!text) throw new Error('Archivo vacío');
-                    const imported = JSON.parse(text);
-                    if (!isValidNexusBackupPayload(imported)) throw new Error('Formato no reconocido');
-                    openBackupImportSelectModal(imported);
+                    const normalized = parseNexusBackupFileText(e.target.result);
+                    openBackupImportSelectModal(normalized);
                 } catch (err) {
                     console.error('[NEXUS] Error leyendo backup:', err);
-                    alert('⚠️ No se pudo leer la copia: ' + (err.message || 'JSON inválido o archivo demasiado grande.'));
+                    alert('⚠️ No se pudo leer la copia:\n\n' + (err.message || 'JSON inválido o archivo demasiado grande.'));
                 }
-                event.target.value = '';
+                if (event && event.target) event.target.value = '';
             };
             reader.onerror = function() {
                 alert('⚠️ No se pudo abrir el archivo en este dispositivo.');
-                event.target.value = '';
+                if (event && event.target) event.target.value = '';
             };
             reader.readAsText(file);
         }
