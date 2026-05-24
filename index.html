@@ -6468,6 +6468,72 @@
         }
 
         function convertCurrency(amount, fromCode, toCode) { if (!amount) return 0; if(fromCode === toCode) return amount; return (amount / (LIVE_RATES[fromCode] || 1)) * (LIVE_RATES[toCode] || 1); }
+
+        /** Flujo de caja real (no proyección ni pasivos internos Afterpay). */
+        function nexusIsRealCashflowTx(t) {
+            if (!t || t.isProjected) return false;
+            if (t.type === 'isolated' || t.type === 'afterpay') return false;
+            if (t.renderType === 'afterpay' || t.apInternalOnly) return false;
+            return t.type === 'income' || t.type === 'expense' || t.type === 'transfer';
+        }
+        /** Abonos reales a deuda/TC: ya reflejados en saldo de bóveda/préstamo; no duplicar en presupuesto 50/30/20. */
+        function nexusIsDebtPaymentTx(t) {
+            if (!t || t.type !== 'expense') return false;
+            const cat = String(t.cat || '').toLowerCase();
+            const note = String(t.note || '').toLowerCase();
+            return cat.includes('abono') || cat.includes('pago deuda') || cat.includes('pago tc') || note.includes('[abono]');
+        }
+        function nexusEntityCurrencyCode(ent) {
+            return ent && (ent.original_currency || ent.currency);
+        }
+        function nexusMatchesActiveCurrency(ent, displayCur) {
+            if (!ent || displayCur === 'GLOBAL') return true;
+            return nexusEntityCurrencyCode(ent) === displayCur;
+        }
+        function nexusLoanRemainingBalance(l) {
+            if (!l) return 0;
+            const P = l.original_total || l.total || 0;
+            const r = (l.rate || 0) / 100;
+            const n = l.term || 1;
+            const paid = l.paidQuotas || 0;
+            if (paid >= n) return 0;
+            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            let balance = P;
+            for (let j = 0; j < paid; j++) balance -= (A - (balance * r));
+            return Math.max(0, balance);
+        }
+        function nexusAfterpayPendingAmount(t) {
+            const quotas = t.apQuotas || 4;
+            const paid = t.apPaid || 0;
+            if (paid >= quotas) return 0;
+            const unit = (t.original_amount || t.amount) / quotas;
+            return unit * (quotas - paid);
+        }
+        /** Refresco unificado tras borrar/editar datos (todos los módulos vinculados al SSoT). */
+        function nexusRefreshAllModules() {
+            if (typeof updateDashboard === 'function') updateDashboard();
+            const tab = state.activeTab;
+            if (tab === 'database' && typeof renderDatabase === 'function') renderDatabase();
+            else if (tab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay();
+            else if (tab === 'analysis' && typeof renderAnalysis === 'function') renderAnalysis();
+            else if (tab === 'report' && typeof renderReport === 'function') renderReport();
+            else if (tab === 'finances' && typeof renderFinancesUnified === 'function') renderFinancesUnified();
+            else if (tab === 'budget' && typeof renderBudgetTab === 'function') renderBudgetTab();
+            else if (tab === 'calendar' && typeof renderCalendar === 'function') renderCalendar();
+            else if (tab === 'loans' && typeof renderLoansList === 'function') renderLoansList();
+            else if (tab === 'tasks' && typeof renderTasksTab === 'function') renderTasksTab();
+            else if (tab === 'accounts' && typeof renderAccountsTab === 'function') renderAccountsTab();
+            if (typeof currentHistAccId !== 'undefined' && currentHistAccId) {
+                const acc = (state.accounts || []).find(a => a.id === currentHistAccId);
+                if (acc) {
+                    const balEl = $id('hist-acc-balance');
+                    if (balEl) balEl.innerText = fmt(acc.balance, acc.currency);
+                    if (typeof renderHistAccList === 'function') renderHistAccList();
+                } else if (typeof closeAccountHistory === 'function') closeAccountHistory();
+            }
+            const archMod = $id('deleted-tx-archive-modal');
+            if (archMod && !archMod.classList.contains('hidden') && typeof renderDeletedTxArchiveList === 'function') renderDeletedTxArchiveList();
+        }
         function buildTransactionSchema(baseObj) { const baseCurrency = state.settings.baseCurrency || 'USD'; return { ...baseObj, id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), original_amount: baseObj.amount, currency_code: baseObj.currency, base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency), flags: { isAfterpay: baseObj.type === 'afterpay' } }; }
         const getActiveAccounts = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.accounts || []).map(a => ({ ...a, original_balance: a.balance, original_currency: a.currency, balance: convertCurrency(a.balance, a.currency, base), limit: convertCurrency(a.limit || 0, a.currency, base), currency: base, isVirtual: true })); } return (state.accounts || []).filter(a => a.currency === state.activeCurrency); };
         const getActiveTx = () => {
@@ -6520,8 +6586,8 @@
             const now = new Date(); now.setHours(0,0,0,0);
             const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
 
-            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx)
-            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4)); 
+            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx), filtrado por divisa activa
+            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4) && nexusMatchesActiveCurrency(t, cDisplay)); 
             
             apTx.forEach(tx => { 
                 const quotas = tx.apQuotas || 4; 
@@ -6559,8 +6625,8 @@
                 } 
             });
             
-            // 2. LOANS: Se extrae del SSoT puro (state.loans)
-            state.loans.forEach(l => {
+            // 2. LOANS: Se extrae del SSoT puro (state.loans), filtrado por divisa activa
+            (state.loans || []).filter(l => nexusMatchesActiveCurrency(l, cDisplay)).forEach(l => {
                 const P_orig = l.original_total || l.total;
                 const r = l.rate / 100; const n = l.term; 
                 const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
@@ -7520,12 +7586,15 @@
             });
             
             (state.loans || []).forEach(l => { 
-                totLiab += convertCurrency(l.balance, l.currency, bC); 
-                nwByCurrency[l.currency] = (nwByCurrency[l.currency] || 0) - l.balance;
+                const rem = nexusLoanRemainingBalance(l);
+                if (rem <= 0) return;
+                totLiab += convertCurrency(rem, l.currency, bC); 
+                nwByCurrency[l.currency] = (nwByCurrency[l.currency] || 0) - rem;
             });
             
             state.tx.filter(t => t.type === 'afterpay').forEach(t => {
-                const quotas = t.apQuotas || 4; const pending = ((t.original_amount || t.amount) / quotas) * (quotas - (t.apPaid || 0));
+                const pending = nexusAfterpayPendingAmount(t);
+                if (pending <= 0) return;
                 totLiab += convertCurrency(pending, t.original_currency || t.currency, bC);
                 nwByCurrency[t.original_currency || t.currency] = (nwByCurrency[t.original_currency || t.currency] || 0) - pending;
             });
@@ -7550,8 +7619,8 @@
                      // Calcular flujos globales en moneda base
                      const aTxCur = getEnrichedTx();
                      const cTxCur = getContextTx(aTxCur);
-                     const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
-                     const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
+                     const curInc = cTxCur.filter(nexusIsRealCashflowTx).filter(t=>t.type==='income').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
+                     const curExp = cTxCur.filter(nexusIsRealCashflowTx).filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.original_amount||t.amount, t.original_currency||t.currency, c),0);
 
                      html = `
                      <div class="wealth-card w-full p-4 md:p-5 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 rounded-[1.5rem]">
@@ -7599,8 +7668,8 @@
                               state.activeCurrency = c;
                               const aTxCur = getEnrichedTx();
                               const cTxCur = getContextTx(aTxCur);
-                              const curInc = cTxCur.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-                              const curExp = cTxCur.filter(t=>t.type==='expense' || t.type==='afterpay').reduce((s,t)=>s+t.amount,0);
+                              const curInc = cTxCur.filter(nexusIsRealCashflowTx).filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+                              const curExp = cTxCur.filter(nexusIsRealCashflowTx).filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
 
                               html += `
                               <div class="wealth-card w-full p-4 md:p-5 flex flex-col shadow-xl relative overflow-hidden group border border-white/10 rounded-[1.5rem]">
@@ -7932,15 +8001,14 @@
         function render7DaysChart(aTx) { 
             const canvas = $id('chart-7days'); if(!canvas) return; const ctx = canvas.getContext('2d'); if(charts.d7) charts.d7.destroy(); 
             const dI = [], dO = [], l = []; 
-            for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate() - i); l.push(d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })); const dTx = aTx.filter(t => new Date(t.date).toDateString() === d.toDateString() && t.type !== 'afterpay'); dI.push(dTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)); dO.push(dTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0)); } 
+            for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate() - i); l.push(d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })); const dTx = aTx.filter(t => new Date(t.date).toDateString() === d.toDateString() && nexusIsRealCashflowTx(t)); dI.push(dTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)); dO.push(dTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0)); } 
             charts.d7 = new Chart(ctx, { type: 'line', data: { labels: l, datasets: [{ data: dI, borderColor: state.theme.inc, tension: 0.4 }, { data: dO, borderColor: state.theme.exp, tension: 0.4 }]}, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); 
         }
 
         function renderPeriodChart(cTx) { 
             const canvas = $id('chart-period'); if(!canvas) return; const ctx = canvas.getContext('2d'); if(charts.period) charts.period.destroy(); 
             const grp = {}; 
-            cTx.forEach(t => { 
-                if(t.type === 'afterpay') return; 
+            cTx.filter(nexusIsRealCashflowTx).forEach(t => { 
                 const dStr = t.date.split('T')[0]; 
                 grp[dStr] = (grp[dStr]||0) + (t.type==='income' ? t.amount : -t.amount); 
             }); 
@@ -8664,6 +8732,7 @@
                     t.updatedAt = now;
                 });
             } else {
+                relatedTx.forEach(t => { if (typeof nexusReverseTxBalanceEffect === 'function') nexusReverseTxBalanceEffect(t); });
                 state.tx = (state.tx || []).filter(t => t.accId !== id && t.toAccId !== id);
             }
 
@@ -8686,10 +8755,8 @@
             nexusApplyAccountTombstonesToState();
             saveState();
             nexusForceCloudPushNow();
-            updateDashboard();
-            renderAccountsTab();
             closeAccountModal();
-            if (state.activeTab === 'database') renderDatabase();
+            nexusRefreshAllModules();
 
             const msg = deleteMode === 'audit'
                 ? '✅ Cuenta eliminada. Los movimientos siguen en Auditoría sin afectar balances activos.'
@@ -9553,7 +9620,9 @@
             if(!acc) return alert("Necesitas cuenta líquida con saldo para debitar la cuota.");
             if((l.paidQuotas || 0) >= l.term) return alert("Deuda saldada.");
             const r = l.rate / 100; const quotaAmt = (l.rate === 0) ? (l.total / l.term) : (l.total * r) / (1 - Math.pow(1 + r, -l.term));
-            l.paidQuotas = (l.paidQuotas || 0) + 1; acc.balance -= quotaAmt;
+            l.paidQuotas = (l.paidQuotas || 0) + 1;
+            l.balance = nexusLoanRemainingBalance(l);
+            acc.balance -= quotaAmt;
             const newTx = buildTransactionSchema({ type: 'expense', amount: quotaAmt, cat: l.isCC ? '💳 Abono TC' : '💳 Pago Deuda', accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${l.name} (${l.paidQuotas}/${l.term})`, currency: l.currency, costType: 'fixed' });
             
             // APEX FIX: Inyectar trazabilidad de autor
@@ -10111,17 +10180,25 @@
 
         function nexusReverseTxBalanceEffect(tx) {
             if (!tx) return;
-            if (tx.type === 'transfer') {
-                const oOrig = state.accounts.find(a => a.id === tx.accId);
-                const oDest = state.accounts.find(a => a.id === tx.toAccId);
-                if (oOrig) { if (nexusIsLiabAccount(oOrig)) oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
-                if (oDest) { if (nexusIsLiabAccount(oDest)) oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
-            } else {
-                const acc = state.accounts.find(a => a.id === tx.accId);
-                if (acc && tx.type !== 'afterpay') {
-                    if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
-                    if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+            const touchRev = (acc) => {
+                if (!acc) return;
+                if (acc.isShared && acc.syncedOnce && typeof nexusRevertSharedTxOnBalance === 'function') {
+                    nexusRevertSharedTxOnBalance(acc, tx);
+                    return;
                 }
+                if (tx.type === 'transfer') {
+                    if (tx.accId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                    if (tx.toAccId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
+                    if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                    if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                }
+            };
+            if (tx.type === 'transfer') {
+                touchRev(state.accounts.find(a => a.id === tx.accId));
+                touchRev(state.accounts.find(a => a.id === tx.toAccId));
+            } else {
+                touchRev(state.accounts.find(a => a.id === tx.accId));
             }
         }
 
@@ -10300,16 +10377,7 @@
 
         function refreshAfterTxDelete() {
             saveState();
-            updateDashboard();
-            const tab = state.activeTab;
-            if (tab === 'database') renderDatabase();
-            else if (tab === 'afterpay') renderAfterpay();
-            else if (tab === 'analysis') renderAnalysis();
-            else if (tab === 'report') renderReport();
-            else if (tab === 'finances') renderFinancesUnified();
-            else if (tab === 'budget') renderBudgetTab();
-            else if (tab === 'calendar') renderCalendar();
-            else if (tab === 'accounts') {
+            if (state.activeTab === 'accounts' && typeof renderAccountsTab === 'function') {
                 renderAccountsTab();
                 (state.accounts || []).forEach(a => {
                     const el = $id('acc-tx-' + a.id);
@@ -10317,22 +10385,11 @@
                         el.classList.add('hidden');
                         el.classList.remove('flex');
                         el.innerHTML = '';
-                        toggleAccountTx(a.id);
+                        if (typeof toggleAccountTx === 'function') toggleAccountTx(a.id);
                     }
                 });
             }
-            if (currentHistAccId) {
-                const acc = state.accounts.find(a => a.id === currentHistAccId);
-                if (acc) {
-                    const balEl = $id('hist-acc-balance');
-                    if (balEl) balEl.innerText = fmt(acc.balance, acc.currency);
-                    renderHistAccList();
-                } else if (typeof closeAccountHistory === 'function') closeAccountHistory();
-            }
-            const archMod = $id('deleted-tx-archive-modal');
-            if (archMod && !archMod.classList.contains('hidden') && typeof renderDeletedTxArchiveList === 'function') {
-                renderDeletedTxArchiveList();
-            }
+            nexusRefreshAllModules();
         }
 
         function promptRootDeleteTransaction(txId, accIdHint) {
@@ -11503,8 +11560,8 @@ ${JSON.stringify(dataToAnalyze)}`;
                         if(nOrig) { if(nexusIsLiabAccount(nOrig)) nOrig.balance += amount; else nOrig.balance -= amount; }
                         if(nDest) { if(nexusIsLiabAccount(nDest)) nDest.balance -= amount; else nDest.balance += amount; }
                     } else {
-                        const newAcc = state.accounts.find(a => a.id === oldTx.accId);
-                        if(newAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if (nexusIsLiabAccount(newAcc)) newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if (nexusIsLiabAccount(newAcc)) newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
+                        const newAcc = state.accounts.find(a => a.id === accId);
+                        if(newAcc && type !== 'afterpay') { if(type === 'income') { if (nexusIsLiabAccount(newAcc)) newAcc.balance -= amount; else newAcc.balance += amount; } if(type === 'expense') { if (nexusIsLiabAccount(newAcc)) newAcc.balance += amount; else newAcc.balance -= amount; } }
                     }
                     saveCloudTx(oldTx);
                 }
@@ -11556,17 +11613,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (destAcc && destAcc.isShared && destAcc.remoteId && typeof nexusPushSharedP2PInstant === 'function') {
                 nexusPushSharedP2PInstant('accounts', destAcc.remoteId);
             }
-            updateDashboard(); closeForm(); 
-            
-            // APEX FIX: Ruteo de refresco global
-            if(state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase(); 
-            else if(state.activeTab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay(); 
-            else if(state.activeTab === 'analysis') renderAnalysis();
-            else if(state.activeTab === 'report') renderReport();
-            else if(state.activeTab === 'finances') renderFinancesUnified();
-            else if(state.activeTab === 'budget') renderBudgetTab();
-            else if(state.activeTab === 'calendar') renderCalendar();
-            else if(state.activeTab === 'accounts') renderAccountsTab();
+            closeForm();
+            nexusRefreshAllModules();
         }
         // ANALÍTICA
         function setStatsType(type) { state.statsType = type; renderAnalysis(); }
@@ -11709,18 +11757,13 @@ ${JSON.stringify(dataToAnalyze)}`;
             let nonCurrentLiabilities = 0;
             (state.loans || []).forEach(l => { 
                 if (!l.isBNPL) { 
-                    let P = l.original_total || l.total; 
-                    const r = l.rate / 100; const n = l.term; 
-                    const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1); 
-                    let balance = P; const paid = l.paidQuotas || 0; 
-                    for(let j=0; j<paid; j++) balance -= (A - (balance * r)); 
-                    if(balance > 0) nonCurrentLiabilities += Math.max(0, convertCurrency(balance, l.original_currency || l.currency, bC)); 
+                    const balance = nexusLoanRemainingBalance(l);
+                    if (balance > 0) nonCurrentLiabilities += convertCurrency(balance, l.original_currency || l.currency, bC); 
                 } 
             });
             
-            // APEX FIX: Recalcula pasivos a corto plazo usando la fuente pura (state.tx) para Afterpay
             const shortTermLiabilities = totalLiabilities + state.tx.filter(t => t.type === 'afterpay').reduce((sum, t) => {
-                const quotas = t.apQuotas || 4; const pending = ((t.original_amount || t.amount) / quotas) * (quotas - (t.apPaid || 0));
+                const pending = nexusAfterpayPendingAmount(t);
                 return sum + convertCurrency(pending, t.original_currency || t.currency, bC);
             }, 0); 
             
@@ -11746,7 +11789,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const mExp = currentMonthTx.filter(t=>t.type==='expense').reduce((s,t)=>s+convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC),0);
             
             const fixedCats = ['Vivienda', 'Salud', 'Deuda', 'Transporte', 'TC', 'Préstamo', 'Afterpay', 'fijo']; let mFixed = 0, mVar = 0;
-            currentMonthTx.filter(t => t.type === 'expense').forEach(t => { 
+            currentMonthTx.filter(t => t.type === 'expense' && !nexusIsDebtPaymentTx(t)).forEach(t => { 
                 const amtBase = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC);
                 if(fixedCats.some(c => t.cat.toLowerCase().includes(c.toLowerCase()))) mFixed += amtBase; else mVar += amtBase; 
             });
@@ -11772,7 +11815,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const targetFixed = baseIncome * 0.50; const targetVar = baseIncome * 0.30; const targetSave = baseIncome * 0.20;
             
             let actFixed = 0, actVar = 0; const fixedKeywords = ['vivienda', 'salud', 'transporte', 'deuda', 'afterpay', 'tc', 'préstamo', 'cuota', 'fijos', 'fijo'];
-            currentMonthTx.filter(t=>t.type==='expense').forEach(t => { 
+            currentMonthTx.filter(t=>t.type==='expense' && !nexusIsDebtPaymentTx(t)).forEach(t => { 
                 const amtBase = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC);
                 const isF = fixedKeywords.some(k => t.cat.toLowerCase().includes(k)); 
                 if(isF) actFixed += amtBase; else actVar += amtBase; 
@@ -11805,7 +11848,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             if (Object.keys(state.budgets).length > 0) {
                 const expByCat = {};
-                currentMonthTx.filter(t=>t.type==='expense' || t.type==='afterpay').forEach(t => {
+                currentMonthTx.filter(t=>t.type==='expense' && !nexusIsDebtPaymentTx(t)).forEach(t => {
                     const cAmt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, bC);
                     expByCat[t.cat] = (expByCat[t.cat] || 0) + cAmt;
                     const m = t.cat.match(/\[(.*?)\]\s*(.*)/);
@@ -13230,12 +13273,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial Estricto
                 if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(nexusIsLiabAccount(a) ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
-            (state.loans||[]).forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
+            (state.loans||[]).forEach(l => {
+                const rem = nexusLoanRemainingBalance(l);
+                if (rem > 0) totLiab += convertCurrency(rem, l.currency, bC);
+            });
             
-            // APEX FIX: Sumatoria precisa del saldo pendiente de Afterpay (Pasivo Real)
             state.tx.filter(t => t.type === 'afterpay').forEach(t => {
-                const quotas = t.apQuotas || 4; const pending = (t.amount / quotas) * (quotas - (t.apPaid || 0));
-                totLiab += convertCurrency(pending, t.currency, bC);
+                const pending = nexusAfterpayPendingAmount(t);
+                if (pending > 0) totLiab += convertCurrency(pending, t.original_currency || t.currency, bC);
             });
 
             const rA = $id('rep-assets'); if(rA) rA.innerText = fmt(totAssets, bC); 
