@@ -1788,7 +1788,14 @@
                 </div>
                 <button type="button" onclick="closeDeletedTxArchiveModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <p class="text-[10px] font-black uppercase text-slate-400">Registros: <span id="deleted-tx-archive-count" class="theme-text">0</span></p>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-[10px] font-black uppercase text-slate-400">Registros: <span id="deleted-tx-archive-count" class="theme-text">0</span> · <span id="deleted-tx-archive-selected-count" class="text-rose-600">0</span> seleccionados</p>
+                <div class="flex flex-wrap gap-1.5">
+                    <button type="button" onclick="nexusToggleDeletedTxArchiveSelectAll()" class="bg-slate-100 text-slate-600 px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95">Seleccionar todo</button>
+                    <button type="button" onclick="promptBulkRestoreDeletedTxArchive()" class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95"><i class="fa-solid fa-rotate-left mr-1"></i>Restaurar</button>
+                    <button type="button" onclick="promptBulkPurgeDeletedTxArchive()" class="bg-red-600 text-white px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase active:scale-95"><i class="fa-solid fa-trash-can mr-1"></i>Borrar permanente</button>
+                </div>
+            </div>
             <div id="deleted-tx-archive-list" class="space-y-2 max-h-[55vh] overflow-y-auto hide-scrollbar"></div>
             <button type="button" onclick="closeDeletedTxArchiveModal()" class="w-full bg-slate-100 theme-text p-4 rounded-2xl font-black uppercase text-xs">Cerrar</button>
         </div>
@@ -3252,6 +3259,22 @@
                 else if(action === 'purge_deleted_tx') {
                     if (typeof nexusPermanentDeleteArchivedTx === 'function' && nexusPermanentDeleteArchivedTx(payload)) {
                         if (typeof renderDeletedTxArchiveList === 'function') renderDeletedTxArchiveList();
+                        if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                    }
+                }
+                else if(action === 'purge_deleted_tx_bulk') {
+                    const ids = String(payload || '').split(',').filter(Boolean);
+                    if (typeof nexusBulkPermanentDeleteArchivedTx === 'function') {
+                        nexusBulkPermanentDeleteArchivedTx(ids);
+                        if (typeof renderDeletedTxArchiveList === 'function') renderDeletedTxArchiveList();
+                        if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                    }
+                }
+                else if(action === 'restore_deleted_tx_bulk') {
+                    const ids = String(payload || '').split(',').filter(Boolean);
+                    if (typeof nexusBulkRestoreArchivedTransactions === 'function') {
+                        const r = nexusBulkRestoreArchivedTransactions(ids);
+                        if (r.fail > 0) alert('Restauradas: ' + r.ok + '. No restauradas: ' + r.fail + ' (bóveda inexistente).');
                         if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
                     }
                 }
@@ -6509,6 +6532,25 @@
             const unit = (t.original_amount || t.amount) / quotas;
             return unit * (quotas - paid);
         }
+        function nexusGetPatrimonyEligibleAccounts() {
+            return (state.accounts || []).filter(a => {
+                if (!a || !a.id) return false;
+                if (a.isShared || a.type === 'terceros') return false;
+                if (typeof nexusIsAccountTombstoned === 'function' && nexusIsAccountTombstoned(a.id, a.remoteId)) return false;
+                return true;
+            });
+        }
+        function nexusGetPatrimonyAfterpayContracts() {
+            const purged = typeof nexusGetPurgedTxIdSet === 'function' ? nexusGetPurgedTxIdSet() : new Set(state.deletedTxIds || []);
+            return (state.tx || []).filter(t => t && t.type === 'afterpay' && !purged.has(t.id) && !t.auditArchived);
+        }
+        function nexusGetPatrimonyLoansForLiabilities() {
+            return (state.loans || []).filter(l => {
+                if (!l || !l.id) return false;
+                if (l.isCC && l.cardId) return false;
+                return nexusLoanRemainingBalance(l) > 0;
+            });
+        }
         /** Refresco unificado tras borrar/editar datos (todos los módulos vinculados al SSoT). */
         function nexusRefreshAllModules() {
             if (typeof updateDashboard === 'function') updateDashboard();
@@ -7578,21 +7620,19 @@
             const bC = state.settings.baseCurrency || 'COP'; let totAssets = 0; let totLiab = 0;
             let nwByCurrency = {};
             
-            (state.accounts || []).forEach(a => { 
-                if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
+            nexusGetPatrimonyEligibleAccounts().forEach(a => { 
                 let bal = nexusIsLiabAccount(a) ? -a.balance : a.balance; 
                 nwByCurrency[a.currency] = (nwByCurrency[a.currency] || 0) + bal;
                 if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(nexusIsLiabAccount(a) ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
             
-            (state.loans || []).forEach(l => { 
+            nexusGetPatrimonyLoansForLiabilities().forEach(l => { 
                 const rem = nexusLoanRemainingBalance(l);
-                if (rem <= 0) return;
                 totLiab += convertCurrency(rem, l.currency, bC); 
                 nwByCurrency[l.currency] = (nwByCurrency[l.currency] || 0) - rem;
             });
             
-            state.tx.filter(t => t.type === 'afterpay').forEach(t => {
+            nexusGetPatrimonyAfterpayContracts().forEach(t => {
                 const pending = nexusAfterpayPendingAmount(t);
                 if (pending <= 0) return;
                 totLiab += convertCurrency(pending, t.original_currency || t.currency, bC);
@@ -10398,6 +10438,8 @@
 
         function openDeletedTxArchiveModal() {
             nexusPurgeExpiredDeletedTxArchive();
+            if (!state.ui) state.ui = {};
+            state.ui.deletedTxArchiveSelected = [];
             const mod = $id('deleted-tx-archive-modal');
             if (!mod) return;
             nexusShowModalInstant(mod);
@@ -10408,12 +10450,75 @@
             nexusHideModalInstant($id('deleted-tx-archive-modal'));
         }
 
+        function nexusEnsureDeletedTxArchiveSelection() {
+            if (!state.ui) state.ui = {};
+            if (!Array.isArray(state.ui.deletedTxArchiveSelected)) state.ui.deletedTxArchiveSelected = [];
+        }
+        function nexusGetDeletedTxArchiveSelectedSet() {
+            nexusEnsureDeletedTxArchiveSelection();
+            return new Set(state.ui.deletedTxArchiveSelected || []);
+        }
+        function nexusUpdateDeletedTxArchiveSelectedCount() {
+            const el = $id('deleted-tx-archive-selected-count');
+            if (el) el.innerText = String((state.ui && state.ui.deletedTxArchiveSelected) ? state.ui.deletedTxArchiveSelected.length : 0);
+        }
+        function nexusToggleDeletedTxArchiveSelect(id, checked) {
+            nexusEnsureDeletedTxArchiveSelection();
+            const arr = state.ui.deletedTxArchiveSelected;
+            const idx = arr.indexOf(id);
+            if (checked && idx === -1) arr.push(id);
+            else if (!checked && idx > -1) arr.splice(idx, 1);
+            nexusUpdateDeletedTxArchiveSelectedCount();
+        }
+        function nexusToggleDeletedTxArchiveSelectAll() {
+            nexusPurgeExpiredDeletedTxArchive();
+            nexusEnsureDeletedTxArchiveSelection();
+            const entries = state.deletedTxArchive || [];
+            const sel = nexusGetDeletedTxArchiveSelectedSet();
+            const allSelected = entries.length > 0 && entries.every(e => sel.has(e.id));
+            state.ui.deletedTxArchiveSelected = allSelected ? [] : entries.map(e => e.id);
+            renderDeletedTxArchiveList();
+        }
+        function nexusGetDeletedTxArchiveSelectedIds() {
+            return [...nexusGetDeletedTxArchiveSelectedSet()];
+        }
+        function promptBulkPurgeDeletedTxArchive() {
+            const ids = nexusGetDeletedTxArchiveSelectedIds();
+            if (!ids.length) return alert('Selecciona al menos una transacción de la papelera.');
+            triggerUIConfirm('¿Eliminar permanentemente ' + ids.length + ' registro(s)?\n\nNo podrás restaurarlos.', 'purge_deleted_tx_bulk', ids.join(','));
+        }
+        function nexusBulkPermanentDeleteArchivedTx(ids) {
+            if (!ids || !ids.length) return 0;
+            let n = 0;
+            ids.forEach(id => { if (nexusPermanentDeleteArchivedTx(id)) n++; });
+            state.ui.deletedTxArchiveSelected = (state.ui.deletedTxArchiveSelected || []).filter(id => !ids.includes(id));
+            return n;
+        }
+        function promptBulkRestoreDeletedTxArchive() {
+            const ids = nexusGetDeletedTxArchiveSelectedIds();
+            if (!ids.length) return alert('Selecciona al menos una transacción para restaurar.');
+            triggerUIConfirm('¿Restaurar ' + ids.length + ' transacción(es)?\n\nVolverán a cuentas, auditoría e informes.', 'restore_deleted_tx_bulk', ids.join(','));
+        }
+        function nexusBulkRestoreArchivedTransactions(ids) {
+            if (!ids || !ids.length) return { ok: 0, fail: 0 };
+            let ok = 0, fail = 0;
+            ids.forEach(id => {
+                if (nexusRestoreArchivedTransaction(id)) ok++;
+                else fail++;
+            });
+            state.ui.deletedTxArchiveSelected = (state.ui.deletedTxArchiveSelected || []).filter(id => !ids.includes(id));
+            return { ok, fail };
+        }
+
         function renderDeletedTxArchiveList() {
             nexusPurgeExpiredDeletedTxArchive();
             const list = $id('deleted-tx-archive-list');
             const countEl = $id('deleted-tx-archive-count');
             const entries = [...(state.deletedTxArchive || [])].sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+            nexusEnsureDeletedTxArchiveSelection();
+            const selected = nexusGetDeletedTxArchiveSelectedSet();
             if (countEl) countEl.innerText = String(entries.length);
+            nexusUpdateDeletedTxArchiveSelectedCount();
             if (!list) return;
             if (!entries.length) {
                 list.innerHTML = '<p class="text-center text-[10px] font-bold uppercase text-slate-400 py-6">No hay transacciones en la papelera de los últimos 15 días.</p>';
@@ -10433,12 +10538,13 @@
                 const note = (t.note || (t.cat && t.cat.length > 2 ? t.cat.substring(2) : t.cat) || 'Sin descripción');
                 const safeNote = String(note).replace(/</g, '&lt;');
                 const safeId = String(e.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const isChecked = selected.has(e.id);
                 const canRestore = nexusCanRestoreArchivedTx(t).ok;
                 const restoreBtn = canRestore
                     ? `<button type="button" onclick="event.stopPropagation(); promptRestoreDeletedTransaction('${safeId}')" class="shrink-0 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl text-[8px] font-black uppercase active:scale-95 hover:bg-emerald-100 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Restaurar</button>`
                     : `<span class="shrink-0 text-[7px] font-bold text-slate-400 uppercase px-2 py-1" title="Bóveda no disponible">Sin bóveda</span>`;
                 const purgeBtn = `<button type="button" onclick="event.stopPropagation(); promptPermanentDeleteArchivedTx('${safeId}')" class="shrink-0 bg-red-600 text-white border border-red-700 px-3 py-1.5 rounded-xl text-[8px] font-black uppercase active:scale-95 hover:bg-red-700 transition-colors ml-1"><i class="fa-solid fa-trash-can mr-1"></i>Borrar permanente</button>`;
-                return `<div class="theme-card p-4 rounded-2xl border border-rose-100/80 shadow-sm"><div class="flex justify-between items-start gap-2"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div><div class="flex justify-end flex-wrap gap-1 mt-2 pt-2 border-t border-rose-50">${restoreBtn}${purgeBtn}</div></div>`;
+                return `<div class="theme-card p-4 rounded-2xl border ${isChecked ? 'border-rose-400 bg-rose-50/30' : 'border-rose-100/80'} shadow-sm"><div class="flex justify-between items-start gap-2"><label class="flex items-start gap-3 min-w-0 flex-1 cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-rose-600 mt-0.5 shrink-0" ${isChecked ? 'checked' : ''} onchange="nexusToggleDeletedTxArchiveSelect('${safeId}', this.checked)"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div></label><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div><div class="flex justify-end flex-wrap gap-1 mt-2 pt-2 border-t border-rose-50">${restoreBtn}${purgeBtn}</div></div>`;
             }).join('');
         }
 
@@ -11745,9 +11851,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const bC = state.settings.baseCurrency; const now = new Date(); const enrichedTx = getEnrichedTx();
             let liquidAssets = 0, investmentAssets = 0, totalLiabilities = 0; 
             
-            // APEX FIX: Aislamiento Patrimonial y Conversión Estricta para Cuentas
-            (state.accounts || []).forEach(a => { 
-                if (a.isShared || a.type === 'terceros') return; 
+            nexusGetPatrimonyEligibleAccounts().forEach(a => { 
                 const balInBase = convertCurrency(a.balance, a.currency, bC);
                 if (a.type === 'liquid' || (a.type === 'virtual' && a.balance >= 0)) liquidAssets += balInBase; 
                 else if (a.type === 'investment') investmentAssets += balInBase; 
@@ -11755,14 +11859,14 @@ ${JSON.stringify(dataToAnalyze)}`;
             });
             
             let nonCurrentLiabilities = 0;
-            (state.loans || []).forEach(l => { 
+            nexusGetPatrimonyLoansForLiabilities().forEach(l => { 
                 if (!l.isBNPL) { 
                     const balance = nexusLoanRemainingBalance(l);
-                    if (balance > 0) nonCurrentLiabilities += convertCurrency(balance, l.original_currency || l.currency, bC); 
+                    nonCurrentLiabilities += convertCurrency(balance, l.original_currency || l.currency, bC); 
                 } 
             });
             
-            const shortTermLiabilities = totalLiabilities + state.tx.filter(t => t.type === 'afterpay').reduce((sum, t) => {
+            const shortTermLiabilities = totalLiabilities + nexusGetPatrimonyAfterpayContracts().reduce((sum, t) => {
                 const pending = nexusAfterpayPendingAmount(t);
                 return sum + convertCurrency(pending, t.original_currency || t.currency, bC);
             }, 0); 
@@ -13269,16 +13373,14 @@ ${JSON.stringify(dataToAnalyze)}`;
         function renderReport() {
             const bC = state.settings.baseCurrency; const rb = $id('rep-base-curr'); if(rb) rb.innerText = bC;
             let totAssets = 0; let totLiab = 0;
-            (state.accounts||[]).forEach(a => { 
-                if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial Estricto
+            nexusGetPatrimonyEligibleAccounts().forEach(a => { 
                 if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(nexusIsLiabAccount(a) ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
-            (state.loans||[]).forEach(l => {
+            nexusGetPatrimonyLoansForLiabilities().forEach(l => {
                 const rem = nexusLoanRemainingBalance(l);
-                if (rem > 0) totLiab += convertCurrency(rem, l.currency, bC);
+                totLiab += convertCurrency(rem, l.currency, bC);
             });
-            
-            state.tx.filter(t => t.type === 'afterpay').forEach(t => {
+            nexusGetPatrimonyAfterpayContracts().forEach(t => {
                 const pending = nexusAfterpayPendingAmount(t);
                 if (pending > 0) totLiab += convertCurrency(pending, t.original_currency || t.currency, bC);
             });
@@ -15451,10 +15553,80 @@ ${JSON.stringify(dataToAnalyze)}`;
             return payload;
         }
 
+        function nexusMergeStringListUnique(a, b) {
+            return [...new Set([...(a || []), ...(b || [])])];
+        }
+
+        function nexusMergeCategoryLists(target, imported) {
+            if (!target.categories || typeof target.categories !== 'object') target.categories = { global: [] };
+            if (!Array.isArray(target.categories.global)) target.categories.global = [];
+            if (!target.catParents || typeof target.catParents !== 'object') target.catParents = { global: [] };
+            if (!Array.isArray(target.catParents.global)) target.catParents.global = [];
+            const catSet = new Set(target.categories.global);
+            (imported.categories && imported.categories.global || []).forEach(c => { if (c) catSet.add(c); });
+            target.categories.global = [...catSet];
+            const parSet = new Set(target.catParents.global);
+            (imported.catParents && imported.catParents.global || []).forEach(p => { if (p) parSet.add(p); });
+            target.catParents.global = [...parSet];
+        }
+
+        /** Fusiona por ID (no reemplaza toda la bóveda) para que importar no borre datos locales ni sea pisado por nube. */
         function mergeBackupIntoState(target, imported, selection) {
-            collectStateKeysFromSelection(selection).forEach(k => {
-                if (imported[k] !== undefined) target[k] = JSON.parse(JSON.stringify(imported[k]));
-            });
+            if (!target || !imported || !selection) return;
+            const skipTxIds = new Set([
+                ...(imported.deletedTxIds || []),
+                ...(imported.deletedSharedTxs || []),
+                ...(target.deletedTxIds || []),
+                ...(target.deletedSharedTxs || [])
+            ]);
+
+            if (selection.tx) {
+                const importTx = (imported.tx || []).filter(t => t && t.id && !skipTxIds.has(t.id));
+                target.tx = nexusMergeTxById(target.tx || [], importTx);
+                target.tx = nexusFilterPurgedTransactions(target.tx);
+                target.deletedTxIds = nexusMergeDeletedTxIdList(target.deletedTxIds, imported.deletedTxIds);
+                target.deletedSharedTxs = nexusMergeStringListUnique(target.deletedSharedTxs, imported.deletedSharedTxs);
+                target.deletedTxArchive = nexusMergeDeletedTxArchiveList(target.deletedTxArchive || [], imported.deletedTxArchive || []);
+            }
+            if (selection.accounts) {
+                target.accounts = nexusMergeEntityById(target.accounts || [], imported.accounts || []);
+                target.deletedAccounts = nexusMergeDeletedAccountTombstones(target.deletedAccounts || [], imported.deletedAccounts || []);
+            }
+            if (selection.loans) {
+                target.loans = nexusMergeEntityById(target.loans || [], imported.loans || []);
+            }
+            if (selection.tasks) {
+                target.tasks = nexusMergeEntityById(target.tasks || [], imported.tasks || []);
+                target.taskVaults = nexusMergeEntityById(target.taskVaults || [], imported.taskVaults || []);
+                target.deletedSharedTasks = nexusMergeStringListUnique(target.deletedSharedTasks, imported.deletedSharedTasks);
+            }
+            if (selection.goals) {
+                target.goals = nexusMergeEntityById(target.goals || [], imported.goals || []);
+            }
+            if (selection.projects) {
+                target.projects = nexusMergeEntityById(target.projects || [], imported.projects || []);
+                target.projectVaults = nexusMergeEntityById(target.projectVaults || [], imported.projectVaults || []);
+            }
+            if (selection.categories) {
+                nexusMergeCategoryLists(target, imported);
+            }
+            if (selection.budgets && imported.budgets) {
+                target.budgets = { ...(target.budgets || {}), ...JSON.parse(JSON.stringify(imported.budgets)) };
+            }
+            if (selection.pse) {
+                target.pseLinks = nexusMergeEntityById(target.pseLinks || [], imported.pseLinks || []);
+            }
+            if (selection.taxes && imported.taxes) {
+                target.taxes = { ...(target.taxes || {}), ...JSON.parse(JSON.stringify(imported.taxes)) };
+            }
+            if (selection.prefs) {
+                if (imported.settings) target.settings = { ...(target.settings || {}), ...JSON.parse(JSON.stringify(imported.settings)) };
+                if (imported.theme) target.theme = { ...(target.theme || {}), ...JSON.parse(JSON.stringify(imported.theme)) };
+                ['activeCurrency', 'context', 'activeTab', 'periodFilter', 'statsType', 'calendarFilter'].forEach(k => {
+                    if (imported[k] !== undefined) target[k] = JSON.parse(JSON.stringify(imported[k]));
+                });
+                if (imported.ui) target.ui = { ...(target.ui || {}), ...JSON.parse(JSON.stringify(imported.ui)) };
+            }
         }
 
         function faviconFromBankUrl(bankUrl) {
@@ -15724,8 +15896,8 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const nAcc = (pendingBackupImport.accounts || []).length;
                 const nPse = (pendingBackupImport.pseLinks || []).length;
                 hint.textContent = meta && meta.sections
-                    ? `Archivo listo (${nAcc} cuentas, ${nPse} enlaces PSE). Las secciones del archivo ya están marcadas — pulsa «Importar selección».`
-                    : 'Archivo cargado. Elige qué secciones fusionar con tu bóveda actual.';
+                    ? `Archivo listo (${nAcc} cuentas, ${nPse} enlaces PSE). Las secciones del archivo ya están marcadas — pulsa «Importar selección» para fusionar sin borrar datos locales.`
+                    : 'Archivo cargado (formato legacy → v2 automático). Elige qué secciones fusionar con tu bóveda actual.';
             }
             if (btn) btn.textContent = 'Importar selección';
             renderBackupSectionsList('import', pendingBackupImport);
@@ -15834,16 +16006,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
             try {
                 imported = normalizeBackupImportPayload(imported);
-                const allChecked = NEXUS_BACKUP_SECTIONS.every(s => selection[s.id]);
-                const isLegacyFull = !imported._nexusBackup && (imported.tx || imported.accounts);
-                if (isLegacyFull && allChecked && confirm('¿Reemplazar toda la bóveda con esta copia? (Cancelar = fusionar solo lo marcado)')) {
-                    state = JSON.parse(JSON.stringify(imported));
-                    if (state._nexusBackup) delete state._nexusBackup;
-                } else {
-                    mergeBackupIntoState(state, imported, selection);
-                }
+                mergeBackupIntoState(state, imported, selection);
 
                 if (state._nexusBackup) delete state._nexusBackup;
+                if (typeof nexusPurgeDeletedTxFromState === 'function') nexusPurgeDeletedTxFromState();
                 if (typeof nexusNormalizePinSettings === 'function') nexusNormalizePinSettings();
 
                 if (typeof unsubscribeSnapshot !== 'undefined' && unsubscribeSnapshot) {
@@ -15865,7 +16031,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (!state.tx) state.tx = [];
                 if (!state.loans) state.loans = [];
 
-                nexusMarkForceLocalWin(300000);
+                nexusMarkForceLocalWin(600000);
                 nexusTouchLocalState('backup-import');
                 state._nexusSync.localRevision = Date.now();
                 nexusApplyAccountTombstonesToState();
@@ -15873,19 +16039,14 @@ ${JSON.stringify(dataToAnalyze)}`;
                 await forcePersistVaultState();
                 nexusRefreshModulesAfterBackupImport(selection);
 
-                window.__nexusCloudPullPausedUntil = Date.now() + 300000;
+                window.__nexusCloudPullPausedUntil = Date.now() + 600000;
+                window.__nexusBackupImportJustFinished = Date.now();
                 lastCloudSyncHash = {};
                 if (typeof syncTimeout !== 'undefined') clearTimeout(syncTimeout);
 
-                if (typeof nexusRunBackgroundPushNow === 'function') {
-                    nexusRunBackgroundPushNow('backup-import');
-                } else if (typeof nexusScheduleBackgroundPush === 'function') {
-                    nexusScheduleBackgroundPush('backup-import');
-                }
-
                 switchTab(state.activeTab === 'settings' ? 'accounts' : (state.activeTab || 'home'));
                 const importedLabels = NEXUS_BACKUP_SECTIONS.filter(s => selection[s.id]).map(s => s.label).join(', ');
-                alert('✅ Copia importada (' + importedLabels + ').');
+                alert('✅ Copia fusionada (' + importedLabels + ').\n\nLos datos locales se conservan; la nube no sobrescribirá esta bóveda durante 10 minutos. Sincroniza después si lo necesitas.');
             } catch (e) {
                 console.error('[NEXUS] applyPartialBackupImport', e);
                 alert('Error al importar la copia: ' + (e.message || 'revisa la consola'));
