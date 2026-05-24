@@ -326,6 +326,17 @@
         #nexus-doc-viewer, #nexus-web-viewer {
             align-items: stretch !important;
             flex-direction: column;
+            justify-content: flex-start !important;
+        }
+        #nexus-web-viewer-frame {
+            flex: 1 1 auto;
+            width: 100% !important;
+            max-width: none !important;
+            min-height: 0;
+        }
+        #nexus-web-viewer-blocked {
+            flex: 1 1 auto;
+            min-height: 0;
         }
         /* Formularios/modales: fijos al centro, sin arrastre horizontal */
         .fixed.inset-0[id$="-modal"]:not(.hidden),
@@ -2819,9 +2830,16 @@
         <div id="nexus-web-viewer" class="fixed inset-0 z-[245] hidden bg-slate-900 flex flex-col">
             <div class="flex justify-between items-center gap-3 px-4 py-3 safe-top shrink-0 border-b border-white/10">
                 <h3 id="nexus-web-viewer-title" class="text-xs font-black text-white uppercase truncate flex-1">Portal de pago</h3>
-                <button type="button" onclick="nexusCloseWebViewer()" class="nexus-modal-close-btn bg-white/10 text-white border border-white/20" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
+                <button type="button" onclick="nexusOpenWebViewerExternal()" class="shrink-0 bg-emerald-500 text-white px-3 py-2 rounded-xl text-[9px] font-black uppercase active:scale-95" title="Abrir en Safari"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>Safari</button>
+                <button type="button" onclick="nexusCloseWebViewer()" class="nexus-modal-close-btn bg-white/10 text-white border border-white/20 shrink-0" title="Cerrar"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <iframe id="nexus-web-viewer-frame" class="flex-1 w-full min-h-0 border-0 bg-white" title="Navegación embebida" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+            <iframe id="nexus-web-viewer-frame" class="flex-1 w-full min-h-0 border-0 bg-white" title="Navegación embebida" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
+            <div id="nexus-web-viewer-blocked" class="hidden flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+                <i class="fa-solid fa-building-columns text-4xl text-emerald-400"></i>
+                <p class="text-sm font-bold text-white leading-relaxed">Este portal de pago no puede mostrarse dentro de la app (política del banco).</p>
+                <p class="text-[10px] font-bold text-slate-400 uppercase">Abre el enlace en Safari para completar el pago PSE.</p>
+                <button type="button" onclick="nexusOpenWebViewerExternal()" class="w-full max-w-xs bg-emerald-500 text-white py-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Abrir portal de pago</button>
+            </div>
         </div>
 
         <!-- NEXUS AR — JavaScript monolítico (regenerar: node scripts/merge-nexus-monolith.mjs) -->
@@ -10779,15 +10797,67 @@ ${JSON.stringify(dataToAnalyze)}`;
         let taskCalSelectedDate = null;
         let taskPriorityFilter = 'all'; // APEX FIX: Estado del fichero de prioridades
         // --- MÓDULO DE PAGOS PSE ---
+        function nexusEscapeHtml(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function nexusNormalizePaymentUrl(url) {
+            let u = String(url || '').trim();
+            if (!u) return '';
+            if (!/^https?:\/\//i.test(u)) u = 'https://' + u.replace(/^\/+/, '');
+            return u;
+        }
+
+        function nexusIsIosPwaContext() {
+            const ua = navigator.userAgent || '';
+            const ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+            return ios || standalone || navigator.standalone === true;
+        }
+
+        function nexusLaunchExternalBrowser(url) {
+            const u = nexusNormalizePaymentUrl(url);
+            if (!u) return false;
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+                try {
+                    window.webkit.messageHandlers.appInterface.postMessage({ action: 'openURL', url: u });
+                    return true;
+                } catch (e) { /* fallback web */ }
+            }
+            const a = document.createElement('a');
+            a.href = u;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            return true;
+        }
+
+        function nexusShowWebViewerBlockedPanel(show) {
+            const frame = $id('nexus-web-viewer-frame');
+            const panel = $id('nexus-web-viewer-blocked');
+            if (frame) frame.classList.toggle('hidden', !!show);
+            if (panel) panel.classList.toggle('hidden', !show);
+        }
+
         function redirigirPagoDirecto(url) {
-            if (!url) return;
-            nexusOpenWebViewer(url, 'Portal de pago / recibo');
+            const u = nexusNormalizePaymentUrl(url);
+            if (!u) return;
+            if (nexusIsIosPwaContext()) {
+                if (nexusLaunchExternalBrowser(u)) return;
+            }
+            nexusOpenWebViewer(u, 'Portal de pago / recibo');
         }
 
         function openPSEHub() {
             const mod = $id('pse-hub-modal'); if(!mod) return;
+            try { renderPSELinks(); } catch (e) {
+                console.error('[NEXUS] renderPSELinks', e);
+                const cont = $id('pse-hub-list');
+                if (cont) cont.innerHTML = '<p class="text-center text-[10px] font-bold text-red-500 py-4 uppercase">Error al cargar enlaces PSE. Reintenta.</p>';
+            }
             nexusShowModalInstant(mod);
-            renderPSELinks();
         }
 
         function closePSEHub() { nexusHideModalInstant($id('pse-hub-modal')); }
@@ -10823,50 +10893,58 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const iconClass = group.icon || 'fa-building-columns';
                 
                 let actionsHtml = group.items.map(link => {
+                    const lid = nexusEscapeJsStr(link.id);
+                    const lref = nexusEscapeJsStr(link.reference || '');
+                    const lurl = nexusEscapeJsStr(link.url || '');
+                    const refHtml = nexusEscapeHtml(link.reference || '');
+                    const refNameHtml = nexusEscapeHtml(link.refName || 'REF / NIC');
                     if (link.reference) {
                         return `
                         <div class="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm mt-2">
                             <div class="flex flex-col min-w-0 pr-2 flex-1">
                                 <div class="flex justify-between items-center mb-1">
-                                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate"><i class="fa-solid fa-hashtag text-slate-300 mr-1"></i> ${link.refName || 'REF / NIC'}</p>
+                                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate"><i class="fa-solid fa-hashtag text-slate-300 mr-1"></i> ${refNameHtml}</p>
                                     <div class="flex items-center gap-1 shrink-0 ml-2">
-                                        <button type="button" onclick="openNewPSEForm('${link.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
-                                        <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
+                                        <button type="button" onclick="openNewPSEForm('${lid}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
+                                        <button type="button" onclick="triggerUIDelete('pse_link', '${lid}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
                                     </div>
                                 </div>
-                                <p class="text-xs font-mono font-black text-slate-700 truncate">${link.reference}</p>
+                                <p class="text-xs font-mono font-black text-slate-700 truncate">${refHtml}</p>
                             </div>
-                            <button onclick="copyAndPayPSE('${link.reference}', '${link.url}')" class="bg-emerald-500 text-white px-4 py-3 rounded-lg font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform flex items-center gap-1.5 shrink-0 ml-2 hover:bg-emerald-600">
+                            <button type="button" onclick="copyAndPayPSE('${lref}', '${lurl}')" class="bg-emerald-500 text-white px-4 py-3 rounded-lg font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform flex items-center gap-1.5 shrink-0 ml-2 hover:bg-emerald-600">
                                 Pagar <i class="fa-solid fa-arrow-up-right-from-square"></i>
                             </button>
                         </div>`;
                     } else {
                         return `
                         <div class="flex items-center justify-between mt-2">
-                            <button type="button" onclick="redirigirPagoDirecto('${link.url}')" class="flex-1 bg-emerald-500 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm hover:bg-emerald-600 transition-colors active:scale-95 flex items-center justify-center gap-2">
+                            <button type="button" onclick="redirigirPagoDirecto('${lurl}')" class="flex-1 bg-emerald-500 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-sm hover:bg-emerald-600 transition-colors active:scale-95 flex items-center justify-center gap-2">
                                 <i class="fa-solid fa-arrow-up-right-from-square"></i> Ir al Portal de Pago
                             </button>
                             <div class="flex items-center gap-1 shrink-0 ml-2 bg-white p-2 rounded-xl border border-slate-100">
-                                <button type="button" onclick="openNewPSEForm('${link.id}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
-                                <button type="button" onclick="triggerUIDelete('pse_link', '${link.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
+                                <button type="button" onclick="openNewPSEForm('${lid}')" class="text-slate-300 hover:text-blue-500 transition-colors p-1"><i class="fa-solid fa-pen text-[9px]"></i></button>
+                                <button type="button" onclick="triggerUIDelete('pse_link', '${lid}')" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-trash text-[9px]"></i></button>
                             </div>
                         </div>`;
                     }
                 }).join('');
                 
                 const groupId = 'pse-grp-' + groupName.replace(/[^a-zA-Z0-9]/g, '');
+                const groupNameJs = nexusEscapeJsStr(groupName);
+                const groupNameHtml = nexusEscapeHtml(groupName);
+                const groupUrlHtml = nexusEscapeHtml(group.url || '');
                 
                 return `<div class="p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100 shadow-sm transition-colors hover:border-emerald-200 group mb-3">
                     <div class="flex items-center justify-between border-b border-slate-100/50 pb-3 cursor-pointer select-none" onclick="togglePSEGroup('${groupId}')">
                         <div class="flex items-center gap-3 min-w-0">
                             <div class="w-10 h-10 rounded-full bg-white text-emerald-600 flex items-center justify-center shadow-sm shrink-0 border border-slate-100"><i class="fa-solid ${iconClass} text-[14px]"></i></div>
                             <div class="truncate">
-                                <p class="text-xs font-black uppercase theme-text truncate">${groupName}</p>
-                                <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${group.url}</p>
+                                <p class="text-xs font-black uppercase theme-text truncate">${groupNameHtml}</p>
+                                <p class="text-[8px] font-bold text-slate-400 mt-0.5 truncate">${groupUrlHtml}</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            <button type="button" onclick="event.stopPropagation(); openNewPSEForm(null, '${groupName}')" class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm shrink-0 transition-colors hover:bg-emerald-500 hover:text-white active:scale-90" title="Añadir otra referencia para esta empresa"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                            <button type="button" onclick="event.stopPropagation(); openNewPSEForm(null, '${groupNameJs}')" class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-sm shrink-0 transition-colors hover:bg-emerald-500 hover:text-white active:scale-90" title="Añadir otra referencia para esta empresa"><i class="fa-solid fa-plus text-[10px]"></i></button>
                             <i id="icon-${groupId}" class="fa-solid fa-chevron-down text-slate-400 text-sm ml-1 transition-transform"></i>
                         </div>
                     </div>
@@ -10920,7 +10998,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                     $id('f-pse-ref-name').value = link.refName || '';
                     $id('f-pse-ref').value = link.reference || '';
                     $id('f-pse-url').value = link.url;
-                    $id('f-pse-icon').value = link.icon.replace('fa-', ''); 
+                    $id('f-pse-icon').value = String(link.icon || 'fa-building-columns').replace(/^fa-/, ''); 
                     if($id('f-pse-freq')) $id('f-pse-freq').value = link.freq || 'none';
                     if($id('f-pse-cutoff')) $id('f-pse-cutoff').value = link.cutoff || '';
                     if($id('f-pse-payday')) $id('f-pse-payday').value = link.payday || '';
@@ -12571,13 +12649,15 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         function copyAndPayPSE(reference, url) {
-            // 1. Copiar al portapapeles con limpieza programada (SecureCopy)
-            secureCopy(reference, "✅ NIC Copiado y Protegido.\nAbriendo portal de pagos...");
-            
-            // 3. Abrir pestaña de pago
-            setTimeout(() => {
-                redirigirPagoDirecto(url);
-            }, 800);
+            const u = nexusNormalizePaymentUrl(url);
+            if (!u) return alert('Este enlace no tiene URL de pago configurada.');
+            const ref = String(reference || '').trim();
+            if (ref) {
+                secureCopy(ref, "✅ NIC copiado.\nAbriendo portal de pagos...");
+                setTimeout(() => redirigirPagoDirecto(u), 700);
+            } else {
+                redirigirPagoDirecto(u);
+            }
         }
 
         let calMonthOffset = 0;
@@ -16248,30 +16328,58 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         function nexusCloseWebViewer() {
             const mod = $id('nexus-web-viewer');
             const frame = $id('nexus-web-viewer-frame');
-            if (frame) frame.src = 'about:blank';
+            if (_nexusWebViewerFallbackTimer) clearTimeout(_nexusWebViewerFallbackTimer);
+            if (frame) {
+                frame.onload = null;
+                frame.onerror = null;
+                frame.src = 'about:blank';
+            }
+            nexusShowWebViewerBlockedPanel(false);
             _nexusWebViewerUrl = '';
             nexusHideModalInstant(mod);
         }
 
+        let _nexusWebViewerFallbackTimer = null;
+
+        function nexusDetectWebViewerEmbedBlocked() {
+            const frame = $id('nexus-web-viewer-frame');
+            if (!frame) return;
+            try {
+                const doc = frame.contentDocument;
+                if (doc && doc.body && String(doc.body.innerText || '').trim().length > 8) {
+                    frame.setAttribute('data-nexus-load-ok', '1');
+                    nexusShowWebViewerBlockedPanel(false);
+                    return;
+                }
+            } catch (e) { /* cross-origin: bancos / PSE no permiten iframe */ }
+            nexusShowWebViewerBlockedPanel(true);
+        }
+
         function nexusOpenWebViewer(url, title) {
-            if (!url) return;
-            _nexusWebViewerUrl = url;
+            const u = nexusNormalizePaymentUrl(url);
+            if (!u) return;
+            _nexusWebViewerUrl = u;
+            const mod = $id('nexus-web-viewer');
             const frame = $id('nexus-web-viewer-frame');
             const ttl = $id('nexus-web-viewer-title');
             if (ttl) ttl.textContent = title || 'Portal de pago';
-            if (frame) frame.src = url;
-            nexusShowModalInstant($id('nexus-web-viewer'));
+            if (_nexusWebViewerFallbackTimer) clearTimeout(_nexusWebViewerFallbackTimer);
+            nexusShowWebViewerBlockedPanel(false);
+            if (frame) {
+                frame.classList.remove('hidden');
+                frame.removeAttribute('data-nexus-load-ok');
+                frame.onload = function() { nexusDetectWebViewerEmbedBlocked(); };
+                frame.onerror = function() { nexusShowWebViewerBlockedPanel(true); };
+                frame.src = 'about:blank';
+                frame.src = u;
+            }
+            nexusShowModalInstant(mod);
+            _nexusWebViewerFallbackTimer = setTimeout(nexusDetectWebViewerEmbedBlocked, nexusIsIosPwaContext() ? 800 : 1800);
         }
 
         function nexusOpenWebViewerExternal() {
             if (!_nexusWebViewerUrl) return;
-            const a = document.createElement('a');
-            a.href = _nexusWebViewerUrl;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            nexusLaunchExternalBrowser(_nexusWebViewerUrl);
         }
 
         function closeScannerResults() {
