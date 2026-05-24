@@ -23,6 +23,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="locales/nexus-locale-es.js"></script>
+    <script src="locales/nexus-locale-en.js"></script>
+    <script src="locales/nexus-i18n.js"></script>
     <style>  
         :root { --app-bg: #f8fafc; --card-bg: #ffffff; --app-text: #0f172a; --val-inc: #10b981; --val-exp: #ef4444; --nexus-black: #000000; }
         /* APEX FIX: Bloqueo de selección nativa y menús emergentes de Safari/Chrome en toda la UI */
@@ -1291,9 +1294,19 @@
                         <p id="ai-save-status" class="text-[8px] font-bold text-center mt-2 text-slate-400"></p>
                     </div>
 
+                    <div class="pt-4 border-t border-slate-100" id="settings-language-block">
+                        <h4 class="text-[10px] font-black uppercase text-slate-700 mb-2" data-i18n="settings.language">Idioma de la interfaz</h4>
+                        <p class="text-[8px] text-slate-400 mb-2 leading-relaxed" data-i18n="settings.languageHint">Afecta menús, módulos y textos de la interfaz. Los datos y categorías propias no se traducen automáticamente.</p>
+                        <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Idioma / Language</label>
+                        <select id="set-language" class="form-input text-xs mt-1 w-full max-w-xs bg-slate-50 font-bold text-slate-700" onchange="if(typeof nexusSetLanguage==='function'){nexusSetLanguage(this.value);updateSettings();}">
+                            <option value="es" data-i18n="settings.languageEs">Español</option>
+                            <option value="en" data-i18n="settings.languageEn">English</option>
+                        </select>
+                    </div>
+
                     <div class="pt-4 border-t border-slate-100">
-                        <h4 class="text-[10px] font-black uppercase text-slate-700 mb-2">Auditoría en pantalla</h4>
-                        <p class="text-[8px] text-slate-400 mb-2 leading-relaxed">Los totales, flujo y cronogramas usan el 100% de registros filtrados (reales + proyecciones), aunque no estén visibles. Solo la lista en pantalla se carga por bloques.</p>
+                        <h4 class="text-[10px] font-black uppercase text-slate-700 mb-2" data-i18n="settings.auditPageSize">Auditoría en pantalla</h4>
+                        <p class="text-[8px] text-slate-400 mb-2 leading-relaxed" data-i18n="settings.auditPageSizeHint">Los totales, flujo y cronogramas usan el 100% de registros filtrados (reales + proyecciones), aunque no estén visibles. Solo la lista en pantalla se carga por bloques.</p>
                         <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Registros por bloque</label>
                         <select id="set-audit-page-size" class="form-input text-xs mt-1 w-full max-w-xs bg-slate-50 font-bold text-slate-700" onchange="updateSettings()">
                             <option value="10">10</option>
@@ -2608,14 +2621,16 @@
                     <div class="p-4 rounded-2xl border border-rose-100 bg-rose-50/40 space-y-2">
                         <p class="text-[9px] font-black uppercase text-rose-600">Bloque A</p>
                         <select id="informe-type-a" class="form-input text-xs" onchange="refreshInformeCategoryOptions()"><option value="expense">Gasto</option><option value="income">Ingreso</option><option value="all">Cualquier tipo</option></select>
+                        <label class="text-[7px] font-black uppercase text-rose-500/80 ml-0.5">Categoría de gasto</label>
                         <select id="informe-cat-a" class="form-input text-xs"></select>
-                        <input type="text" id="informe-needle-a" class="form-input text-xs" placeholder="Filtro texto (ej. gasolina)">
+                        <input type="text" id="informe-needle-a" class="form-input text-xs" placeholder="Ej. gasolina, compras…">
                     </div>
                     <div class="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 space-y-2">
                         <p class="text-[9px] font-black uppercase text-emerald-600">Bloque B</p>
                         <select id="informe-type-b" class="form-input text-xs" onchange="refreshInformeCategoryOptions()"><option value="income">Ingreso</option><option value="expense">Gasto</option><option value="all">Cualquier tipo</option></select>
+                        <label class="text-[7px] font-black uppercase text-emerald-600/80 ml-0.5">Categoría de ingreso</label>
                         <select id="informe-cat-b" class="form-input text-xs"></select>
-                        <input type="text" id="informe-needle-b" class="form-input text-xs" placeholder="Filtro texto (ej. uber)">
+                        <input type="text" id="informe-needle-b" class="form-input text-xs" placeholder="Ej. salario, uber, cobros…">
                     </div>
                 </div>
                 <button type="button" onclick="runAuditInforme()" class="w-full bg-purple-600 text-white py-3.5 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95"><i class="fa-solid fa-scale-balanced mr-1"></i> Generar comparativa</button>
@@ -7682,9 +7697,9 @@
         }
 
         function nexusAccountBalanceLabelStem(type) {
-            if (nexusIsLiabAccount(type)) return 'Monto endeudado';
-            if (type === 'virtual') return 'Balance (+ a favor, - deuda)';
-            return 'Balance Inicial';
+            if (nexusIsLiabAccount(type)) return (typeof nexusT === 'function' ? nexusT('accounts.amountOwed') : 'Monto endeudado');
+            if (type === 'virtual') return (typeof nexusT === 'function' ? nexusT('accounts.balanceVirtual') : 'Balance (+ a favor, - deuda)');
+            return (typeof nexusT === 'function' ? nexusT('accounts.balanceInitial') : 'Balance Inicial');
         }
 
         function nexusUpdateAccountBalanceHelp(type) {
@@ -11653,15 +11668,72 @@
             return currentFilteredTx && currentFilteredTx.length ? [...currentFilteredTx] : [];
         }
 
+        /** Flujo contable real para informes (solo ingreso/gasto operativo). */
+        function nexusInformeTxFlowType(tx) {
+            if (!tx || tx.isProjected) return null;
+            const r = tx.renderType || tx.type;
+            if (r === 'income') return 'income';
+            if (r === 'expense') return 'expense';
+            return null;
+        }
+
+        /** Padre [Ingresos]/[Gastos] en etiqueta de categoría. */
+        function nexusInformeCategoryParent(cat) {
+            if (!cat) return '';
+            const m = String(cat).match(/\[(.*?)\]\s*(.*)/);
+            return m ? m[1].trim() : String(cat).trim();
+        }
+
+        function nexusCategoryLabelMatchesInformeFlow(cat, flow) {
+            if (!cat || flow === 'all') return true;
+            const parent = nexusInformeCategoryParent(cat).toLowerCase();
+            const sub = (String(cat).match(/\[(.*?)\]\s*(.*)/) || [])[2];
+            const subL = (sub || '').toLowerCase();
+            const incomeParent = /\bingreso/.test(parent);
+            const expenseParent = /\bgasto/.test(parent) || /\bcompra/.test(parent) || /\begreso/.test(parent);
+            if (flow === 'income') {
+                if (incomeParent) return true;
+                if (expenseParent) return false;
+                return false;
+            }
+            if (flow === 'expense') {
+                if (expenseParent) return true;
+                if (incomeParent) return false;
+                return false;
+            }
+            return true;
+        }
+
+        function nexusCatMatchesInformeSelector(txCat, catSel) {
+            if (!catSel || catSel === '__all__') return true;
+            const cat = (txCat || '').trim();
+            const sel = String(catSel).trim();
+            if (!cat) return false;
+            if (cat === sel) return true;
+            const m = cat.match(/\[(.*?)\]\s*(.*)/);
+            if (m) {
+                const p = m[1].trim();
+                const s = (m[2] || '').trim();
+                if (`[${p}] ${s}` === sel || s === sel || p === sel) return true;
+            }
+            return cat.toLowerCase().includes(sel.toLowerCase());
+        }
+
         function collectInformeCategoryOptions(typeFilter) {
             const set = new Set();
             if (typeof sanitizeUserCategoriesInState === 'function') sanitizeUserCategoriesInState();
-            (state.categories && state.categories.global || []).forEach(c => { if (c) set.add(c); });
-            (state.tx || []).forEach(t => {
-                const r = t.renderType || t.type;
-                if (typeFilter === 'expense' && r !== 'expense') return;
-                if (typeFilter === 'income' && r !== 'income') return;
-                if (t.cat && !nexusIsLegacyCategoryLabel(t.cat)) set.add(t.cat);
+            const pool = getInformeTxPool();
+            pool.forEach(t => {
+                const flow = nexusInformeTxFlowType(t);
+                if (typeFilter === 'expense' && flow !== 'expense') return;
+                if (typeFilter === 'income' && flow !== 'income') return;
+                if (typeFilter === 'all' && !flow) return;
+                if (t.cat && !nexusIsLegacyCategoryLabel(t.cat)) set.add(String(t.cat).trim());
+            });
+            (state.categories && state.categories.global || []).forEach(c => {
+                if (!c || nexusIsLegacyCategoryLabel(c)) return;
+                if (typeFilter === 'all') { set.add(c); return; }
+                if (nexusCategoryLabelMatchesInformeFlow(c, typeFilter)) set.add(c);
             });
             return [...set].sort((a, b) => String(a).localeCompare(String(b), 'es'));
         }
@@ -11683,33 +11755,68 @@
         function refreshInformeCategoryOptions() {
             const selA = $id('informe-cat-a');
             const selB = $id('informe-cat-b');
-            const typeA = $id('informe-type-a') ? $id('informe-type-a').value : 'expense';
-            const typeB = $id('informe-type-b') ? $id('informe-type-b').value : 'income';
+            let typeA = $id('informe-type-a') ? $id('informe-type-a').value : 'expense';
+            let typeB = $id('informe-type-b') ? $id('informe-type-b').value : 'income';
+            const labelA = $id('informe-cat-a') && $id('informe-cat-a').previousElementSibling;
+            const labelB = $id('informe-cat-b') && $id('informe-cat-b').previousElementSibling;
+            if (labelA) {
+                labelA.textContent = typeA === 'income' ? 'Categoría de ingreso' : typeA === 'expense' ? 'Categoría de gasto' : 'Categoría';
+            }
+            if (labelB) {
+                labelB.textContent = typeB === 'income' ? 'Categoría de ingreso' : typeB === 'expense' ? 'Categoría de gasto' : 'Categoría';
+            }
             const optsA = collectInformeCategoryOptions(typeA);
             const optsB = collectInformeCategoryOptions(typeB);
-            const buildOpts = (list, prev) => {
-                let html = '<option value="__all__">— Todas las categorías —</option>';
-                list.forEach(c => { html += `<option value="${String(c).replace(/"/g, '&quot;')}">${c}</option>`; });
-                return { html, prev };
+            const buildOpts = (list, typeFilter) => {
+                const allLabel = typeFilter === 'income'
+                    ? '— Todas las categorías de ingreso —'
+                    : typeFilter === 'expense'
+                        ? '— Todas las categorías de gasto —'
+                        : '— Todas las categorías —';
+                let html = `<option value="__all__">${allLabel}</option>`;
+                const byParent = {};
+                list.forEach(c => {
+                    const parent = nexusInformeCategoryParent(c) || 'Otras';
+                    if (!byParent[parent]) byParent[parent] = [];
+                    byParent[parent].push(c);
+                });
+                const parents = Object.keys(byParent).sort((a, b) => a.localeCompare(b, 'es'));
+                parents.forEach(parent => {
+                    const items = byParent[parent].sort((a, b) => a.localeCompare(b, 'es'));
+                    if (parents.length > 1 && parent !== 'Otras') {
+                        html += `<optgroup label="${String(parent).replace(/"/g, '&quot;')}">`;
+                    }
+                    items.forEach(c => {
+                        const m = String(c).match(/\[(.*?)\]\s*(.*)/);
+                        const label = m && m[2] ? m[2].trim() : c;
+                        html += `<option value="${String(c).replace(/"/g, '&quot;')}">${label}</option>`;
+                    });
+                    if (parents.length > 1 && parent !== 'Otras') html += '</optgroup>';
+                });
+                return html;
             };
             if (selA) {
                 const p = selA.value;
-                selA.innerHTML = buildOpts(optsA, p).html;
+                selA.innerHTML = buildOpts(optsA, typeA);
                 if (p && [...selA.options].some(o => o.value === p)) selA.value = p;
+                else selA.value = '__all__';
             }
             if (selB) {
                 const p = selB.value;
-                selB.innerHTML = buildOpts(optsB, p).html;
+                selB.innerHTML = buildOpts(optsB, typeB);
                 if (p && [...selB.options].some(o => o.value === p)) selB.value = p;
+                else selB.value = '__all__';
             }
         }
 
         function txMatchesInformeBlock(tx, typeFilter, catSel, needle) {
-            const rType = tx.renderType || tx.type;
-            if (typeFilter === 'expense' && rType !== 'expense') return false;
-            if (typeFilter === 'income' && rType !== 'income') return false;
+            if (tx.isProjected) return false;
+            const flow = nexusInformeTxFlowType(tx);
+            if (typeFilter === 'expense' && flow !== 'expense') return false;
+            if (typeFilter === 'income' && flow !== 'income') return false;
+            if (typeFilter === 'all' && !flow) return false;
+            if (!nexusCatMatchesInformeSelector(tx.cat, catSel)) return false;
             const hay = ((tx.cat || '') + ' ' + (tx.note || '')).toLowerCase();
-            if (catSel && catSel !== '__all__' && !hay.includes(String(catSel).toLowerCase())) return false;
             const n = (needle || '').trim().toLowerCase();
             if (n && !hay.includes(n)) return false;
             return true;
@@ -14567,6 +14674,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             const hdEl = $id('set-hide-decimals'); if(hdEl) hdEl.checked = !!state.settings.hideDecimals;
             const wvEl = $id('set-wealth-view'); if(wvEl) wvEl.value = state.settings.wealthView || 'all';
             const apsEl = $id('set-audit-page-size'); if(apsEl) apsEl.value = String(state.settings.auditPageSize || 20);
+            const langEl = $id('set-language');
+            if (langEl) langEl.value = (state.settings.uiLanguage || (typeof nexusGetLanguage === 'function' ? nexusGetLanguage() : 'es') || 'es');
+            if (typeof nexusInitI18n === 'function') try { nexusApplyI18nDom(); } catch (e) { /* i18n opcional */ }
             
             if (typeof renderAiSettingsUI === 'function') renderAiSettingsUI();
 
@@ -15064,6 +15174,8 @@ ${JSON.stringify(dataToAnalyze)}`;
                 state.settings.auditPageSize = (!Number.isNaN(psz) && psz >= 5 && psz <= 100) ? psz : 20;
                 if (state.activeTab === 'database' && typeof renderDatabase === 'function') renderDatabase();
             }
+            const langEl = $id('set-language');
+            if (langEl) state.settings.uiLanguage = langEl.value === 'en' ? 'en' : 'es';
             
             /* Claves IA: solo vía persistAiSettings() — evita borrar password vacío al cambiar otros ajustes */
 
