@@ -2040,10 +2040,14 @@
                     <p class="text-[8px] font-bold text-slate-400 ml-2 leading-relaxed">Vincula una bóveda de terceros para seguimiento aislado del pasivo.</p>
                 </div>
                 <div id="fl-banco-wrap" class="hidden space-y-2 animate-slideUp bg-emerald-50/40 p-3 rounded-2xl border border-emerald-100">
-                    <label class="text-[10px] font-black uppercase text-emerald-700 ml-1"><i class="fa-solid fa-building-columns mr-1"></i>Enlace de pago PSE</label>
-                    <select id="fl-pse-link" class="form-input text-sm font-bold bg-white border-emerald-200">
-                        <option value="">Configurar después…</option>
+                    <label class="text-[10px] font-black uppercase text-emerald-700 ml-1"><i class="fa-solid fa-building-columns mr-1"></i>Banco / entidad de pago</label>
+                    <select id="fl-pse-link" class="form-input text-sm font-bold bg-white border-emerald-200" onchange="nexusSyncLoanCreditRefFromPse()">
+                        <option value="">Crear enlace nuevo…</option>
                     </select>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-emerald-700 ml-1">Nº crédito / NIC de pago</label>
+                        <input type="text" id="fl-credit-ref" class="form-input text-sm font-mono font-bold bg-white border-emerald-200" placeholder="Referencia que se copia al pagar" autocomplete="off">
+                    </div>
                     <div class="flex flex-col sm:flex-row gap-2">
                         <button type="button" onclick="openNewPSEFormFromLoanEditor()" class="flex-1 bg-emerald-500 text-white py-2.5 rounded-xl text-[9px] font-black uppercase shadow-sm active:scale-95"><i class="fa-solid fa-plus mr-1"></i>Nuevo enlace PSE</button>
                         <button type="button" onclick="openPSEHub()" class="flex-1 bg-white text-emerald-700 border border-emerald-200 py-2.5 rounded-xl text-[9px] font-black uppercase active:scale-95">Centro PSE</button>
@@ -2176,6 +2180,14 @@
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Día de Corte</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-cutoff" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 15"></div>
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Día Límite Pago</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-payday" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 30"></div>
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Tasa E.M. %</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-rate" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 2.1"></div>
+                    <div class="col-span-2 space-y-2 border-t border-red-200/80 pt-3 mt-1">
+                        <label class="text-[10px] font-black uppercase text-emerald-700 ml-1"><i class="fa-solid fa-bolt mr-1"></i>Pago PSE (crédito rotativo)</label>
+                        <select id="fa-pse-link" class="form-input text-sm font-bold bg-white border-emerald-200" onchange="nexusSyncAccountPaymentNicFromPse()">
+                            <option value="">Sin enlace PSE</option>
+                        </select>
+                        <input type="text" id="fa-payment-nic" class="form-input text-sm font-mono font-bold bg-white border-emerald-200" placeholder="NIC / Nº crédito (se copia al pagar)" autocomplete="off">
+                        <p class="text-[8px] font-bold text-red-600/80 ml-1 leading-relaxed">Vincula el portal del banco y el NIC. Desde la tarjeta podrás copiar el NIC y abrir el pago.</p>
+                    </div>
                 </div>
 
                 <div id="virtual-fields" class="hidden animate-slideUp space-y-4 bg-purple-50 p-4 rounded-2xl border border-purple-100">
@@ -7217,6 +7229,7 @@
         }
         function numpadPress(char) { 
             if (!numpadCurrentValue) numpadCurrentValue = "";
+            if (char === ',') char = '.';
             if (char === 'C') { numpadCurrentValue = ""; } else if (char === '=') { numpadEvaluate(); } else {
                 if (numpadCurrentValue.length >= 30) return; const tokens = numpadCurrentValue.split(/[\+\-\*/()]/); const lastToken = tokens[tokens.length - 1];
                 if (char === '.' && lastToken.includes('.')) return; 
@@ -7241,11 +7254,9 @@
             if (!numpadCurrentValue || numpadCurrentValue === "") { d.innerText = numpadFormatType === 'currency' ? fmt(0, c) : "0"; return; } 
             const hasOperators = /[\+\-\*/()]/.test(numpadCurrentValue);
             if (hasOperators) { d.innerText = numpadCurrentValue; } else {
-                let parts = numpadCurrentValue.split('.'); let intPart = parts[0]; let decPart = parts.length > 1 ? parts[1] : null; let vInt = parseInt(intPart || 0, 10); if(isNaN(vInt)) vInt = 0; 
-                const hideDec = state.settings && state.settings.hideDecimals;
-                const frac = (['COP', 'JPY'].includes(c) || hideDec) ? 0 : 2;
-                let formattedInt = numpadFormatType === 'currency' ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: c, maximumFractionDigits: frac, minimumFractionDigits: frac }).format(vInt) : new Intl.NumberFormat('es-CO').format(vInt);
-                d.innerText = formattedInt + (decPart !== null ? ',' + decPart : '');
+                d.innerText = numpadFormatType === 'currency'
+                    ? nexusFormatNumpadLiveCurrency(numpadCurrentValue, c)
+                    : new Intl.NumberFormat('es-CO').format(parseFloat(numpadCurrentValue) || 0);
             }
         }
         function numpadConfirm() { 
@@ -7832,7 +7843,7 @@
                                 const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
                                 const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
                                 const sign = a.type === 'credit' ? '-' : '';
-                                const detailText = nexusAccountDetailLine(a, curr);
+                                const detailText = nexusAccountMetaLine(a, curr);
                                 
                                 // APEX FIX: Coloración solo en borde de la tarjeta y soporte para Logo Bancario
                                 const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
@@ -7868,7 +7879,7 @@
                         const icon = 'fa-mobile-screen';
                         const color = a.balance < 0 ? 'theme-val-exp' : (a.balance > 0 ? 'theme-val-inc' : 'theme-text');
                         const sign = '';
-                        const detailText = nexusAccountDetailLine(a, curr);
+                        const detailText = nexusAccountMetaLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
@@ -7902,7 +7913,7 @@
                         const icon = 'fa-users';
                         const color = a.balance < 0 ? 'text-red-500' : 'text-orange-500';
                         const sign = '';
-                        const detailText = nexusAccountDetailLine(a, curr);
+                        const detailText = nexusAccountMetaLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #fff7ed; color: #f97316;';
@@ -7936,7 +7947,7 @@
                         const icon = 'fa-link';
                         const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
                         const sign = a.type === 'credit' ? '-' : '';
-                        const detailText = nexusAccountDetailLine(a, curr);
+                        const detailText = nexusAccountMetaLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
@@ -8091,7 +8102,23 @@
         function buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn) {
             const safeId = String(a.id).replace(/'/g, "\\'");
             const balFull = `${sign}${fmt(a.balance, curr)}`;
-            return `<div class="acc-vault-card flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] transition-all shadow-sm min-w-0 max-w-full overflow-hidden" style="${customStyle}"><div class="flex justify-between items-center gap-2 min-w-0"><div role="button" tabindex="0" onclick="toggleAccountTx('${safeId}')" class="flex items-center gap-3 min-w-0 flex-1 pr-1 cursor-pointer"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div class="min-w-0 flex-1"><p class="text-xs font-black uppercase theme-text truncate">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${detailText}</p></div></div><div class="acc-vault-amt-wrap nexus-amount-box shrink min-w-0"><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${balFull}">${balFull}</span></div><div class="flex flex-col gap-1 shrink-0 relative z-10" onclick="event.stopPropagation()">${p2pBtn}<button type="button" onclick="editAccount('${safeId}')" class="text-slate-400 hover:text-blue-600 transition-colors p-2 min-w-[32px] min-h-[32px]" title="Editar cuenta"><i class="fa-solid fa-pen text-[11px]"></i></button><button type="button" onclick="openAccountHistory('${safeId}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-2 min-h-[32px]" title="Historial"><i class="fa-solid fa-clock-rotate-left text-[11px]"></i></button></div></div><div id="acc-tx-${safeId}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[400px] overflow-y-auto hide-scrollbar"></div></div>`;
+            const idSub = nexusAccountIdentitySubtitle(a);
+            const idLine = idSub ? `<p class="text-[9px] font-bold text-slate-600 font-mono mt-0.5 truncate" title="${idSub.replace(/"/g, '&quot;')}">${idSub}</p>` : '';
+            const metaLine = detailText ? `<p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${detailText}</p>` : '';
+            const creditPayBtn = (a.type === 'credit' && (a.pseLinkId || a.paymentNic))
+                ? `<button type="button" onclick="openAccountCreditPSEPay('${safeId}')" class="text-emerald-600 hover:text-emerald-700 transition-colors p-2 min-h-[32px]" title="Pagar tarjeta vía PSE"><i class="fa-solid fa-bolt text-[11px]"></i></button>`
+                : '';
+            return `<div class="acc-vault-card flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] transition-all shadow-sm min-w-0 max-w-full overflow-hidden" style="${customStyle}"><div class="flex justify-between items-center gap-2 min-w-0"><div role="button" tabindex="0" onclick="toggleAccountTx('${safeId}')" class="flex items-center gap-3 min-w-0 flex-1 pr-1 cursor-pointer"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div class="min-w-0 flex-1"><p class="text-xs font-black uppercase theme-text truncate">${a.name}</p>${idLine}${metaLine}</div></div><div class="acc-vault-amt-wrap nexus-amount-box shrink min-w-0"><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${balFull}">${balFull}</span></div><div class="flex flex-col gap-1 shrink-0 relative z-10" onclick="event.stopPropagation()">${p2pBtn}${creditPayBtn}<button type="button" onclick="editAccount('${safeId}')" class="text-slate-400 hover:text-blue-600 transition-colors p-2 min-w-[32px] min-h-[32px]" title="Editar cuenta"><i class="fa-solid fa-pen text-[11px]"></i></button><button type="button" onclick="openAccountHistory('${safeId}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-2 min-h-[32px]" title="Historial"><i class="fa-solid fa-clock-rotate-left text-[11px]"></i></button></div></div><div id="acc-tx-${safeId}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[400px] overflow-y-auto hide-scrollbar"></div></div>`;
+        }
+
+        function openAccountCreditPSEPay(accId) {
+            const acc = (state.accounts || []).find(a => a.id === accId);
+            if (!acc) return;
+            const link = acc.pseLinkId ? (state.pseLinks || []).find(p => p.id === acc.pseLinkId) : null;
+            const nic = String(acc.paymentNic || (link && link.reference) || acc.accountNumber || '').trim();
+            const url = (link && link.url) ? link.url : '';
+            if (!nic && !url) return alert('Configura el NIC y el enlace PSE en la tarjeta de crédito.');
+            copyAndPayPSE(nic, url || 'https://');
         }
 
         function resetAccountFormForNew() {
@@ -8106,6 +8133,8 @@
             if($id('fa-bank-url')) $id('fa-bank-url').value = '';
             if($id('fa-account-number')) $id('fa-account-number').value = '';
             if($id('fa-bsb')) $id('fa-bsb').value = '';
+            if($id('fa-pse-link')) $id('fa-pse-link').value = '';
+            if($id('fa-payment-nic')) $id('fa-payment-nic').value = '';
             if($id('fa-custom-logo-b64')) $id('fa-custom-logo-b64').value = '';
             if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
             if(typeof nexusOnAccountCurrencyChange === 'function') nexusOnAccountCurrencyChange();
@@ -8150,6 +8179,9 @@
                 const cutEl = $id('fa-cutoff'); if(cutEl) { cutEl.dataset.raw = String(acc.cutoffDay||1); cutEl.value = acc.cutoffDay||1; }
                 const payEl = $id('fa-payday'); if(payEl) { payEl.dataset.raw = String(acc.payDay||15); payEl.value = acc.payDay||15; }
                 const rateEl = $id('fa-rate'); if(rateEl) { rateEl.dataset.raw = String(acc.rate||0); rateEl.value = acc.rate||0; }
+                if (typeof populateAccountPseSelect === 'function') populateAccountPseSelect();
+                const pseSel = $id('fa-pse-link'); if (pseSel) pseSel.value = acc.pseLinkId || '';
+                const nicEl = $id('fa-payment-nic'); if (nicEl) nicEl.value = acc.paymentNic || '';
             } else if(acc.type === 'virtual') {
                 const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.dataset.raw = String(acc.limit||0); vLimEl.value = fmt(acc.limit||0, acc.currency); }
                 const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.dataset.raw = String(acc.virtualTerm||''); vTerm.value = acc.virtualTerm||''; }
@@ -8431,27 +8463,150 @@
             return '•••• ' + t.slice(-4);
         }
 
-        function nexusAccountIdentityHint(acc) {
+        function nexusAccountIdentitySubtitle(acc) {
             if (!acc) return '';
             const bits = [];
-            if (acc.bsb) bits.push((acc.currency === 'AUD' ? 'BSB ' : 'Cód. ') + String(acc.bsb).trim());
             if (acc.accountNumber) {
-                const pref = (acc.type === 'credit' || acc.type === 'virtual') ? 'Tarj. ' : 'Cta. ';
-                bits.push(pref + nexusMaskAccountNumber(acc.accountNumber));
+                const lbl = (acc.type === 'credit' || acc.type === 'virtual') ? 'Tarjeta' : 'Cuenta';
+                bits.push(`${lbl} ${String(acc.accountNumber).trim()}`);
             }
+            if (acc.bsb) bits.push(`BSB ${String(acc.bsb).trim()}`);
             return bits.join(' · ');
         }
 
-        function nexusAccountDetailLine(acc, curr) {
+        function nexusAccountMetaLine(acc, curr) {
             if (!acc) return '';
-            let base = '';
-            if (acc.type === 'credit') base = `Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
-            else if (acc.type === 'virtual') base = `App: ${acc.platform ? acc.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(acc.limit || 0, curr)}`;
-            else if (acc.isShared) base = `Conexión Activa | ID: ${acc.remoteId || acc.id}`;
-            else if (acc.type === 'terceros') base = `Cuenta Externa | ID: ${acc.id}`;
-            else base = `ID: ${acc.id}`;
-            const idHint = nexusAccountIdentityHint(acc);
-            return idHint ? (base + ' · ' + idHint) : base;
+            if (acc.type === 'credit') return `Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
+            if (acc.type === 'virtual') return `App: ${acc.platform ? acc.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(acc.limit || 0, curr)}`;
+            if (acc.isShared) return `Conexión P2P activa`;
+            if (acc.type === 'terceros') return `Cuenta externa aislada`;
+            return '';
+        }
+
+        function nexusAccountDetailLine(acc, curr) {
+            const meta = nexusAccountMetaLine(acc, curr);
+            const idSub = nexusAccountIdentitySubtitle(acc);
+            if (idSub && meta) return idSub + ' · ' + meta;
+            return idSub || meta;
+        }
+
+        function nexusNormalizeAfterpayAuditCat(cat) {
+            const c = cat || '🛍️ Afterpay';
+            return String(c).includes('Afterpay') ? c : '🛍️ Afterpay';
+        }
+
+        /** Proyecciones Afterpay para auditoría (cronograma + enriched, sin duplicar). */
+        function nexusCollectAfterpayAuditProjections(cDisplay) {
+            const schedule = nexusBuildAfterpayAuditSchedule(cDisplay);
+            const prevCurr = state.activeCurrency;
+            state.activeCurrency = 'GLOBAL';
+            const fromEnriched = getEnrichedTx().filter(t => {
+                const id = String(t.id || '');
+                return id.startsWith('proj_ap_') || id.startsWith('audit_ap_');
+            }).map(t => ({
+                ...t,
+                renderType: 'afterpay',
+                cat: nexusNormalizeAfterpayAuditCat(t.cat),
+                original_amount: t.original_amount != null ? t.original_amount : t.amount,
+                original_currency: t.original_currency || t.currency,
+                currency: t.currency || cDisplay
+            }));
+            state.activeCurrency = prevCurr;
+            const map = new Map();
+            schedule.forEach(r => {
+                if (!r || !r.id) return;
+                r.cat = nexusNormalizeAfterpayAuditCat(r.cat);
+                r.renderType = 'afterpay';
+                map.set(r.id, r);
+            });
+            fromEnriched.forEach(r => { if (r && r.id && !map.has(r.id)) map.set(r.id, r); });
+            return Array.from(map.values()).filter(t => nexusShouldShowTxInAudit(t));
+        }
+
+        function nexusCurrencyUsesDecimals(currency) {
+            const c = currency || state.settings.baseCurrency || 'COP';
+            if (state.settings && state.settings.hideDecimals) return false;
+            return !['COP', 'JPY'].includes(c);
+        }
+
+        function nexusFormatNumpadLiveCurrency(rawStr, currency) {
+            const c = currency || state.settings.baseCurrency || 'COP';
+            if (!rawStr || rawStr === '') return fmt(0, c);
+            if (/[\+\-\*/()]/.test(rawStr)) return rawStr;
+            const usesDec = nexusCurrencyUsesDecimals(c);
+            const parts = String(rawStr).split('.');
+            const intPart = parseInt(parts[0] || '0', 10);
+            const safeInt = Number.isNaN(intPart) ? 0 : intPart;
+            if (!usesDec) return fmt(parseFloat(rawStr) || safeInt, c);
+            const intFmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: c, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(safeInt);
+            if (parts.length === 1) return intFmt;
+            return intFmt + ',' + (parts[1] || '');
+        }
+
+        function populateAccountPseSelect() {
+            const sel = $id('fa-pse-link');
+            if (!sel) return;
+            const prev = sel.value;
+            sel.innerHTML = '<option value="">Sin enlace PSE</option>';
+            (state.pseLinks || []).forEach(p => {
+                if (!p || !p.id) return;
+                const ref = p.reference ? (' • ' + p.reference) : '';
+                sel.innerHTML += `<option value="${p.id}">${p.name}${ref}</option>`;
+            });
+            if (prev) sel.value = prev;
+        }
+
+        function nexusSyncAccountPaymentNicFromPse() {
+            const sel = $id('fa-pse-link');
+            const nic = $id('fa-payment-nic');
+            if (!sel || !nic || !sel.value) return;
+            const link = (state.pseLinks || []).find(p => p.id === sel.value);
+            if (link && link.reference) nic.value = link.reference;
+        }
+
+        function nexusSyncLoanCreditRefFromPse() {
+            const sel = $id('fl-pse-link');
+            const refEl = $id('fl-credit-ref');
+            if (!sel || !refEl || !sel.value) return;
+            const link = (state.pseLinks || []).find(p => p.id === sel.value);
+            if (link && link.reference) refEl.value = link.reference;
+        }
+
+        function nexusEnsurePseLinkForDebt(name, nic, urlHint) {
+            if (!state.pseLinks) state.pseLinks = [];
+            const ref = String(nic || '').trim();
+            const label = String(name || 'Deuda bancaria').trim();
+            let link = null;
+            if (ref) link = (state.pseLinks || []).find(p => p.reference === ref && (p.type === 'debt' || !p.type));
+            if (!link) {
+                link = { id: 'pse_' + Date.now(), name: label, type: 'debt', reference: ref, url: urlHint || 'https://', icon: 'fa-building-columns', freq: 'none', cutoff: 0, payday: 0 };
+                state.pseLinks.push(link);
+            } else if (ref) {
+                link.reference = ref;
+                if (label) link.name = label;
+            }
+            return link;
+        }
+
+        function nexusUpsertLoanPseFromForm(loan) {
+            if (!loan || loan.creditorType !== 'banco') return null;
+            const nicEl = $id('fl-credit-ref');
+            const nic = nicEl ? String(nicEl.value || '').trim() : '';
+            const pseSel = $id('fl-pse-link');
+            let linkId = (pseSel && pseSel.value) ? pseSel.value : (loan.pseLinkId || null);
+            if (linkId) {
+                const link = (state.pseLinks || []).find(p => p.id === linkId);
+                if (link && nic) link.reference = nic;
+                if (link) { loan.pseLinkId = link.id; loan.paymentNic = nic || link.reference || ''; return link; }
+            }
+            if (nic) {
+                const link = nexusEnsurePseLinkForDebt(loan.name, nic);
+                loan.pseLinkId = link.id;
+                loan.paymentNic = nic;
+                if (pseSel) pseSel.value = link.id;
+                return link;
+            }
+            return null;
         }
 
         function nexusBuildAccountVaultProfile(acc) {
@@ -8469,13 +8624,15 @@
                 payDay: acc.payDay || 0,
                 rate: acc.rate || 0,
                 virtualTerm: acc.virtualTerm || null,
+                pseLinkId: acc.pseLinkId || null,
+                paymentNic: String(acc.paymentNic || '').trim(),
                 profileUpdatedAt: new Date().toISOString()
             };
         }
 
         function nexusApplySharedAccountVaultProfile(acc, profile) {
             if (!acc || !profile || typeof profile !== 'object') return;
-            ['type', 'color', 'bankUrl', 'logoUrl', 'accountNumber', 'bsb', 'platform', 'limit', 'cutoffDay', 'payDay', 'rate', 'virtualTerm'].forEach(k => {
+            ['type', 'color', 'bankUrl', 'logoUrl', 'accountNumber', 'bsb', 'platform', 'limit', 'cutoffDay', 'payDay', 'rate', 'virtualTerm', 'pseLinkId', 'paymentNic'].forEach(k => {
                 if (profile[k] !== undefined) acc[k] = profile[k];
             });
         }
@@ -8530,7 +8687,8 @@
             const lim = $id('fa-limit'); if(lim) lim.required = false; 
 
             if(type === 'credit') { 
-                if(fields) fields.classList.remove('hidden'); if(lim) lim.required = true; 
+                if(fields) fields.classList.remove('hidden'); if(lim) lim.required = true;
+                if (typeof populateAccountPseSelect === 'function') populateAccountPseSelect();
             } else if (type === 'virtual') { 
                 if(vFields) vFields.classList.remove('hidden'); 
             }
@@ -8601,6 +8759,19 @@
 
             const ownerEmail = nexusP2POwnerEmail();
             const displayName = isShared && name && !name.startsWith('👥') ? ('👥 ' + name) : name;
+            let pseLinkId = null;
+            let paymentNic = '';
+            if (type === 'credit') {
+                pseLinkId = ($id('fa-pse-link') && $id('fa-pse-link').value) ? $id('fa-pse-link').value : null;
+                paymentNic = $id('fa-payment-nic') ? String($id('fa-payment-nic').value || '').trim() : '';
+                if (pseLinkId && paymentNic) {
+                    const pl = (state.pseLinks || []).find(p => p.id === pseLinkId);
+                    if (pl) pl.reference = paymentNic;
+                } else if (paymentNic && !pseLinkId) {
+                    const pl = nexusEnsurePseLinkForDebt(displayName, paymentNic);
+                    pseLinkId = pl.id;
+                }
+            }
             const newAcc = { 
                 id: newId,
                 name: displayName,
@@ -8620,7 +8791,9 @@
                 bankUrl: bankUrl,
                 logoUrl: logoUrl,
                 accountNumber: accountNumber,
-                bsb: bsb
+                bsb: bsb,
+                pseLinkId: type === 'credit' ? pseLinkId : null,
+                paymentNic: type === 'credit' ? paymentNic : ''
             }; 
             
             const wasNew = !id;
@@ -8809,7 +8982,7 @@
             const pseSel = $id('fl-pse-link');
             if (pseSel) {
                 const prevPse = pseSel.value;
-                pseSel.innerHTML = '<option value="">Configurar después…</option>';
+                pseSel.innerHTML = '<option value="">Crear enlace nuevo…</option>';
                 (state.pseLinks || []).forEach(p => {
                     if (!p || !p.id) return;
                     const ref = p.reference ? (' • ' + p.reference) : '';
@@ -8892,12 +9065,13 @@
                 return pn === nameKey || pn.includes(nameKey) || nameKey.includes(pn);
             });
 
+            const payNic = String(loan.paymentNic || (linked && linked.reference) || '').trim();
             let html = '';
             if (linked) {
-                const safeRef = nexusEscapeJsStr(linked.reference || '');
+                const safeRef = nexusEscapeJsStr(payNic || linked.reference || '');
                 const safeUrl = nexusEscapeJsStr(linked.url || '');
-                if (linked.reference && linked.url) {
-                    html += `<button type="button" onclick="copyAndPayPSE('${safeRef}', '${safeUrl}')" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pago directo (enlace vinculado)</button>`;
+                if ((payNic || linked.reference) && linked.url) {
+                    html += `<button type="button" onclick="copyAndPayPSE('${safeRef}', '${safeUrl}')" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pago directo (NIC: ${safeRef})</button>`;
                 } else if (linked.url) {
                     html += `<button type="button" onclick="redirigirPagoDirecto('${safeUrl}')" class="w-full bg-emerald-500 text-white p-4 rounded-2xl font-black uppercase text-[10px] shadow-lg active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-arrow-up-right-from-square"></i> Ir al portal vinculado</button>`;
                 }
@@ -8956,6 +9130,8 @@
                 if ($id('fl-creditor-type')) $id('fl-creditor-type').value = l.creditorType || 'terceros';
                 if ($id('fl-terceros-acc')) $id('fl-terceros-acc').value = l.tercerosAccId || '';
                 if ($id('fl-pse-link')) $id('fl-pse-link').value = l.pseLinkId || '';
+                const link = l.pseLinkId ? (state.pseLinks || []).find(p => p.id === l.pseLinkId) : null;
+                if ($id('fl-credit-ref')) $id('fl-credit-ref').value = l.paymentNic || (link && link.reference) || '';
                 toggleLoanCreditorFields();
             }
         }
@@ -8975,6 +9151,7 @@
             if ($id('fl-creditor-type')) $id('fl-creditor-type').value = 'terceros';
             if ($id('fl-terceros-acc')) $id('fl-terceros-acc').value = '';
             if ($id('fl-pse-link')) $id('fl-pse-link').value = '';
+            if ($id('fl-credit-ref')) $id('fl-credit-ref').value = '';
             toggleLoanCreditorFields();
         }
         
@@ -8986,11 +9163,13 @@
             const currency = $id('fl-currency') ? $id('fl-currency').value : (state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency);
             const creditorType = $id('fl-creditor-type') ? $id('fl-creditor-type').value : 'terceros';
             const tercerosAccId = ($id('fl-terceros-acc') && $id('fl-terceros-acc').value) ? $id('fl-terceros-acc').value : null;
-            const pseLinkId = (creditorType === 'banco' && $id('fl-pse-link') && $id('fl-pse-link').value) ? $id('fl-pse-link').value : null;
+            let pseLinkId = (creditorType === 'banco' && $id('fl-pse-link') && $id('fl-pse-link').value) ? $id('fl-pse-link').value : null;
+            const creditNic = ($id('fl-credit-ref') && creditorType === 'banco') ? String($id('fl-credit-ref').value || '').trim() : '';
             const creditorPatch = {
                 creditorType,
                 tercerosAccId: creditorType === 'terceros' ? tercerosAccId : null,
-                pseLinkId: creditorType === 'banco' ? pseLinkId : null
+                pseLinkId: creditorType === 'banco' ? pseLinkId : null,
+                paymentNic: creditorType === 'banco' ? creditNic : ''
             };
             if(id) { 
                 const l = state.loans.find(x => x.id === id); 
@@ -8998,7 +9177,8 @@
                     l.name = name; l.total = amount; l.rate = rate; l.term = term;
                     l.date = new Date(`${date}T12:00:00`).toISOString(); l.currency = currency;
                     Object.assign(l, creditorPatch);
-                    if (pseLinkId) nexusBindPseLinkToLoan(l.id, pseLinkId);
+                    if (creditorType === 'banco') nexusUpsertLoanPseFromForm(l);
+                    else if (pseLinkId) nexusBindPseLinkToLoan(l.id, pseLinkId);
                 }
             } else { 
                 const newLoan = {
@@ -9007,8 +9187,9 @@
                     currency: currency, isBNPL: false, ...creditorPatch
                 };
                 state.loans.push(newLoan);
-                if (pseLinkId) nexusBindPseLinkToLoan(newLoan.id, pseLinkId);
-                if (window.__nexusPseLinkForLoanName && !pseLinkId) {
+                if (creditorType === 'banco') nexusUpsertLoanPseFromForm(newLoan);
+                else if (pseLinkId) nexusBindPseLinkToLoan(newLoan.id, pseLinkId);
+                if (window.__nexusPseLinkForLoanName && !newLoan.pseLinkId) {
                     const pendingLink = (state.pseLinks || []).find(p => p.name === window.__nexusPseLinkForLoanName);
                     if (pendingLink) nexusBindPseLinkToLoan(newLoan.id, pendingLink.id);
                 }
@@ -9998,7 +10179,7 @@
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
             const cDisplay = state.settings.baseCurrency || 'COP';
-            const apScheduleRows = nexusBuildAfterpayAuditSchedule(cDisplay);
+            const apScheduleRows = nexusCollectAfterpayAuditProjections(cDisplay);
             const apMirroredPayIds = new Set(apScheduleRows.map(r => r.nexusAuditMirrorsTxId).filter(Boolean));
 
             // APEX FIX: Mapeo Aislado Dinámico SSoT (Contrato madre Afterpay oculto, solo se ven los abonos reales)
@@ -10022,7 +10203,11 @@
                     return tx;
                 });
 
-            let projTxs = getEnrichedTx().filter(t => t.isProjected && !String(t.id || '').startsWith('proj_ap_'));
+            const apIds = new Set(apScheduleRows.map(r => r.id));
+            let projTxs = getEnrichedTx().filter(t => {
+                const id = String(t.id || '');
+                return t.isProjected && !id.startsWith('proj_ap_') && !id.startsWith('audit_ap_') && !apIds.has(id);
+            });
             projTxs.push(...apScheduleRows);
             state.activeCurrency = tempCurr;
 
