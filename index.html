@@ -723,15 +723,16 @@
             <div id="scanner-results" class="hidden space-y-4">
                 <div class="flex flex-wrap gap-2 justify-between items-center">
                     <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Informe de extracto</h3>
-                    <div class="flex gap-2 items-center">
-                        <button type="button" onclick="closeScannerResults()" class="nexus-modal-close-btn" title="Cerrar informe"><i class="fa-solid fa-xmark"></i></button>
+                    <div class="flex flex-wrap gap-2 items-center justify-end">
+                        <button type="button" onclick="clearScannerReading()" class="bg-rose-50 text-rose-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-rose-100 active:scale-95"><i class="fa-solid fa-trash-can mr-1"></i>Borrar lectura</button>
+                        <button type="button" onclick="startNewScannerReading()" class="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-blue-100 active:scale-95"><i class="fa-solid fa-file-circle-plus mr-1"></i>Nueva lectura</button>
                         <button type="button" onclick="exportScannerExcel()" class="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-emerald-100"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
                         <button type="button" onclick="exportScannerPDF()" class="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase border border-red-100"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
                     </div>
                 </div>
                 <p id="scanner-tx-count" class="text-[9px] font-bold text-blue-700"></p>
                 <div id="scanner-meta-panel" class="theme-card p-4 rounded-2xl border text-[9px] overflow-x-auto"></div>
-                <div id="scanner-tx-table-wrap" class="theme-card p-3 rounded-2xl border overflow-x-auto max-h-[280px] hide-scrollbar"></div>
+                <div id="scanner-tx-table-wrap" class="theme-card p-3 rounded-2xl border overflow-x-auto max-h-[min(55vh,520px)] min-h-[120px] hide-scrollbar"></div>
                 <div class="flex justify-between items-center bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg">
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total movimientos detectados</p>
                     <p id="scanner-total-val" class="text-xl font-black tracking-tighter tabular-nums">$0.00</p>
@@ -6763,7 +6764,7 @@
             else if (id === 'tasks') renderTasksTab();
             else if (id === 'projects') renderProjectsTab();
             else if (id === 'home') updateDashboard();
-            else if (id === 'scanner') initScanner();
+            else if (id === 'scanner') nexusRestoreScannerUI();
         }
 
         function showFounderSetupBannerIfNeeded() {
@@ -7316,7 +7317,7 @@
                 if(id === 'afterpay') initAfterpayTab();
                 if(id === 'tasks') initTasksTab();
                 if(id === 'home') nexusResetPeriodFilters();
-                if(id === 'scanner') initScanner(); 
+                if(id === 'scanner') nexusEnterScannerTab(); 
             }
             
             // Actualización In-Place de Datos (Fricción Cero)
@@ -15978,21 +15979,90 @@ Responde SOLO con un JSON válido (sin markdown) con esta estructura exacta:
     "remainingInstallments": number
   }]
 }
-Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos visibles.`;
+Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos visibles.
+Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; remainingInstallments = cuotas que faltan por pagar de cada compra; purchaseValue = valor total de la compra; installmentValue = valor de la cuota del periodo.`;
+
+        const NEXUS_SCANNER_STORAGE_KEY = 'nexus_scanner_last_report';
+        let lastScannerReport = null;
+
+        function nexusPersistScannerReport(report) {
+            lastScannerReport = report;
+            if (!state.ui) state.ui = {};
+            state.ui.scannerReport = report;
+            try {
+                sessionStorage.setItem(NEXUS_SCANNER_STORAGE_KEY, JSON.stringify(report));
+            } catch (e) { console.warn('[NEXUS] scanner persist', e); }
+        }
+
+        function nexusLoadScannerReport() {
+            if (lastScannerReport) return lastScannerReport;
+            if (state.ui && state.ui.scannerReport) {
+                lastScannerReport = state.ui.scannerReport;
+                return lastScannerReport;
+            }
+            try {
+                const raw = sessionStorage.getItem(NEXUS_SCANNER_STORAGE_KEY);
+                if (raw) {
+                    lastScannerReport = JSON.parse(raw);
+                    if (!state.ui) state.ui = {};
+                    state.ui.scannerReport = lastScannerReport;
+                    return lastScannerReport;
+                }
+            } catch (e) { console.warn('[NEXUS] scanner load', e); }
+            return null;
+        }
 
         function initScanner() {
             if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
+            nexusEnterScannerTab();
+        }
+
+        /** Entrar al escáner sin borrar la lectura guardada. */
+        function nexusEnterScannerTab() {
+            if (typeof normalizeGeminiModel === 'function') normalizeGeminiModel();
+            const fileInput = $id('nexusFileScanner');
+            if (fileInput) fileInput.value = '';
+            nexusRestoreScannerUI();
+        }
+
+        /** Re-pintar informe tras sync/refresh de pestaña (no limpiar datos). */
+        function nexusRestoreScannerUI() {
+            const report = nexusLoadScannerReport();
+            if (report && ((report.transactions && report.transactions.length) || report.meta)) {
+                renderScannerReportUI(report, { persist: false });
+            }
+        }
+
+        function clearScannerReading() {
             lastScannerReport = null;
+            if (state.ui) delete state.ui.scannerReport;
+            try { sessionStorage.removeItem(NEXUS_SCANNER_STORAGE_KEY); } catch (e) {}
             const resCont = $id('scanner-results');
             if (resCont) resCont.classList.add('hidden');
             const meta = $id('scanner-meta-panel'); if (meta) meta.innerHTML = '';
             const tbl = $id('scanner-tx-table-wrap'); if (tbl) tbl.innerHTML = '';
+            const cntEl = $id('scanner-tx-count'); if (cntEl) cntEl.textContent = '';
+            const totalVal = $id('scanner-total-val');
+            const bC = state.settings.baseCurrency || 'COP';
+            if (totalVal) {
+                totalVal.innerText = fmt(0, bC);
+                totalVal.className = 'text-xl font-black tracking-tighter tabular-nums';
+            }
             const fileInput = $id('nexusFileScanner');
             if (fileInput) fileInput.value = '';
         }
 
-        function renderScannerReportUI(report) {
-            lastScannerReport = report;
+        function startNewScannerReading() {
+            clearScannerReading();
+            const fileInput = $id('nexusFileScanner');
+            if (fileInput) fileInput.click();
+        }
+
+        function renderScannerReportUI(report, opts) {
+            if (!report) return;
+            const options = opts || {};
+            if (options.persist !== false) nexusPersistScannerReport(report);
+            else lastScannerReport = report;
             const bC = state.settings.baseCurrency || 'COP';
             const meta = report.meta;
             const txs = report.transactions || [];
@@ -16042,7 +16112,12 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 totalVal.className = 'text-xl font-black tracking-tighter tabular-nums text-cyan-400';
             }
             const resCont = $id('scanner-results');
-            if (resCont) { resCont.classList.remove('hidden'); resCont.classList.add('animate-slideUp'); }
+            if (resCont) {
+                resCont.classList.remove('hidden');
+                resCont.classList.remove('animate-slideUp');
+                void resCont.offsetHeight;
+                resCont.classList.add('animate-slideUp');
+            }
         }
 
         async function processScannerFile(event) {
@@ -17604,9 +17679,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         }
 
         function closeScannerResults() {
-            const res = $id('scanner-results');
-            if (res) res.classList.add('hidden');
-            if (typeof lastScannerReport !== 'undefined') lastScannerReport = null;
+            clearScannerReading();
         }
 
         function nexusWireModalAutoClose() {
@@ -18760,8 +18833,6 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 .replace(/\n/g, '<br>')
                 .replace(/^- (.*?)(?=<br>|<\/p>|$)/gm, '<li class="ml-4 list-disc marker:text-indigo-400 mb-1">$1</li>');
         }
-
-        let lastScannerReport = null;
 
         function getNexusDisplayName(profile) {
             const p = profile || userProfile;
