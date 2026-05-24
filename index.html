@@ -736,7 +736,7 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total movimientos detectados</p>
                     <p id="scanner-total-val" class="text-xl font-black tracking-tighter tabular-nums">$0.00</p>
                 </div>
-                <button onclick="saveScannedData()" class="w-full bg-emerald-500 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Importar a bóveda SSoT</button>
+                <button onclick="saveScannedData()" class="w-full bg-emerald-500 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Importar a TC + cronograma auditoría</button>
             </div>
         </section>
 
@@ -1783,7 +1783,7 @@
             <div class="flex justify-between items-start gap-3">
                 <div>
                     <h3 class="text-lg font-black uppercase text-rose-600 tracking-tight">Transacciones eliminadas</h3>
-                    <p class="text-[10px] font-bold text-slate-400 mt-1">Copia de seguridad <span class="text-rose-600">15 días</span>. Luego se borran automáticamente.</p>
+                    <p class="text-[10px] font-bold text-slate-400 mt-1">Copia de seguridad <span class="text-rose-600">15 días</span>. Puedes restaurar o <span class="text-rose-600">borrar permanente</span> antes del vencimiento.</p>
                 </div>
                 <button type="button" onclick="closeDeletedTxArchiveModal()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
             </div>
@@ -3245,6 +3245,12 @@
                 }
                 else if(action === 'restore_deleted_tx') {
                     if (typeof nexusRestoreArchivedTransaction === 'function' && nexusRestoreArchivedTransaction(payload)) {
+                        if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
+                    }
+                }
+                else if(action === 'purge_deleted_tx') {
+                    if (typeof nexusPermanentDeleteArchivedTx === 'function' && nexusPermanentDeleteArchivedTx(payload)) {
+                        if (typeof renderDeletedTxArchiveList === 'function') renderDeletedTxArchiveList();
                         if (typeof refreshAfterTxDelete === 'function') refreshAfterTxDelete();
                     }
                 }
@@ -6049,15 +6055,219 @@
             return rows;
         }
 
-        /** Contrato madre y recon a cero fuera; cronograma Afterpay (compra + amortizado + futuro) sí entra. */
+        function nexusIsDebtAuditSynthetic(tx) {
+            const id = String((tx && tx.id) || '');
+            return id.startsWith('audit_loan_') || id.startsWith('audit_cc_') || id.startsWith('audit_pend_');
+        }
+
+        function nexusIsDebtProjectedQuota(tx) {
+            const id = String((tx && tx.id) || '');
+            return !!(tx && tx.isProjected && (id.startsWith('proj_loan_') || id.startsWith('proj_pend_') || id.startsWith('audit_loan_proj_')));
+        }
+
+        function nexusLoanIsActive(l) {
+            if (!l) return false;
+            const paid = l.paidQuotas || 0;
+            if (l.id.startsWith('pend_')) return paid < 1;
+            const term = l.term || 0;
+            return term > 0 && paid < term;
+        }
+
+        function nexusDebtAuditParent(tx) {
+            if (!tx) return null;
+            if (tx.loanParentId) return (state.loans || []).find(l => l.id === tx.loanParentId) || null;
+            const id = String(tx.id || '');
+            if (id.startsWith('audit_cc_buy_')) return (state.loans || []).find(l => l.id === id.slice('audit_cc_buy_'.length)) || null;
+            if (id.startsWith('audit_loan_amort_') || id.startsWith('audit_loan_proj_')) {
+                const rest = id.replace(/^audit_loan_(amort|proj)_/, '');
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                return (state.loans || []).find(l => l.id === rest.slice(0, lastU)) || null;
+            }
+            if (id.startsWith('proj_loan_')) {
+                const rest = id.slice('proj_loan_'.length);
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                return (state.loans || []).find(l => l.id === rest.slice(0, lastU)) || null;
+            }
+            return null;
+        }
+
+        function nexusComputeLoanQuotaDate(l, quotaIndexZeroBased) {
+            const baseDate = getSafeDate(l.date);
+            let pD;
+            if (l.isCC && l.cardId) {
+                const card = (state.accounts || []).find(a => a.id === l.cardId);
+                if (card && card.cutoffDay && card.payDay) {
+                    const pDate = new Date(baseDate);
+                    const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
+                    pD = new Date(pDate.getFullYear(), pDate.getMonth() + addM + quotaIndexZeroBased, card.payDay, 12, 0, 0);
+                } else {
+                    pD = new Date(baseDate);
+                    pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
+                    pD.setHours(12, 0, 0, 0);
+                }
+            } else if (l.id.startsWith('pend_')) {
+                pD = new Date(baseDate);
+                pD.setHours(12, 0, 0, 0);
+            } else {
+                pD = new Date(baseDate);
+                pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
+                pD.setHours(12, 0, 0, 0);
+            }
+            return pD;
+        }
+
+        function nexusFindLoanPaymentForQuota(loan, quotaOneBased) {
+            if (!loan) return null;
+            const tag = `(${quotaOneBased}/${loan.term})`;
+            const baseName = String(loan.name || '').split(' (')[0];
+            return (state.tx || []).find(t => {
+                if (!t || t.isProjected) return false;
+                const n = t.note || '';
+                if (!n.includes('[Abono]') && !(t.cat || '').includes('Abono TC') && !(t.cat || '').includes('Pago Deuda')) return false;
+                if (!n.includes(tag)) return false;
+                return n.includes(loan.name) || (baseName && n.includes(baseName));
+            }) || null;
+        }
+
+        /** Cronograma de deudas / TC para auditoría (amortizado + futuro + compra TC). */
+        function nexusBuildDebtAuditSchedule(cDisplay) {
+            const rows = [];
+            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
+            (state.loans || []).forEach(l => {
+                if (!nexusLoanIsActive(l)) return;
+                const curr = l.original_currency || l.currency || baseCur;
+                const paid = l.paidQuotas || 0;
+                const n = l.term || 1;
+                const P_orig = l.original_total || l.total;
+                const r = (l.rate || 0) / 100;
+                const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                let bal_run = P_orig;
+                const card = l.isCC && l.cardId ? (state.accounts || []).find(a => a.id === l.cardId) : null;
+                const accId = card ? card.id : null;
+
+                if (l.isCC) {
+                    rows.push({
+                        id: 'audit_cc_buy_' + l.id,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(P_orig, curr, baseCur),
+                        original_amount: P_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: '💳 Pago TC',
+                        accId,
+                        date: l.date,
+                        note: `[Compra TC] ${l.name} (${n} cuotas × ${fmt(A_orig, curr)})`,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'purchase',
+                        nexusSkipAuditTotal: true
+                    });
+                }
+
+                for (let i = 0; i < paid; i++) {
+                    const qNum = i + 1;
+                    const payTx = nexusFindLoanPaymentForQuota(l, qNum);
+                    const int_orig = bal_run * r;
+                    const prin_orig = A_orig - int_orig;
+                    const schedDate = nexusComputeLoanQuotaDate(l, i).toISOString();
+                    const amortRow = {
+                        id: 'audit_loan_amort_' + l.id + '_' + i,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(A_orig, curr, baseCur),
+                        original_amount: A_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
+                        accId: payTx ? payTx.accId : accId,
+                        date: schedDate,
+                        note: payTx ? (payTx.note || `[Abono Realizado] ${l.name} (${qNum}/${n})`) : `[Amortizado] ${l.name} (${qNum}/${n})`,
+                        isProjected: false,
+                        loanParentId: l.id,
+                        loanAuditRole: 'amortized',
+                        nexusSkipAuditTotal: true
+                    };
+                    if (payTx) {
+                        amortRow.amount = convertCurrency(payTx.original_amount || payTx.amount, payTx.original_currency || payTx.currency, baseCur);
+                        amortRow.original_amount = payTx.original_amount || payTx.amount;
+                        amortRow.original_currency = payTx.original_currency || payTx.currency;
+                        amortRow.nexusAuditMirrorsTxId = payTx.id;
+                    }
+                    rows.push(amortRow);
+                    bal_run -= prin_orig;
+                    if (bal_run < 0.01) bal_run = 0;
+                }
+
+                for (let i = paid; i < n; i++) {
+                    if (nexusFindLoanPaymentForQuota(l, i + 1)) continue;
+                    const int_orig = bal_run * r;
+                    const prin_orig = A_orig - int_orig;
+                    bal_run -= prin_orig;
+                    if (bal_run < 0.01) bal_run = 0;
+                    const pId = 'proj_loan_' + l.id + '_' + i;
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(A_orig, curr, baseCur),
+                        original_amount: A_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
+                        accId,
+                        date: nexusComputeLoanQuotaDate(l, i).toISOString(),
+                        note: `[Pendiente] ${l.name} (${i + 1}/${n}) · Cap:${fmt(prin_orig, curr)} | Int:${fmt(int_orig, curr)}`,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'projected',
+                        priority: l.priority
+                    });
+                }
+
+                if (l.id.startsWith('pend_') && paid < 1) {
+                    const amtOrig = l.original_balance || l.balance || l.total;
+                    const pId = 'proj_pend_' + l.id;
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'single_debt',
+                        amount: convertCurrency(amtOrig, curr, baseCur),
+                        original_amount: amtOrig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: `⚡ ${l.name}`,
+                        accId: null,
+                        date: nexusComputeLoanQuotaDate(l, 0).toISOString(),
+                        note: l.name,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'projected',
+                        priority: l.priority || 'medium'
+                    });
+                }
+            });
+            return rows;
+        }
+
+        /** Cronograma Afterpay / deudas: no recortar por rango de fechas (control futuro). */
+        function nexusAuditExemptFromDateFilter(tx) {
+            if (nexusAfterpayAuditExemptFromDateFilter(tx)) return true;
+            if (tx && (tx.loanAuditRole || nexusIsDebtAuditSynthetic(tx) || nexusIsDebtProjectedQuota(tx))) return true;
+            const id = String((tx && tx.id) || '');
+            if (id.startsWith('proj_loan_') || id.startsWith('proj_pend_')) return true;
+            return false;
+        }
+
+        /** Contrato madre y recon a cero fuera; filas de cronograma (Afterpay / deudas) siempre visibles. */
         function nexusShouldShowTxInAudit(tx) {
             if (!tx) return false;
             if (tx.type === 'afterpay') return false;
-            if (tx.apAuditRole === 'amortized' || nexusIsAfterpayProjectedQuota(tx) || nexusIsAfterpayAuditSynthetic(tx)) {
-                const parent = nexusAfterpayAuditParent(tx);
-                if (!parent || parent.apRecon) return false;
-                return (parent.apPaid || 0) < (parent.apQuotas || 4);
-            }
+            if (tx.apAuditRole || tx.loanAuditRole || nexusIsAfterpayAuditSynthetic(tx) || nexusIsDebtAuditSynthetic(tx)) return true;
+            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsDebtProjectedQuota(tx)) return true;
+            if (tx.isProjected && (String(tx.id || '').startsWith('proj_loan_') || String(tx.id || '').startsWith('proj_pend_') || String(tx.id || '').startsWith('proj_recur_'))) return true;
             if (nexusIsAfterpayPaymentTx(tx)) {
                 const parent = nexusFindAfterpayParentForPayment(tx);
                 if (parent && parent.apRecon) return false;
@@ -8550,32 +8760,51 @@
             return String(c).includes('Afterpay') ? c : '🛍️ Afterpay';
         }
 
-        /** Proyecciones Afterpay para auditoría (cronograma + enriched, sin duplicar). */
-        function nexusCollectAfterpayAuditProjections(cDisplay) {
-            const schedule = nexusBuildAfterpayAuditSchedule(cDisplay);
+        /** Proyecciones Afterpay + deudas activas para auditoría (cronograma + enriched, sin duplicar). */
+        function nexusCollectAuditProjections(cDisplay) {
+            const apSchedule = nexusBuildAfterpayAuditSchedule(cDisplay);
+            const debtSchedule = nexusBuildDebtAuditSchedule(cDisplay);
             const prevCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
             const fromEnriched = getEnrichedTx().filter(t => {
                 const id = String(t.id || '');
-                return id.startsWith('proj_ap_') || id.startsWith('audit_ap_');
-            }).map(t => ({
-                ...t,
-                renderType: 'afterpay',
-                cat: nexusNormalizeAfterpayAuditCat(t.cat),
-                original_amount: t.original_amount != null ? t.original_amount : t.amount,
-                original_currency: t.original_currency || t.currency,
-                currency: t.currency || cDisplay
-            }));
+                return id.startsWith('proj_ap_') || id.startsWith('audit_ap_')
+                    || id.startsWith('proj_loan_') || id.startsWith('proj_pend_') || id.startsWith('proj_recur_');
+            }).map(t => {
+                const id = String(t.id || '');
+                const renderType = id.startsWith('proj_ap_') || (t.cat || '').includes('Afterpay') ? 'afterpay'
+                    : (id.startsWith('proj_pend_') ? 'single_debt' : 'debt');
+                return {
+                    ...t,
+                    renderType: t.renderType || renderType,
+                    cat: renderType === 'afterpay' ? nexusNormalizeAfterpayAuditCat(t.cat) : t.cat,
+                    original_amount: t.original_amount != null ? t.original_amount : t.amount,
+                    original_currency: t.original_currency || t.currency,
+                    currency: t.currency || cDisplay
+                };
+            });
             state.activeCurrency = prevCurr;
             const map = new Map();
-            schedule.forEach(r => {
+            const ingest = (r, rType) => {
                 if (!r || !r.id) return;
-                r.cat = nexusNormalizeAfterpayAuditCat(r.cat);
-                r.renderType = 'afterpay';
+                if (rType === 'afterpay') {
+                    r.cat = nexusNormalizeAfterpayAuditCat(r.cat);
+                    r.renderType = 'afterpay';
+                } else if (!r.renderType) {
+                    r.renderType = rType || 'debt';
+                }
                 map.set(r.id, r);
-            });
+            };
+            apSchedule.forEach(r => ingest(r, 'afterpay'));
+            debtSchedule.forEach(r => ingest(r, 'debt'));
             fromEnriched.forEach(r => { if (r && r.id && !map.has(r.id)) map.set(r.id, r); });
             return Array.from(map.values()).filter(t => nexusShouldShowTxInAudit(t));
+        }
+
+        function nexusCollectAfterpayAuditProjections(cDisplay) {
+            return nexusCollectAuditProjections(cDisplay).filter(t =>
+                t.renderType === 'afterpay' || nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || !!t.apAuditRole
+            );
         }
 
         function nexusCurrencyUsesDecimals(currency) {
@@ -9986,6 +10215,25 @@
             );
         }
 
+        function nexusPermanentDeleteArchivedTx(txId) {
+            if (!txId) return false;
+            state.deletedTxArchive = (state.deletedTxArchive || []).filter(e => e.id !== txId);
+            if (!state.deletedTxIds.includes(txId)) state.deletedTxIds.push(txId);
+            if (typeof nexusTouchLocalState === 'function') nexusTouchLocalState('tx-purge');
+            saveState();
+            if (typeof deleteCloudTx === 'function') deleteCloudTx(txId);
+            return true;
+        }
+
+        function promptPermanentDeleteArchivedTx(txId) {
+            if (!txId) return;
+            triggerUIConfirm(
+                '¿Eliminar permanentemente este registro?\n\nNo podrás restaurarlo. Se borra de la papelera y de la nube.',
+                'purge_deleted_tx',
+                txId
+            );
+        }
+
         function nexusArchiveDeletedTx(tx, meta) {
             nexusEnsureDeletedAccountsRegistry();
             nexusPurgeExpiredDeletedTxArchive();
@@ -10131,7 +10379,8 @@
                 const restoreBtn = canRestore
                     ? `<button type="button" onclick="event.stopPropagation(); promptRestoreDeletedTransaction('${safeId}')" class="shrink-0 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl text-[8px] font-black uppercase active:scale-95 hover:bg-emerald-100 transition-colors"><i class="fa-solid fa-rotate-left mr-1"></i>Restaurar</button>`
                     : `<span class="shrink-0 text-[7px] font-bold text-slate-400 uppercase px-2 py-1" title="Bóveda no disponible">Sin bóveda</span>`;
-                return `<div class="theme-card p-4 rounded-2xl border border-rose-100/80 shadow-sm"><div class="flex justify-between items-start gap-2"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div><div class="flex justify-end mt-2 pt-2 border-t border-rose-50">${restoreBtn}</div></div>`;
+                const purgeBtn = `<button type="button" onclick="event.stopPropagation(); promptPermanentDeleteArchivedTx('${safeId}')" class="shrink-0 bg-red-600 text-white border border-red-700 px-3 py-1.5 rounded-xl text-[8px] font-black uppercase active:scale-95 hover:bg-red-700 transition-colors ml-1"><i class="fa-solid fa-trash-can mr-1"></i>Borrar permanente</button>`;
+                return `<div class="theme-card p-4 rounded-2xl border border-rose-100/80 shadow-sm"><div class="flex justify-between items-start gap-2"><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${safeNote}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-1">${typeLabels[t.type] || t.type || '—'} • ${accName}</p><p class="text-[8px] text-slate-400 mt-0.5">Movimiento: ${dTx.toLocaleDateString('es-CO')} · Eliminado: ${dDel.toLocaleDateString('es-CO')} ${String(dDel.getHours()).padStart(2,'0')}:${String(dDel.getMinutes()).padStart(2,'0')}</p><p class="text-[8px] text-rose-500 font-bold uppercase mt-1">Origen: ${src} · ${days} día${days === 1 ? '' : 's'} restante${days === 1 ? '' : 's'}</p></div><p class="font-black text-xs theme-text shrink-0">${sign}${amt}</p></div><div class="flex justify-end flex-wrap gap-1 mt-2 pt-2 border-t border-rose-50">${restoreBtn}${purgeBtn}</div></div>`;
             }).join('');
         }
 
@@ -10242,12 +10491,12 @@
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
             const cDisplay = state.settings.baseCurrency || 'COP';
-            const apScheduleRows = nexusCollectAfterpayAuditProjections(cDisplay);
-            const apMirroredPayIds = new Set(apScheduleRows.map(r => r.nexusAuditMirrorsTxId).filter(Boolean));
+            const auditScheduleRows = nexusCollectAuditProjections(cDisplay);
+            const auditMirroredPayIds = new Set(auditScheduleRows.map(r => r.nexusAuditMirrorsTxId).filter(Boolean));
 
             // APEX FIX: Mapeo Aislado Dinámico SSoT (Contrato madre Afterpay oculto, solo se ven los abonos reales)
             let rawTxList = nexusGetOperationalTxList()
-                .filter(t => !t.isCCPurchase && t.type !== 'afterpay' && !apMirroredPayIds.has(t.id))
+                .filter(t => !t.isCCPurchase && t.type !== 'afterpay' && !auditMirroredPayIds.has(t.id))
                 .map(t => {
                     const tx = {...t, original_amount: t.amount, original_currency: t.currency};
                     tx.renderType = nexusIsAfterpayPaymentTx(tx) ? 'afterpay' : tx.type;
@@ -10266,12 +10515,14 @@
                     return tx;
                 });
 
-            const apIds = new Set(apScheduleRows.map(r => r.id));
+            const scheduleIds = new Set(auditScheduleRows.map(r => r.id));
             let projTxs = getEnrichedTx().filter(t => {
                 const id = String(t.id || '');
-                return t.isProjected && !id.startsWith('proj_ap_') && !id.startsWith('audit_ap_') && !apIds.has(id);
+                return t.isProjected && !id.startsWith('proj_ap_') && !id.startsWith('audit_ap_')
+                    && !id.startsWith('proj_loan_') && !id.startsWith('proj_pend_')
+                    && !id.startsWith('audit_loan_') && !id.startsWith('audit_cc_') && !scheduleIds.has(id);
             });
-            projTxs.push(...apScheduleRows);
+            projTxs.push(...auditScheduleRows);
             state.activeCurrency = tempCurr;
 
             // Flujo real + proyecciones + cronograma Afterpay (compra, amortizado, futuro)
@@ -10279,7 +10530,7 @@
 
             let fTx = combinedTxs.filter(t => { 
                 const d = new Date(t.date); 
-                if (!nexusAfterpayAuditExemptFromDateFilter(t) && (d < st || d > en)) return false;
+                if (!nexusAuditExemptFromDateFilter(t) && (d < st || d > en)) return false;
                 if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
 
                 const rType = t.renderType || t.type; // APEX FIX: Filtramos según comportamiento visual para no confundir al usuario
@@ -10295,10 +10546,18 @@
                             || (t.note || '').includes('[Pago inicial proyectado]')
                             || (t.note || '').includes('[Pendiente]')
                             || (t.note || '').includes('[Amortizado]')
-                            || (t.note || '').includes('[Compra BNPL]');
+                            || (t.note || '').includes('[Compra BNPL]')
+                            || (t.note || '').includes('[Compra TC]')
+                            || (t.note || '').includes('[Abono Realizado]');
                         if (!isAp) return false;
                     }
-                    else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
+                    else if (tp === 'debt') {
+                        const isDebt = rType === 'debt' || !!t.loanAuditRole || nexusIsDebtAuditSynthetic(t) || nexusIsDebtProjectedQuota(t)
+                            || (t.cat || '').includes('Deuda') || (t.cat || '').includes('TC') || (t.cat || '').includes('Pago TC')
+                            || (t.cat || '').includes('Pago Deuda') || (t.note || '').includes('[Cuota')
+                            || String(t.id || '').startsWith('proj_loan_');
+                        if (!isDebt) return false;
+                    }
                     else if (tp === 'single_debt' && !(t.cat || '').includes('Pendiente Único')) return false;
                     else if (['afterpay', 'debt', 'single_debt'].indexOf(tp) === -1 && rType !== tp) return false;
                 }
@@ -10435,8 +10694,12 @@
                     let bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-amber-100 text-amber-600 border-amber-200'; 
                     if (t.apAuditRole === 'purchase') {
                         bTxt = 'COMPRA BNPL'; bCls = 'bg-purple-100 text-purple-600 border-purple-200';
-                    } else if (t.apAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
+                    } else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) {
+                        bTxt = 'COMPRA TC'; bCls = 'bg-orange-100 text-orange-600 border-orange-200';
+                    } else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
                         bTxt = 'AMORTIZADO'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
+                    } else if (t.loanAuditRole === 'projected' || (t.note && t.note.includes('[Pendiente]') && (t.cat || '').includes('Pago'))) {
+                        bTxt = isPast ? 'CUOTA DEUDA VENCIDA' : 'CUOTA DEUDA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-orange-100 text-orange-600 border-orange-200';
                     } else if (t.apAuditRole === 'first_projected' || (t.note && t.note.includes('[Pago inicial proyectado]'))) {
                         bTxt = 'PAGO INICIAL PROY.'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
                     } else if (nexusIsAfterpayProjectedQuota(t) || (t.note && t.note.includes('[Pendiente]'))) {
@@ -10453,8 +10716,12 @@
                     pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; 
                 } else if (rType === 'afterpay') {
                     pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`; 
-                } else if (t.apAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
+                } else if (t.apAuditRole === 'amortized' || t.loanAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
                     pBadge = `<span class="text-[8px] bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full ml-2 border border-emerald-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>AMORTIZADO</span>`;
+                } else if (t.loanAuditRole === 'purchase' || (t.note && t.note.includes('[Compra TC]'))) {
+                    pBadge = `<span class="text-[8px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full ml-2 border border-orange-200">COMPRA TC</span>`;
+                } else if (t.loanAuditRole === 'projected' || (t.isProjected && String(t.id||'').startsWith('proj_loan_'))) {
+                    pBadge = `<span class="text-[8px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-2 border border-amber-200">CUOTA PROYECTADA</span>`;
                 } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
                     pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`; 
                 } else if (t.note && t.note.includes('[Pago Inicial]')) {
@@ -10465,18 +10732,18 @@
 
                 const pCreator = t.createdBy ? `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200 shadow-sm"><i class="fa-solid fa-user mr-1"></i>${t.createdBy.split(' ')[0]}</span>` : '';
                 
-                const isApScheduleRow = t.isProjected || t.apAuditRole === 'amortized' || nexusIsAfterpayAuditSynthetic(t);
-                const editAction = isApScheduleRow ? '' : `editTransaction('${t.id}')`; 
+                const isAuditScheduleRow = t.isProjected || t.apAuditRole || t.loanAuditRole || nexusIsAfterpayAuditSynthetic(t) || nexusIsDebtAuditSynthetic(t);
+                const editAction = isAuditScheduleRow ? '' : `editTransaction('${t.id}')`; 
                 
                 const cardBgClass = isPar ? 'bg-red-50 border-red-300' : 'theme-card border-slate-100/50 hover:border-blue-300';
-                const cursorClass = isApScheduleRow ? 'cursor-default' : 'cursor-pointer'; 
+                const cursorClass = isAuditScheduleRow ? 'cursor-default' : 'cursor-pointer'; 
                 const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
                 const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
                 
-                const deleteAction = isApScheduleRow
-                    ? ((nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || t.apAuditRole === 'amortized')
-                        ? `alert('Cronograma Afterpay: gestiona la compra y cuotas en Afterpay Hub.')`
-                        : `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')`)
+                const deleteAction = isAuditScheduleRow
+                    ? ((nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || t.apAuditRole)
+                        ? `alert('Cronograma Afterpay: gestiona la compra y cuotas en el módulo Afterpay.')`
+                        : `alert('Cronograma de deuda/TC: gestiona el pasivo en Deudas o la compra en la tarjeta.')`)
                     : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
@@ -15895,34 +16162,121 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
             nexusDeliverPdf(doc, 'extracto_nexus_' + new Date().toISOString().split('T')[0] + '.pdf', 'Informe de extracto / recibo');
         }
 
-        function saveScannedData() {
-            if (!lastScannerReport || !(lastScannerReport.transactions || []).length) {
-                return alert('No hay transacciones extraídas para importar.');
+        function nexusParseScannerAnchorDate(meta) {
+            const raw = (meta && (meta.paymentDate || meta.cutoffDate)) || '';
+            if (raw) {
+                const d = getSafeDate(raw);
+                if (!Number.isNaN(d.getTime())) {
+                    d.setHours(12, 0, 0, 0);
+                    return d;
+                }
             }
-            const bC = state.settings.baseCurrency || 'COP';
-            const acc = (state.accounts || []).find(a => !a.isShared) || state.accounts[0];
-            if (!acc) return alert('Crea al menos una cuenta antes de importar.');
-            let imported = 0;
-            lastScannerReport.transactions.forEach(t => {
-                const amt = t.purchaseValue || t.installmentValue || 0;
-                if (amt <= 0) return;
-                const rawTx = {
-                    type: 'expense',
-                    amount: amt,
-                    cat: '[Extracto] ' + (lastScannerReport.meta.bankOrAccountName || 'Importado').substring(0, 40),
-                    accId: acc.id,
-                    date: new Date().toISOString(),
-                    note: (t.description || '') + (t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''),
-                    currency: acc.currency || bC
-                };
-                const tx = buildTransactionSchema({ ...rawTx, id: 'tx_scan_' + Date.now() + '_' + imported });
-                state.tx.push(tx);
-                if (nexusIsLiabAccount(acc)) acc.balance += amt; else acc.balance -= amt;
-                imported++;
+            const now = new Date();
+            now.setHours(12, 0, 0, 0);
+            return now;
+        }
+
+        function nexusResolveScannerCreditCard(meta) {
+            const hint = String((meta && meta.bankOrAccountName) || '').toLowerCase().trim();
+            const cards = (state.accounts || []).filter(a => a && !a.isShared && (nexusIsLiabAccount(a) || a.type === 'credit' || a.type === 'rotativo'));
+            const pool = cards.length ? cards : (state.accounts || []).filter(a => a && !a.isShared);
+            if (!pool.length) return null;
+            if (hint) {
+                const hit = pool.find(a => {
+                    const n = String(a.name || '').toLowerCase();
+                    return n.includes(hint) || hint.includes(n);
+                });
+                if (hit) return hit;
+            }
+            return pool.find(a => nexusIsLiabAccount(a)) || pool[0];
+        }
+
+        function nexusImportScannerFixedCharge(card, item, anchorDate, label) {
+            const amt = Number(item.amount) || 0;
+            if (amt <= 0 || !card) return 0;
+            const tx = buildTransactionSchema({
+                type: 'expense',
+                amount: amt,
+                cat: `💳 ${label}`,
+                accId: card.id,
+                date: anchorDate.toISOString(),
+                note: `[TC] ${item.name || label} · Extracto`,
+                currency: card.currency || state.settings.baseCurrency || 'COP',
+                costType: 'fixed'
             });
+            state.tx.push(tx);
+            if (typeof saveCloudTx === 'function') saveCloudTx(tx);
+            card.balance += amt;
+            return 1;
+        }
+
+        function nexusImportScannerCCTransaction(card, t, anchorDate) {
+            if (!card || !t) return 0;
+            const paid = Math.max(0, parseInt(t.paidInstallments, 10) || 0);
+            const remaining = Math.max(0, parseInt(t.remainingInstallments, 10) || 0);
+            const term = Math.max(1, paid + remaining || 1);
+            const purchase = Number(t.purchaseValue) || 0;
+            const installment = Number(t.installmentValue) || 0;
+            const amount = purchase > 0 ? purchase : (installment > 0 ? installment * term : 0);
+            if (amount <= 0) return 0;
+            const desc = String(t.description || 'Compra extracto').trim();
+            const purchaseDate = anchorDate;
+            card.balance += amount;
+            const txId = 'tx_scan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            const newTx = buildTransactionSchema({
+                id: txId,
+                type: 'expense',
+                amount,
+                cat: `[Crédito] ${desc}`,
+                accId: card.id,
+                date: purchaseDate.toISOString(),
+                note: `[TC] ${desc}${t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''}`,
+                currency: card.currency || state.settings.baseCurrency || 'COP',
+                isCCPurchase: true
+            });
+            if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
+            state.tx.push(newTx);
+            if (typeof saveCloudTx === 'function') saveCloudTx(newTx);
+            const loanId = 'CC_scan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            state.loans.push({
+                id: loanId,
+                name: `${desc} (${card.name})`,
+                total: amount,
+                balance: amount,
+                original_total: amount,
+                original_balance: amount,
+                original_currency: card.currency,
+                rate: card.rate || 0,
+                term,
+                paidQuotas: Math.min(paid, term),
+                isBNPL: false,
+                isCC: true,
+                cardId: card.id,
+                date: purchaseDate.toISOString(),
+                currency: card.currency || state.settings.baseCurrency || 'COP'
+            });
+            return 1;
+        }
+
+        function saveScannedData() {
+            if (!lastScannerReport) return alert('No hay informe de extracto para importar.');
+            const meta = lastScannerReport.meta || {};
+            const txs = lastScannerReport.transactions || [];
+            const card = nexusResolveScannerCreditCard(meta);
+            if (!card) return alert('Crea una tarjeta de crédito o rotativo antes de importar el extracto.');
+            const anchorDate = nexusParseScannerAnchorDate(meta);
+            if (meta.totalDebt > 0 && nexusIsLiabAccount(card)) card.balance = Number(meta.totalDebt);
+            if (meta.totalCreditLimit > 0) card.limit = Number(meta.totalCreditLimit);
+            let imported = 0;
+            let fixedCount = 0;
+            (meta.insurance || []).forEach(i => { fixedCount += nexusImportScannerFixedCharge(card, i, anchorDate, 'Seguro TC'); });
+            (meta.otherCharges || []).forEach(i => { fixedCount += nexusImportScannerFixedCharge(card, i, anchorDate, 'Cargo fijo TC'); });
+            txs.forEach(t => { imported += nexusImportScannerCCTransaction(card, t, anchorDate); });
+            if (!imported && !fixedCount) return alert('No se detectaron compras ni cargos con monto válido.');
             saveState();
             updateDashboard();
-            alert('✅ ' + imported + ' movimiento(s) importados a «' + acc.name + '». Revisa Auditoría.');
+            renderAccountsTab();
+            alert(`✅ Extracto importado en «${card.name}».\n\n${imported} compra(s) en cuotas + ${fixedCount} cargo(s) fijo(s).\nFechas ancladas al periodo de pago (${anchorDate.toLocaleDateString('es-CO')}), sin indexar vencimientos antiguos.\nRevisa Auditoría (proyecciones y amortizados).`);
             switchTab('database');
         }
         // --- RESET SUAVE: Solo registros (conserva cuentas y tareas) ---
