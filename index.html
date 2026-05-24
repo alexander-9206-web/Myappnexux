@@ -2052,7 +2052,7 @@
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto Total</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fl-amount" required class="form-input text-lg font-black text-center text-black cursor-pointer"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="fl-currency" class="form-input text-sm text-center bg-amber-50 border-amber-100 text-amber-900"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="fl-currency" class="form-input text-sm text-center bg-amber-50 border-amber-100 text-amber-900" onchange="nexusRefreshFormCurrencyFields('fl-currency', ['fl-amount'])"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tasa Int. (E.M %)</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fl-rate" class="form-input text-sm cursor-pointer" placeholder="Ej: 1.5"></div>
@@ -2072,7 +2072,7 @@
                 <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Descripción</label><input type="text" id="fp-name" required class="form-input text-sm" placeholder="Ej: Pago a Juan"></div>
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Monto a Pagar</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fp-amount" required class="form-input text-lg font-black text-center text-rose-600 cursor-pointer"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="fp-currency" class="form-input text-sm text-center bg-rose-50 border-rose-100 text-rose-900"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Divisa</label><select id="fp-currency" class="form-input text-sm text-center bg-rose-50 border-rose-100 text-rose-900" onchange="nexusRefreshFormCurrencyFields('fp-currency', ['fp-amount'])"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Prioridad</label><select id="fp-priority" class="form-input text-sm"><option value="high">Alta</option><option value="medium" selected>Media</option><option value="low">Baja</option></select></div>
@@ -2089,6 +2089,7 @@
             <div class="bg-white p-5 pb-6 rounded-b-[2rem] shadow-sm shrink-0">
                 <div class="flex justify-between items-center mb-2"><p class="text-[10px] font-black uppercase text-slate-400 tracking-widest">Calculadora de Entrada</p><button type="button" onclick="closeNumpad()" class="text-slate-400 p-2 -m-2 active:scale-90 transition-transform"><i class="fa-solid fa-xmark text-xl"></i></button></div>
                 <p id="numpad-display" class="text-4xl font-black text-slate-800 text-center truncate py-3 min-h-[60px] flex items-center justify-center">$0</p>
+                <p id="numpad-currency-hint" class="text-[9px] font-black uppercase text-indigo-500 text-center tracking-widest pb-1 hidden"></p>
             </div>
             <div class="p-5 grid grid-cols-4 gap-2.5 flex-1 content-start" ontouchstart="">
                 <button type="button" onclick="numpadPress('C')" class="numpad-key text-red-500">C</button><button type="button" onclick="numpadPress('(')" class="numpad-key text-slate-400">(</button><button type="button" onclick="numpadPress(')')" class="numpad-key text-slate-400">)</button><button type="button" onclick="numpadPress('/')" class="numpad-key text-indigo-500 font-black">÷</button>
@@ -2128,7 +2129,7 @@
                 
                 <div class="grid grid-cols-3 gap-3">
                     <div class="col-span-2"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre</label><input type="text" id="fa-name" required class="form-input text-sm"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda</label><select id="fa-currency" class="form-input text-sm text-center" onchange="toggleAccountIdentityFields()"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda de la cuenta</label><select id="fa-currency" class="form-input text-sm text-center font-bold" onchange="nexusOnAccountCurrencyChange()"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
                 </div>
                 
                 <!-- CAMPOS RESTAURADOS: Alcance, Balance, Tipo y Explicaciones -->
@@ -3834,7 +3835,7 @@
         }
 
         Nexus.bootstrapSession({ currentUser: null, userProfile: {}, state: {}, charts: {} });
-        let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency';
+        let numpadTargetId = null, numpadCurrentValue = "", numpadFormatType = 'currency', numpadDisplayCurrency = null;
         let currentHistAccId = null, currentHistPeriod = 'all', sessionUnlocked = false; 
         let catManageType = 'income', inactivityTimer = null, autoBackupInterval = null, autoBackupTimeout = null, LIVE_RATES = EXCHANGE_RATES;
         let saveStateDebounceTimer = null, cloudUiRefreshTimer = null, p2pAttachDebounceTimer = null, p2pListenersSessionReady = false;
@@ -7153,6 +7154,57 @@
             updateSettings();
         }
 
+        /** Divisa del teclado: aislada por formulario (cuenta, tx, préstamo) — no usa el gestor global salvo fallback. */
+        function nexusResolveNumpadCurrency(targetId, el) {
+            const id = targetId || (el && el.id) || '';
+            if (el && el.dataset && el.dataset.currency) return el.dataset.currency;
+            const pick = (selId) => { const s = $id(selId); return (s && s.value) ? s.value : null; };
+            if (['fa-balance', 'fa-limit', 'fa-virtual-limit'].includes(id)) return pick('fa-currency');
+            if (id === 'f-amount') return pick('f-currency');
+            if (id === 'fl-amount') return pick('fl-currency');
+            if (id === 'fp-amount') return pick('fp-currency');
+            if (id === 'f-proj-budget' || id === 'f-phase-cost') return pick('f-proj-currency');
+            if (id === 'set-ap-limit') return pick('set-ap-currency');
+            if (state.activeCurrency === 'GLOBAL') return state.settings.baseCurrency || 'COP';
+            return state.activeCurrency || state.settings.baseCurrency || 'COP';
+        }
+
+        function nexusRefreshFormCurrencyFields(currencySelectId, fieldIds) {
+            const sel = $id(currencySelectId);
+            const curr = sel ? sel.value : null;
+            if (!curr || !fieldIds || !fieldIds.length) return;
+            fieldIds.forEach(fid => {
+                const el = $id(fid);
+                if (!el || (el.dataset.type || 'currency') !== 'currency') return;
+                const raw = el.dataset.raw;
+                if (raw !== undefined && raw !== '') {
+                    const v = parseFloat(raw);
+                    if (!isNaN(v)) el.value = fmt(v, curr);
+                }
+            });
+        }
+
+        function nexusAccountBalanceLabelStem(type) {
+            if (type === 'credit') return 'Deuda Actual';
+            if (type === 'virtual') return 'Balance (+ a favor, - deuda)';
+            return 'Balance Inicial';
+        }
+
+        function nexusUpdateAccountBalanceLabel() {
+            const lbl = $id('fa-balance-lbl');
+            if (!lbl) return;
+            const type = $id('fa-type') ? $id('fa-type').value : 'liquid';
+            const curr = $id('fa-currency') ? $id('fa-currency').value : '';
+            const stem = nexusAccountBalanceLabelStem(type);
+            lbl.innerText = curr ? `${stem} (${curr})` : stem;
+        }
+
+        function nexusOnAccountCurrencyChange() {
+            if (typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
+            nexusUpdateAccountBalanceLabel();
+            nexusRefreshFormCurrencyFields('fa-currency', ['fa-balance', 'fa-limit', 'fa-virtual-limit']);
+        }
+
         // CALCULADORA NUMPAD
         function openNumpad(id) { 
             if(document.activeElement) { document.activeElement.blur(); }
@@ -7160,6 +7212,7 @@
             el.blur(); 
             numpadCurrentValue = el.dataset.raw !== undefined && el.dataset.raw !== "" ? el.dataset.raw.toString() : ""; 
             numpadFormatType = el.dataset.type || 'currency'; 
+            numpadDisplayCurrency = nexusResolveNumpadCurrency(id, el);
             const modal = $id('numpad-modal'); if(modal) { nexusShowModalInstant(modal); updateNumpadDisplay(); } 
         }
         function numpadPress(char) { 
@@ -7175,17 +7228,40 @@
         function numpadBackspace() { if (!numpadCurrentValue) return; numpadCurrentValue = numpadCurrentValue.slice(0, -1); updateNumpadDisplay(); if(navigator.vibrate) navigator.vibrate(20); }
         function updateNumpadDisplay() { 
             const d = $id('numpad-display'); if(!d) return;
-            if (!numpadCurrentValue || numpadCurrentValue === "") { d.innerText = numpadFormatType === 'currency' ? fmt(0) : "0"; return; } 
+            const hint = $id('numpad-currency-hint');
+            const c = numpadDisplayCurrency || nexusResolveNumpadCurrency(numpadTargetId, numpadTargetId ? $id(numpadTargetId) : null);
+            if (hint) {
+                if (numpadFormatType === 'currency' && c) {
+                    hint.innerText = 'Divisa: ' + c;
+                    hint.classList.remove('hidden');
+                } else {
+                    hint.classList.add('hidden');
+                }
+            }
+            if (!numpadCurrentValue || numpadCurrentValue === "") { d.innerText = numpadFormatType === 'currency' ? fmt(0, c) : "0"; return; } 
             const hasOperators = /[\+\-\*/()]/.test(numpadCurrentValue);
             if (hasOperators) { d.innerText = numpadCurrentValue; } else {
                 let parts = numpadCurrentValue.split('.'); let intPart = parts[0]; let decPart = parts.length > 1 ? parts[1] : null; let vInt = parseInt(intPart || 0, 10); if(isNaN(vInt)) vInt = 0; 
-                let c = state.activeCurrency === 'GLOBAL' ? state.settings.baseCurrency : state.activeCurrency;
-                let formattedInt = numpadFormatType === 'currency' ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: c, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(vInt) : new Intl.NumberFormat('es-CO').format(vInt);
+                const hideDec = state.settings && state.settings.hideDecimals;
+                const frac = (['COP', 'JPY'].includes(c) || hideDec) ? 0 : 2;
+                let formattedInt = numpadFormatType === 'currency' ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: c, maximumFractionDigits: frac, minimumFractionDigits: frac }).format(vInt) : new Intl.NumberFormat('es-CO').format(vInt);
                 d.innerText = formattedInt + (decPart !== null ? ',' + decPart : '');
             }
         }
         function numpadConfirm() { 
-            if (numpadTargetId) { numpadEvaluate(); const el = $id(numpadTargetId); if(el) { let v = parseFloat(numpadCurrentValue); if(isNaN(v)) v = 0; el.dataset.raw = numpadCurrentValue !== "" ? v.toString() : ""; if (numpadCurrentValue === "") el.value = ""; else el.value = numpadFormatType === 'currency' ? fmt(v) : new Intl.NumberFormat('es-CO').format(v); el.dispatchEvent(new Event('change', { bubbles: true })); } } 
+            if (numpadTargetId) {
+                numpadEvaluate();
+                const el = $id(numpadTargetId);
+                const c = numpadDisplayCurrency || nexusResolveNumpadCurrency(numpadTargetId, el);
+                if (el) {
+                    let v = parseFloat(numpadCurrentValue);
+                    if (isNaN(v)) v = 0;
+                    el.dataset.raw = numpadCurrentValue !== "" ? v.toString() : "";
+                    if (numpadCurrentValue === "") el.value = "";
+                    else el.value = numpadFormatType === 'currency' ? fmt(v, c) : new Intl.NumberFormat('es-CO').format(v);
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
             closeNumpad(); if(navigator.vibrate) navigator.vibrate(50); 
         }
         function closeNumpad() { const modal = $id('numpad-modal'); if(!modal) return; nexusHideModalInstant(modal); numpadTargetId = null; }
@@ -8022,7 +8098,7 @@
             if($id('acc-form-title')) $id('acc-form-title').innerText = "Nueva Cuenta";
             if($id('fa-id')) $id('fa-id').value = '';
             if($id('fa-name')) $id('fa-name').value = '';
-            if($id('fa-currency')) $id('fa-currency').value = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : (state.activeCurrency || 'COP');
+            if($id('fa-currency')) $id('fa-currency').value = state.settings.baseCurrency || 'COP';
             const scp = $id('fa-scope'); if(scp) scp.value = 'personal';
             const balEl = $id('fa-balance'); if(balEl) { balEl.value = ''; balEl.dataset.raw = ''; }
             if($id('fa-type')) $id('fa-type').value = 'liquid';
@@ -8032,7 +8108,7 @@
             if($id('fa-bsb')) $id('fa-bsb').value = '';
             if($id('fa-custom-logo-b64')) $id('fa-custom-logo-b64').value = '';
             if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
-            if(typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
+            if(typeof nexusOnAccountCurrencyChange === 'function') nexusOnAccountCurrencyChange();
             ['fa-virtual-limit','fa-virtual-term','fa-virtual-payday','fa-limit','fa-cutoff','fa-payday','fa-rate'].forEach(id => {
                 const el = $id(id); if(el) { el.value=''; el.dataset.raw=''; }
             });
@@ -8051,7 +8127,7 @@
             if($id('fa-currency')) $id('fa-currency').value = acc.currency || 'COP';
             const scp = $id('fa-scope'); if(scp) scp.value = acc.isShared ? 'shared' : 'personal';
             const balEl = $id('fa-balance');
-            if(balEl) { balEl.dataset.raw = String(acc.balance ?? 0); balEl.value = fmt(acc.balance, acc.currency); }
+            if(balEl) { balEl.dataset.raw = String(acc.balance ?? 0); balEl.value = fmt(acc.balance, acc.currency || 'COP'); }
             if($id('fa-type')) $id('fa-type').value = acc.type || 'liquid';
             if($id('fa-color')) $id('fa-color').value = acc.color || '#e2e8f0';
             if($id('fa-bank-url')) $id('fa-bank-url').value = acc.bankUrl || '';
@@ -8068,7 +8144,7 @@
                 } else updateBankLogoPreview();
             }
             toggleCreditFields();
-            if (typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
+            nexusOnAccountCurrencyChange();
             if(acc.type === 'credit') {
                 const limEl = $id('fa-limit'); if(limEl) { limEl.dataset.raw = String(acc.limit||0); limEl.value = fmt(acc.limit||0, acc.currency); }
                 const cutEl = $id('fa-cutoff'); if(cutEl) { cutEl.dataset.raw = String(acc.cutoffDay||1); cutEl.value = acc.cutoffDay||1; }
@@ -8454,13 +8530,11 @@
             const lim = $id('fa-limit'); if(lim) lim.required = false; 
 
             if(type === 'credit') { 
-                if(fields) fields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Deuda Actual'; if(lim) lim.required = true; 
+                if(fields) fields.classList.remove('hidden'); if(lim) lim.required = true; 
             } else if (type === 'virtual') { 
-                if(vFields) vFields.classList.remove('hidden'); if(lbl) lbl.innerText = 'Balance (+ a favor, - deuda)'; 
-            } else { 
-                if(lbl) lbl.innerText = 'Balance Inicial'; 
-            } 
-
+                if(vFields) vFields.classList.remove('hidden'); 
+            }
+            nexusUpdateAccountBalanceLabel();
             if (typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
             
             // APEX FIX: Textos de ayuda dinámicos para cuentas especiales con Aislamiento Patrimonial
