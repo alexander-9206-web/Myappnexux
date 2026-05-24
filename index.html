@@ -2148,9 +2148,10 @@
                     <div>
                         <label class="text-[10px] font-black uppercase text-slate-400 ml-2">Tipo de Bóveda</label>
                         <select id="fa-type" class="form-input text-sm font-bold bg-white" onchange="toggleCreditFields()">
-                            <option value="liquid">Efectivo / Débito</option>
+                            <option value="liquid">Efectivo / Débito (Liquidez)</option>
                             <option value="investment">Inversión (Sinking)</option>
-                            <option value="credit">Tarjeta Crédito</option>
+                            <option value="credit">Tarjeta de Crédito</option>
+                            <option value="rotativo">Crédito Rotativo</option>
                             <option value="virtual">Virtual / App</option>
                             <option value="terceros">Terceros (Aislada)</option>
                         </select>
@@ -2180,14 +2181,15 @@
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Día de Corte</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-cutoff" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 15"></div>
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Día Límite Pago</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-payday" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 30"></div>
                     <div><label class="text-[10px] font-black uppercase text-red-500 ml-2">Tasa E.M. %</label><input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="number" id="fa-rate" class="form-input text-sm text-center bg-white cursor-pointer" placeholder="Ej: 2.1"></div>
-                    <div class="col-span-2 space-y-2 border-t border-red-200/80 pt-3 mt-1">
-                        <label class="text-[10px] font-black uppercase text-emerald-700 ml-1"><i class="fa-solid fa-bolt mr-1"></i>Pago PSE (crédito rotativo)</label>
-                        <select id="fa-pse-link" class="form-input text-sm font-bold bg-white border-emerald-200" onchange="nexusSyncAccountPaymentNicFromPse()">
-                            <option value="">Sin enlace PSE</option>
-                        </select>
-                        <input type="text" id="fa-payment-nic" class="form-input text-sm font-mono font-bold bg-white border-emerald-200" placeholder="NIC / Nº crédito (se copia al pagar)" autocomplete="off">
-                        <p class="text-[8px] font-bold text-red-600/80 ml-1 leading-relaxed">Vincula el portal del banco y el NIC. Desde la tarjeta podrás copiar el NIC y abrir el pago.</p>
-                    </div>
+                </div>
+
+                <div id="rotativo-pse-fields" class="hidden animate-slideUp space-y-2 bg-teal-50 p-4 rounded-2xl border border-teal-100">
+                    <label class="text-[10px] font-black uppercase text-teal-800 ml-1"><i class="fa-solid fa-arrows-rotate mr-1"></i> Pago PSE (rotativo)</label>
+                    <select id="fa-pse-link" class="form-input text-sm font-bold bg-white border-teal-200" onchange="nexusSyncAccountPaymentNicFromPse()">
+                        <option value="">Sin enlace PSE</option>
+                    </select>
+                    <input type="text" id="fa-payment-nic" class="form-input text-sm font-mono font-bold bg-white border-teal-200" placeholder="NIC / Nº crédito (se copia al pagar)" autocomplete="off">
+                    <p class="text-[8px] font-bold text-teal-700/80 ml-1 leading-relaxed">Línea rotativa con portal bancario: vincula el enlace PSE y el NIC para copiar al pagar.</p>
                 </div>
 
                 <div id="virtual-fields" class="hidden animate-slideUp space-y-4 bg-purple-50 p-4 rounded-2xl border border-purple-100">
@@ -5819,7 +5821,7 @@
             const rawDeductAmt = (apContract.original_amount || apContract.amount) / quotas;
             let deductAmt = rawDeductAmt;
             if (apAcc.currency !== apContract.currency) deductAmt = convertCurrency(rawDeductAmt, apContract.currency, apAcc.currency);
-            if (apAcc.type === 'credit') apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
+            if (nexusIsLiabAccount(apAcc)) apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
             const label = (apContract.note || (apContract.cat && apContract.cat.length > 2 ? apContract.cat.substring(2) : apContract.cat) || '').trim();
             const apPayTx = buildTransactionSchema({
                 type: 'expense',
@@ -7196,8 +7198,27 @@
             });
         }
 
+        function nexusIsLiabAccount(accOrType) {
+            const t = typeof accOrType === 'string' ? accOrType : (accOrType && accOrType.type);
+            return t === 'credit' || t === 'rotativo';
+        }
+
+        function nexusIsRotativoAccount(accOrType) {
+            const t = typeof accOrType === 'string' ? accOrType : (accOrType && accOrType.type);
+            return t === 'rotativo';
+        }
+
+        function nexusAccountCardIcon(type) {
+            if (type === 'liquid') return 'fa-wallet';
+            if (type === 'credit') return 'fa-credit-card';
+            if (type === 'rotativo') return 'fa-arrows-rotate';
+            if (type === 'investment') return 'fa-chart-line';
+            if (type === 'virtual') return 'fa-mobile-screen';
+            return 'fa-wallet';
+        }
+
         function nexusAccountBalanceLabelStem(type) {
-            if (type === 'credit') return 'Deuda Actual';
+            if (nexusIsLiabAccount(type)) return 'Deuda Actual';
             if (type === 'virtual') return 'Balance (+ a favor, - deuda)';
             return 'Balance Inicial';
         }
@@ -7282,9 +7303,9 @@
             
             (state.accounts || []).forEach(a => { 
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial
-                let bal = a.type === 'credit' ? -a.balance : a.balance; 
+                let bal = nexusIsLiabAccount(a) ? -a.balance : a.balance; 
                 nwByCurrency[a.currency] = (nwByCurrency[a.currency] || 0) + bal;
-                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+                if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(nexusIsLiabAccount(a) ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
             
             (state.loans || []).forEach(l => { 
@@ -7654,14 +7675,14 @@
             let html = '';
             
             for(let curr in groups) {
-                const accs = groups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
+                const accs = groups[curr]; let total = 0; accs.forEach(a => { if(nexusIsLiabAccount(a)) total -= a.balance; else total += a.balance; });
                 const grpTotal = fmt(total, curr);
                 html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm mb-4 min-w-0"><div class="border-b border-slate-100/50 pb-3 mb-3 flex justify-between items-center gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-slate-500 shrink-0">Divisa ${curr}</h3><div class="acc-vault-amt-wrap nexus-amount-box"><span class="acc-vault-amt nexus-amount-fit font-black ${total>=0?'theme-val-inc':'theme-val-exp'}" title="${grpTotal}">${grpTotal}</span></div></div><div class="space-y-3">`;
                 accs.forEach(a => { 
-                    const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-chart-line' : 'fa-chart-line'); 
-                    const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
+                    const icon = nexusAccountCardIcon(a.type); 
+                    const color = nexusIsLiabAccount(a) ? 'theme-val-exp' : 'theme-text'; 
                     const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm">` : `<i class="fa-solid ${icon} text-[10px] text-slate-400 w-5 text-center"></i>`;
-                    const rowAmt = `${a.type==='credit'?'-':''}${fmt(a.balance, curr)}`;
+                    const rowAmt = `${nexusIsLiabAccount(a)?'-':''}${fmt(a.balance, curr)}`;
                     html += `<div onclick="switchTab('accounts')" class="p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors min-w-0"><div class="flex items-center justify-between gap-2 min-w-0"><div class="flex items-center gap-2 min-w-0 flex-1">${iconHtml}<p class="text-[11px] font-black uppercase theme-text truncate">${a.name}</p></div><div class="acc-vault-amt-wrap nexus-amount-box"><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${rowAmt}">${rowAmt}</span></div></div></div>`; 
                 });
                 html += `</div></div>`;
@@ -7670,13 +7691,13 @@
             // APEX FIX: Aislamiento para Cuentas Compartidas P2P en Dashboard
             if(Object.keys(sharedGroups).length > 0) {
                 for(let curr in sharedGroups) {
-                    const accs = sharedGroups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
+                    const accs = sharedGroups[curr]; let total = 0; accs.forEach(a => { if(nexusIsLiabAccount(a)) total -= a.balance; else total += a.balance; });
                     const grpTotalSh = fmt(total, curr);
                     html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm border-purple-100/50 bg-slate-50/50 mb-4 min-w-0"><div class="border-b border-slate-200/50 pb-3 mb-3 flex justify-between items-center gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-purple-600 shrink-0"><i class="fa-solid fa-link mr-1"></i> Compartidas ${curr}</h3><div class="acc-vault-amt-wrap nexus-amount-box"><span class="acc-vault-amt nexus-amount-fit font-black ${total>=0?'theme-val-inc':'theme-val-exp'}" title="${grpTotalSh}">${grpTotalSh}</span></div></div><div class="space-y-3">`;
                     accs.forEach(a => { 
-                        const icon = 'fa-link'; const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
+                        const icon = 'fa-link'; const color = nexusIsLiabAccount(a) ? 'theme-val-exp' : 'theme-text'; 
                         const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm border border-purple-200">` : `<i class="fa-solid ${icon} text-[10px] text-purple-400 w-5 text-center"></i>`;
-                        const rowAmt = `${a.type==='credit'?'-':''}${fmt(a.balance, curr)}`;
+                        const rowAmt = `${nexusIsLiabAccount(a)?'-':''}${fmt(a.balance, curr)}`;
                         html += `<div onclick="switchTab('accounts')" class="p-2 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-0"><div class="flex items-center justify-between gap-2 min-w-0"><div class="flex items-center gap-2 min-w-0 flex-1">${iconHtml}<p class="text-[11px] font-black uppercase theme-text truncate">${a.name}</p></div><div class="acc-vault-amt-wrap nexus-amount-box"><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${rowAmt}">${rowAmt}</span></div></div></div>`; 
                     });
                     html += `</div></div>`;
@@ -7778,7 +7799,7 @@
                 if(a.type === 'terceros' || a.isShared) return; 
 
                 const balInBase = convertCurrency(a.balance, a.currency, bC);
-                if(a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
+                if(nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
                 else totalAssets += balInBase; 
             });
             
@@ -7790,6 +7811,7 @@
             }
 
             const groups = {};
+            const rotativoGroups = {};
             const virtualGroups = {};
             const tercerosGroups = {}; // APEX FIX: Contenedor para Cuentas de Terceros
             const sharedGroups = {}; // APEX FIX: Contenedor aislado para Cuentas Compartidas P2P
@@ -7799,6 +7821,9 @@
                 if (a.isShared) {
                     if(!sharedGroups[curr]) sharedGroups[curr] = [];
                     sharedGroups[curr].push(a);
+                } else if (a.type === 'rotativo') {
+                    if(!rotativoGroups[curr]) rotativoGroups[curr] = [];
+                    rotativoGroups[curr].push(a);
                 } else if (a.type === 'virtual') {
                     if(!virtualGroups[curr]) virtualGroups[curr] = [];
                     virtualGroups[curr].push(a);
@@ -7822,7 +7847,7 @@
 
                     const accs = groups[curr];
                     let subTotal = 0;
-                    accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
+                    accs.forEach(a => { if(nexusIsLiabAccount(a)) subTotal -= a.balance; else subTotal += a.balance; });
                     
                     html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-100/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-slate-500 flex items-center shrink-0">Divisa ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
@@ -7840,9 +7865,9 @@
                         if(accsByType[t].length > 0) {
                             html += `<p class="text-[9px] font-black uppercase text-slate-400 mt-2 mb-1 tracking-widest pl-2">${typeLabels[t]}</p>`;
                             accsByType[t].forEach(a => {
-                                const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
-                                const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
-                                const sign = a.type === 'credit' ? '-' : '';
+                                const icon = nexusAccountCardIcon(a.type);
+                                const color = nexusIsLiabAccount(a) ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                                const sign = nexusIsLiabAccount(a) ? '-' : '';
                                 const detailText = nexusAccountMetaLine(a, curr);
                                 
                                 // APEX FIX: Coloración solo en borde de la tarjeta y soporte para Logo Bancario
@@ -7857,6 +7882,32 @@
                         }
                     });
                     
+                    html += `</div></div>`;
+                }
+            }
+
+            if (Object.keys(rotativoGroups).length > 0) {
+                html += `<div><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3 mt-2"><i class="fa-solid fa-arrows-rotate text-teal-600 mr-1"></i> Créditos Rotativos</h3></div>`;
+                for(let curr in rotativoGroups) {
+                    const gId = `grp-rot-${curr}`;
+                    const isOpen = state.ui && state.ui[`acc_view_${gId}`] === true;
+                    const eyeIcon = isOpen ? 'fa-eye text-teal-600' : 'fa-eye-slash text-slate-400';
+                    const dispCls = isOpen ? '' : 'hidden';
+                    const accs = rotativoGroups[curr];
+                    let subTotal = 0;
+                    accs.forEach(a => { subTotal -= a.balance; });
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-teal-100/60 bg-teal-50/20 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-teal-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-teal-800 flex items-center shrink-0">Rotativos ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black theme-val-exp" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
+                    accs.forEach(a => {
+                        const icon = nexusAccountCardIcon(a.type);
+                        const color = 'theme-val-exp';
+                        const sign = '-';
+                        const detailText = nexusAccountMetaLine(a, curr);
+                        const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
+                        const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #ccfbf1; color: #0d9488;';
+                        const iconContent = a.logoUrl ? `<img src="${a.logoUrl}" class="w-full h-full object-cover rounded-full bg-white p-0.5 shadow-sm">` : `<i class="fa-solid ${icon} text-[14px]"></i>`;
+                        const p2pBtn = nexusAccountP2pBtnHtml(a);
+                        html += buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn);
+                    });
                     html += `</div></div>`;
                 }
             }
@@ -7939,14 +7990,14 @@
 
                     const accs = sharedGroups[curr];
                     let subTotal = 0;
-                    accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
+                    accs.forEach(a => { if(nexusIsLiabAccount(a)) subTotal -= a.balance; else subTotal += a.balance; });
                     
                     html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center shrink-0">Compartidas ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
                     accs.forEach(a => {
                         const icon = 'fa-link';
-                        const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
-                        const sign = a.type === 'credit' ? '-' : '';
+                        const color = nexusIsLiabAccount(a) ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
+                        const sign = nexusIsLiabAccount(a) ? '-' : '';
                         const detailText = nexusAccountMetaLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
@@ -8105,7 +8156,7 @@
             const idSub = nexusAccountIdentitySubtitle(a);
             const idLine = idSub ? `<p class="text-[9px] font-bold text-slate-600 font-mono mt-0.5 truncate" title="${idSub.replace(/"/g, '&quot;')}">${idSub}</p>` : '';
             const metaLine = detailText ? `<p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${detailText}</p>` : '';
-            const creditPayBtn = (a.type === 'credit' && (a.pseLinkId || a.paymentNic))
+            const creditPayBtn = (nexusIsRotativoAccount(a) && (a.pseLinkId || a.paymentNic))
                 ? `<button type="button" onclick="openAccountCreditPSEPay('${safeId}')" class="text-emerald-600 hover:text-emerald-700 transition-colors p-2 min-h-[32px]" title="Pagar tarjeta vía PSE"><i class="fa-solid fa-bolt text-[11px]"></i></button>`
                 : '';
             return `<div class="acc-vault-card flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] transition-all shadow-sm min-w-0 max-w-full overflow-hidden" style="${customStyle}"><div class="flex justify-between items-center gap-2 min-w-0"><div role="button" tabindex="0" onclick="toggleAccountTx('${safeId}')" class="flex items-center gap-3 min-w-0 flex-1 pr-1 cursor-pointer"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div class="min-w-0 flex-1"><p class="text-xs font-black uppercase theme-text truncate">${a.name}</p>${idLine}${metaLine}</div></div><div class="acc-vault-amt-wrap nexus-amount-box shrink min-w-0"><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${balFull}">${balFull}</span></div><div class="flex flex-col gap-1 shrink-0 relative z-10" onclick="event.stopPropagation()">${p2pBtn}${creditPayBtn}<button type="button" onclick="editAccount('${safeId}')" class="text-slate-400 hover:text-blue-600 transition-colors p-2 min-w-[32px] min-h-[32px]" title="Editar cuenta"><i class="fa-solid fa-pen text-[11px]"></i></button><button type="button" onclick="openAccountHistory('${safeId}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-2 min-h-[32px]" title="Historial"><i class="fa-solid fa-clock-rotate-left text-[11px]"></i></button></div></div><div id="acc-tx-${safeId}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[400px] overflow-y-auto hide-scrollbar"></div></div>`;
@@ -8174,14 +8225,16 @@
             }
             toggleCreditFields();
             nexusOnAccountCurrencyChange();
-            if(acc.type === 'credit') {
+            if(acc.type === 'credit' || acc.type === 'rotativo') {
                 const limEl = $id('fa-limit'); if(limEl) { limEl.dataset.raw = String(acc.limit||0); limEl.value = fmt(acc.limit||0, acc.currency); }
                 const cutEl = $id('fa-cutoff'); if(cutEl) { cutEl.dataset.raw = String(acc.cutoffDay||1); cutEl.value = acc.cutoffDay||1; }
                 const payEl = $id('fa-payday'); if(payEl) { payEl.dataset.raw = String(acc.payDay||15); payEl.value = acc.payDay||15; }
                 const rateEl = $id('fa-rate'); if(rateEl) { rateEl.dataset.raw = String(acc.rate||0); rateEl.value = acc.rate||0; }
-                if (typeof populateAccountPseSelect === 'function') populateAccountPseSelect();
-                const pseSel = $id('fa-pse-link'); if (pseSel) pseSel.value = acc.pseLinkId || '';
-                const nicEl = $id('fa-payment-nic'); if (nicEl) nicEl.value = acc.paymentNic || '';
+                if (acc.type === 'rotativo') {
+                    if (typeof populateAccountPseSelect === 'function') populateAccountPseSelect();
+                    const pseSel = $id('fa-pse-link'); if (pseSel) pseSel.value = acc.pseLinkId || '';
+                    const nicEl = $id('fa-payment-nic'); if (nicEl) nicEl.value = acc.paymentNic || '';
+                }
             } else if(acc.type === 'virtual') {
                 const vLimEl = $id('fa-virtual-limit'); if(vLimEl) { vLimEl.dataset.raw = String(acc.limit||0); vLimEl.value = fmt(acc.limit||0, acc.currency); }
                 const vTerm = $id('fa-virtual-term'); if(vTerm) { vTerm.dataset.raw = String(acc.virtualTerm||''); vTerm.value = acc.virtualTerm||''; }
@@ -8240,7 +8293,7 @@
             const amount = acc.balance;
             let txType = '';
             
-            if (acc.type === 'credit') {
+            if (nexusIsLiabAccount(acc)) {
                 txType = amount > 0 ? 'income' : 'expense';
             } else {
                 txType = amount > 0 ? 'expense' : 'income';
@@ -8305,6 +8358,7 @@
                 else if(a.type === 'terceros') badgeColor = 'bg-orange-50 text-orange-600 border-orange-200';
                 else if(a.type === 'virtual') badgeColor = 'bg-indigo-50 text-indigo-600 border-indigo-200';
                 else if(a.type === 'credit') badgeColor = 'bg-red-50 text-red-600 border-red-200';
+                else if(a.type === 'rotativo') badgeColor = 'bg-teal-50 text-teal-700 border-teal-200';
 
                 return `<div class="flex items-center justify-between p-3 bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-200 rounded-[1.25rem] shadow-sm transition-colors">
                     <div class="flex items-center gap-3 overflow-hidden">
@@ -8467,7 +8521,7 @@
             if (!acc) return '';
             const bits = [];
             if (acc.accountNumber) {
-                const lbl = (acc.type === 'credit' || acc.type === 'virtual') ? 'Tarjeta' : 'Cuenta';
+                const lbl = (nexusIsLiabAccount(acc) || acc.type === 'virtual') ? 'Tarjeta' : 'Cuenta';
                 bits.push(`${lbl} ${String(acc.accountNumber).trim()}`);
             }
             if (acc.bsb) bits.push(`BSB ${String(acc.bsb).trim()}`);
@@ -8476,7 +8530,8 @@
 
         function nexusAccountMetaLine(acc, curr) {
             if (!acc) return '';
-            if (acc.type === 'credit') return `Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
+            if (nexusIsLiabAccount(acc)) return `TC · Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
+            if (acc.type === 'rotativo') return `Rotativo · Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
             if (acc.type === 'virtual') return `App: ${acc.platform ? acc.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(acc.limit || 0, curr)}`;
             if (acc.isShared) return `Conexión P2P activa`;
             if (acc.type === 'terceros') return `Cuenta externa aislada`;
@@ -8651,11 +8706,11 @@
             const bsbLbl = $id('fa-bsb-lbl');
             const bsbInp = $id('fa-bsb');
             if (accLbl) {
-                if (type === 'credit' || type === 'virtual') accLbl.innerText = 'Nº tarjeta (referencia)';
+                if (nexusIsLiabAccount(type) || type === 'virtual') accLbl.innerText = 'Nº tarjeta (referencia)';
                 else accLbl.innerText = 'Nº cuenta (referencia)';
             }
             if (accInp) {
-                if (type === 'credit') accInp.placeholder = 'Ej: •••• 4242 o últimos dígitos';
+                if (type === 'credit' || type === 'rotativo') accInp.placeholder = 'Ej: •••• 4242 o últimos dígitos';
                 else if (type === 'virtual') accInp.placeholder = 'Ej: alias o últimos dígitos';
                 else if (curr === 'EUR') accInp.placeholder = 'Ej: IBAN o número de cuenta';
                 else accInp.placeholder = 'Ej: 1234567890';
@@ -8679,15 +8734,19 @@
         function toggleCreditFields() { 
             const typeEl = $id('fa-type'); const type = typeEl ? typeEl.value : 'liquid'; 
             const scpEl = $id('fa-scope'); const scope = scpEl ? scpEl.value : 'personal';
-            const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const lbl = $id('fa-balance-lbl'); 
+            const fields = $id('credit-fields'); const vFields = $id('virtual-fields'); const rotPse = $id('rotativo-pse-fields');
             const helper = $id('fa-type-helper');
 
-            if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden'); 
+            if(fields) fields.classList.add('hidden'); if(vFields) vFields.classList.add('hidden');
+            if(rotPse) rotPse.classList.add('hidden');
             if(helper) { helper.classList.add('hidden'); helper.innerHTML = ''; }
             const lim = $id('fa-limit'); if(lim) lim.required = false; 
 
-            if(type === 'credit') { 
+            if(type === 'credit' || type === 'rotativo') { 
                 if(fields) fields.classList.remove('hidden'); if(lim) lim.required = true;
+            }
+            if(type === 'rotativo') {
+                if(rotPse) rotPse.classList.remove('hidden');
                 if (typeof populateAccountPseSelect === 'function') populateAccountPseSelect();
             } else if (type === 'virtual') { 
                 if(vFields) vFields.classList.remove('hidden'); 
@@ -8702,6 +8761,9 @@
                     helper.classList.remove('hidden');
                 } else if (type === 'terceros') {
                     helper.innerHTML = '<i class="fa-solid fa-users text-orange-500 mr-1"></i> <b>Cuenta de Terceros:</b> Dinero que administras pero no es tuyo (caja menor de tu empresa, encargos, remesas). Totalmente aislada de tu patrimonio y KPIs personales.';
+                    helper.classList.remove('hidden');
+                } else if (type === 'rotativo') {
+                    helper.innerHTML = '<i class="fa-solid fa-arrows-rotate text-teal-600 mr-1"></i> <b>Crédito rotativo:</b> Línea o cupo revolvente del banco con pago PSE y NIC. Distinto de la tarjeta de crédito clásica.';
                     helper.classList.remove('hidden');
                 }
             }
@@ -8761,7 +8823,7 @@
             const displayName = isShared && name && !name.startsWith('👥') ? ('👥 ' + name) : name;
             let pseLinkId = null;
             let paymentNic = '';
-            if (type === 'credit') {
+            if (type === 'rotativo') {
                 pseLinkId = ($id('fa-pse-link') && $id('fa-pse-link').value) ? $id('fa-pse-link').value : null;
                 paymentNic = $id('fa-payment-nic') ? String($id('fa-payment-nic').value || '').trim() : '';
                 if (pseLinkId && paymentNic) {
@@ -8772,6 +8834,7 @@
                     pseLinkId = pl.id;
                 }
             }
+            const usesCardFields = type === 'credit' || type === 'rotativo';
             const newAcc = { 
                 id: newId,
                 name: displayName,
@@ -8781,10 +8844,10 @@
                 owner: isShared ? ownerEmail : undefined,
                 ownerEmail: isShared ? ownerEmail : undefined,
                 syncedOnce: isShared ? true : undefined,
-                limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (parseFloat($id('fa-limit').dataset.raw) || 0), 
-                cutoffDay: parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0, 
-                payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday') ? $id('fa-virtual-payday').dataset.raw : 0) || 0) : (parseInt($id('fa-payday') ? $id('fa-payday').dataset.raw : 0) || 0), 
-                rate: parseFloat($id('fa-rate') ? $id('fa-rate').dataset.raw : 0) || 0, 
+                limit: type === 'virtual' ? (parseFloat($id('fa-virtual-limit').dataset.raw) || 0) : (usesCardFields ? (parseFloat($id('fa-limit').dataset.raw) || 0) : 0), 
+                cutoffDay: usesCardFields ? (parseInt($id('fa-cutoff') ? $id('fa-cutoff').dataset.raw : 0) || 0) : 0, 
+                payDay: type === 'virtual' ? (parseInt($id('fa-virtual-payday') ? $id('fa-virtual-payday').dataset.raw : 0) || 0) : (usesCardFields ? (parseInt($id('fa-payday') ? $id('fa-payday').dataset.raw : 0) || 0) : 0), 
+                rate: usesCardFields ? (parseFloat($id('fa-rate') ? $id('fa-rate').dataset.raw : 0) || 0) : 0, 
                 platform: type === 'virtual' ? ($id('fa-virtual-platform') ? $id('fa-virtual-platform').value : null) : null, 
                 virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term') ? $id('fa-virtual-term').dataset.raw : 0) || 0) : null, 
                 color: color,
@@ -8792,8 +8855,8 @@
                 logoUrl: logoUrl,
                 accountNumber: accountNumber,
                 bsb: bsb,
-                pseLinkId: type === 'credit' ? pseLinkId : null,
-                paymentNic: type === 'credit' ? paymentNic : ''
+                pseLinkId: type === 'rotativo' ? pseLinkId : null,
+                paymentNic: type === 'rotativo' ? paymentNic : ''
             }; 
             
             const wasNew = !id;
@@ -9520,7 +9583,7 @@
             }
 
             const ccCont = $id('cc-term-container'); 
-            if(acc && acc.type === 'credit' && type === 'expense') { 
+            if(acc && nexusIsLiabAccount(acc) && type === 'expense') { 
                 if(ccCont) ccCont.classList.remove('hidden'); 
             } else { 
                 if(ccCont) ccCont.classList.add('hidden'); 
@@ -9821,13 +9884,13 @@
             if (tx.type === 'transfer') {
                 const oOrig = state.accounts.find(a => a.id === tx.accId);
                 const oDest = state.accounts.find(a => a.id === tx.toAccId);
-                if (oOrig) { if (oOrig.type === 'credit') oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
-                if (oDest) { if (oDest.type === 'credit') oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
+                if (oOrig) { if (nexusIsLiabAccount(oOrig)) oOrig.balance -= tx.amount; else oOrig.balance += tx.amount; }
+                if (oDest) { if (nexusIsLiabAccount(oDest)) oDest.balance += tx.amount; else oDest.balance -= tx.amount; }
             } else {
                 const acc = state.accounts.find(a => a.id === tx.accId);
                 if (acc && tx.type !== 'afterpay') {
-                    if (tx.type === 'income') { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
-                    if (tx.type === 'expense') { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                    if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                    if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
                 }
             }
         }
@@ -9842,11 +9905,11 @@
                     return;
                 }
                 if (tx.type === 'transfer') {
-                    if (tx.accId === acc.id) { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
-                    if (tx.toAccId === acc.id) { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                    if (tx.accId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                    if (tx.toAccId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
                 } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
-                    if (tx.type === 'income') { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
-                    if (tx.type === 'expense') { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                    if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                    if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
                 }
             };
             if (tx.type === 'transfer') {
@@ -11108,7 +11171,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             const acc = state.accounts.find(a => a.id === accId); 
             const destAcc = state.accounts.find(a => a.id === destAccId); 
 
-            if(!id && type === 'expense' && acc && acc.type === 'credit') {
+            if(!id && type === 'expense' && acc && nexusIsLiabAccount(acc)) {
                 const termStr = $id('f-cc-term').dataset.raw; const term = parseInt(termStr);
                 if (term && term > 1) {
                     const available = (acc.limit || 0) - acc.balance; 
@@ -11137,11 +11200,11 @@ ${JSON.stringify(dataToAnalyze)}`;
                     if (oldTx.type === 'transfer') {
                         const oOrig = state.accounts.find(a => a.id === oldTx.accId);
                         const oDest = state.accounts.find(a => a.id === oldTx.toAccId);
-                        if(oOrig) { if(oOrig.type === 'credit') oOrig.balance -= oldTx.amount; else oOrig.balance += oldTx.amount; }
-                        if(oDest) { if(oDest.type === 'credit') oDest.balance += oldTx.amount; else oDest.balance -= oldTx.amount; }
+                        if(oOrig) { if(nexusIsLiabAccount(oOrig)) oOrig.balance -= oldTx.amount; else oOrig.balance += oldTx.amount; }
+                        if(oDest) { if(nexusIsLiabAccount(oDest)) oDest.balance += oldTx.amount; else oDest.balance -= oldTx.amount; }
                     } else if (oldTx.accId) { 
                         const oldAcc = state.accounts.find(a => a.id === oldTx.accId); 
-                        if(oldAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if(oldAcc.type === 'credit') oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if(oldAcc.type === 'credit') oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } 
+                        if(oldAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if (nexusIsLiabAccount(oldAcc)) oldAcc.balance += oldTx.amount; else oldAcc.balance -= oldTx.amount; } if(oldTx.type === 'expense') { if (nexusIsLiabAccount(oldAcc)) oldAcc.balance -= oldTx.amount; else oldAcc.balance += oldTx.amount; } } 
                     }
                     
                     oldTx.amount = amount; oldTx.cat = cat; oldTx.accId = accId;
@@ -11169,21 +11232,21 @@ ${JSON.stringify(dataToAnalyze)}`;
                     if (type === 'transfer') {
                         const nOrig = state.accounts.find(a => a.id === accId);
                         const nDest = state.accounts.find(a => a.id === destAccId);
-                        if(nOrig) { if(nOrig.type === 'credit') nOrig.balance += amount; else nOrig.balance -= amount; }
-                        if(nDest) { if(nDest.type === 'credit') nDest.balance -= amount; else nDest.balance += amount; }
+                        if(nOrig) { if(nexusIsLiabAccount(nOrig)) nOrig.balance += amount; else nOrig.balance -= amount; }
+                        if(nDest) { if(nexusIsLiabAccount(nDest)) nDest.balance -= amount; else nDest.balance += amount; }
                     } else {
                         const newAcc = state.accounts.find(a => a.id === oldTx.accId);
-                        if(newAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if(newAcc.type === 'credit') newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if(newAcc.type === 'credit') newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
+                        if(newAcc && oldTx.type !== 'afterpay') { if(oldTx.type === 'income') { if (nexusIsLiabAccount(newAcc)) newAcc.balance -= oldTx.amount; else newAcc.balance += oldTx.amount; } if(oldTx.type === 'expense') { if (nexusIsLiabAccount(newAcc)) newAcc.balance += oldTx.amount; else newAcc.balance -= oldTx.amount; } }
                     }
                     saveCloudTx(oldTx);
                 }
             } else {
                 if(type === 'transfer') {
-                    if(acc) { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; }
-                    if(destAcc) { if(destAcc.type === 'credit') destAcc.balance -= amount; else destAcc.balance += amount; }
+                    if(acc) { if(nexusIsLiabAccount(acc)) acc.balance += amount; else acc.balance -= amount; }
+                    if(destAcc) { if(nexusIsLiabAccount(destAcc)) destAcc.balance -= amount; else destAcc.balance += amount; }
                 } else if(acc && type !== 'afterpay') { 
-                    if(type === 'income') { if(acc.type === 'credit') acc.balance -= amount; else acc.balance += amount; } 
-                    if(type === 'expense') { if(acc.type === 'credit') acc.balance += amount; else acc.balance -= amount; } 
+                    if(type === 'income') { if(nexusIsLiabAccount(acc)) acc.balance -= amount; else acc.balance += amount; } 
+                    if(type === 'expense') { if(nexusIsLiabAccount(acc)) acc.balance += amount; else acc.balance -= amount; } 
                 } 
                 
                 const rawTx = { type, amount, cat, accId: accId, toAccId: type === 'transfer' ? destAccId : null, date: new Date(`${date}T${time}`).toISOString(), note, currency: type === 'afterpay' ? apCurr : selectedCurr, costType: costType, projectId: projectId || null }; 
@@ -11372,7 +11435,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const balInBase = convertCurrency(a.balance, a.currency, bC);
                 if (a.type === 'liquid' || (a.type === 'virtual' && a.balance >= 0)) liquidAssets += balInBase; 
                 else if (a.type === 'investment') investmentAssets += balInBase; 
-                else if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
+                else if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totalLiabilities += Math.abs(balInBase); 
             });
             
             let nonCurrentLiabilities = 0;
@@ -12897,7 +12960,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             let totAssets = 0; let totLiab = 0;
             (state.accounts||[]).forEach(a => { 
                 if (a.isShared || a.type === 'terceros') return; // APEX FIX: Aislamiento Patrimonial Estricto
-                if (a.type === 'credit' || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(a.type === 'credit' ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
+                if (nexusIsLiabAccount(a) || (a.type === 'virtual' && a.balance < 0)) totLiab += Math.abs(convertCurrency(nexusIsLiabAccount(a) ? a.balance : a.balance, a.currency, bC)); else totAssets += convertCurrency(a.balance, a.currency, bC); 
             });
             (state.loans||[]).forEach(l => { totLiab += convertCurrency(l.balance, l.currency, bC); });
             
@@ -13327,7 +13390,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             if(acc.currency !== tx.currency) deductAmt = convertCurrency(rawDeductAmt, tx.currency, acc.currency);
             
             tx.apPaid = (tx.apPaid || 0) + 1; 
-            if (acc.type === 'credit') acc.balance += deductAmt; else acc.balance -= deductAmt;
+            if (nexusIsLiabAccount(acc)) acc.balance += deductAmt; else acc.balance -= deductAmt;
             
             const newTx = buildTransactionSchema({ type: 'expense', amount: rawDeductAmt, cat: tx.cat, accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${tx.note ? tx.note : tx.cat.substring(2).trim()} (${tx.apPaid}/${quotas})`, currency: tx.currency, costType: 'fixed' });
             newTx.apParentId = tx.id;
@@ -15854,7 +15917,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 };
                 const tx = buildTransactionSchema({ ...rawTx, id: 'tx_scan_' + Date.now() + '_' + imported });
                 state.tx.push(tx);
-                if (acc.type === 'credit') acc.balance += amt; else acc.balance -= amt;
+                if (nexusIsLiabAccount(acc)) acc.balance += amt; else acc.balance -= amt;
                 imported++;
             });
             saveState();
@@ -16857,22 +16920,22 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
         function nexusRevertSharedTxOnBalance(acc, tx) {
             if (!acc || !tx || !acc.syncedOnce) return;
             if (tx.type === 'transfer') {
-                if (tx.accId === acc.id) { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
-                if (tx.toAccId === acc.id) { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                if (tx.accId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                if (tx.toAccId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
             } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
-                if (tx.type === 'income') { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
-                if (tx.type === 'expense') { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
             }
         }
 
         function nexusApplySharedTxOnBalance(acc, tx) {
             if (!acc || !tx || !acc.syncedOnce) return;
             if (tx.type === 'transfer') {
-                if (tx.accId === acc.id) { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
-                if (tx.toAccId === acc.id) { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                if (tx.accId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                if (tx.toAccId === acc.id) { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
             } else if (tx.accId === acc.id && tx.type !== 'afterpay') {
-                if (tx.type === 'income') { if (acc.type === 'credit') acc.balance -= tx.amount; else acc.balance += tx.amount; }
-                if (tx.type === 'expense') { if (acc.type === 'credit') acc.balance += tx.amount; else acc.balance -= tx.amount; }
+                if (tx.type === 'income') { if (nexusIsLiabAccount(acc)) acc.balance -= tx.amount; else acc.balance += tx.amount; }
+                if (tx.type === 'expense') { if (nexusIsLiabAccount(acc)) acc.balance += tx.amount; else acc.balance -= tx.amount; }
             }
         }
 
