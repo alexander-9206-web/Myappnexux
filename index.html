@@ -5908,12 +5908,23 @@
                 if (t.isProjected || t.type !== 'expense') return false;
                 const m = (t.note || '').match(/\((\d+)\/(\d+)\)/);
                 if (!m || parseInt(m[1], 10) !== quotaOneBased) return false;
+                if (t.apParentId && t.apParentId !== parent.id) return false;
                 if (t.apParentId === parent.id) return true;
                 if (!/^\[(Abono|Pago Inicial)\]/i.test(t.note || '')) return false;
                 if (parent.cat && t.cat && t.cat !== parent.cat) return false;
                 const tLabel = (t.note || '').replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
                 return !label || tLabel === label || (label && tLabel.includes(label));
             }) || null;
+        }
+
+        /** Cronograma Afterpay en auditoría: no recortar por rango de fechas (control futuro). */
+        function nexusAfterpayAuditExemptFromDateFilter(tx) {
+            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsAfterpayAuditSynthetic(tx)) return true;
+            if (nexusIsAfterpayPaymentTx(tx)) {
+                const parent = nexusFindAfterpayParentForPayment(tx);
+                return !!(parent && !parent.apRecon && (parent.apPaid || 0) < (parent.apQuotas || 4));
+            }
+            return false;
         }
 
         /** Cronograma Afterpay para auditoría: compra BNPL + amortizado + cuotas futuras. */
@@ -5950,9 +5961,15 @@
 
                 for (let i = 0; i < quotas; i++) {
                     const qNum = i + 1;
-                    if (nexusFindAfterpayPaymentForQuota(tx, qNum)) continue;
+                    const paidTx = nexusFindAfterpayPaymentForQuota(tx, qNum);
+                    if (paidTx) continue;
                     const isPaidSlot = i < paid;
+                    const isFirstQuota = qNum === 1;
                     const pId = isPaidSlot ? ('audit_ap_amort_' + tx.id + '_' + i) : ('proj_ap_' + tx.id + '_' + i);
+                    let noteLine;
+                    if (isPaidSlot) noteLine = `[Amortizado] ${label} (${qNum}/${quotas})`;
+                    else if (isFirstQuota) noteLine = `[Pago inicial proyectado] ${label} (${qNum}/${quotas})`;
+                    else noteLine = `[Pendiente] ${label} (${qNum}/${quotas})`;
                     rows.push({
                         id: pId,
                         type: 'expense',
@@ -5964,11 +5981,11 @@
                         cat: tx.cat,
                         accId: tx.accId,
                         date: nexusComputeAfterpayQuotaDate(tx, i).toISOString(),
-                        note: isPaidSlot ? `[Amortizado] ${label} (${qNum}/${quotas})` : `[Pendiente] ${label} (${qNum}/${quotas})`,
+                        note: noteLine,
                         isProjected: true,
                         apParentId: tx.id,
                         apQuotaIndex: i,
-                        apAuditRole: isPaidSlot ? 'amortized' : 'projected'
+                        apAuditRole: isPaidSlot ? 'amortized' : (isFirstQuota ? 'first_projected' : 'projected')
                     });
                 }
             });
@@ -5987,6 +6004,7 @@
             if (nexusIsAfterpayPaymentTx(tx)) {
                 const parent = nexusFindAfterpayParentForPayment(tx);
                 if (parent && parent.apRecon) return false;
+                return true;
             }
             return true;
         }
@@ -9652,7 +9670,7 @@
                 .filter(t => !t.isCCPurchase && t.type !== 'afterpay')
                 .map(t => {
                     const tx = {...t, original_amount: t.amount, original_currency: t.currency};
-                    tx.renderType = tx.type;
+                    tx.renderType = nexusIsAfterpayPaymentTx(tx) ? 'afterpay' : tx.type;
                     const accOrig = state.accounts.find(a => a.id === tx.accId);
                     const accDest = state.accounts.find(a => a.id === tx.toAccId);
                     const isOrigIso = accOrig && (accOrig.isShared || accOrig.type === 'terceros');
@@ -9672,10 +9690,8 @@
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
             const cDisplay = state.settings.baseCurrency || 'COP';
-            let projTxs = getEnrichedTx().filter(t => t.isProjected);
-            const apAuditSchedule = nexusBuildAfterpayAuditSchedule(cDisplay);
-            const projIds = new Set(projTxs.map(t => t.id));
-            apAuditSchedule.forEach(r => { if (!projIds.has(r.id)) { projTxs.push(r); projIds.add(r.id); } });
+            let projTxs = getEnrichedTx().filter(t => t.isProjected && !String(t.id || '').startsWith('proj_ap_'));
+            projTxs.push(...nexusBuildAfterpayAuditSchedule(cDisplay));
             state.activeCurrency = tempCurr;
 
             // Flujo real + proyecciones + cronograma Afterpay (compra, amortizado, futuro)
@@ -9683,7 +9699,7 @@
 
             let fTx = combinedTxs.filter(t => { 
                 const d = new Date(t.date); 
-                if(d < st || d > en) return false; 
+                if (!nexusAfterpayAuditExemptFromDateFilter(t) && (d < st || d > en)) return false;
                 if(dbSearchQ && !(t.note||'').toLowerCase().includes(dbSearchQ)) return false;
 
                 const rType = t.renderType || t.type; // APEX FIX: Filtramos según comportamiento visual para no confundir al usuario
@@ -9696,6 +9712,7 @@
                             || (t.cat || '').includes('Afterpay')
                             || (t.note || '').includes('[Abono]')
                             || (t.note || '').includes('[Pago Inicial]')
+                            || (t.note || '').includes('[Pago inicial proyectado]')
                             || (t.note || '').includes('[Pendiente]')
                             || (t.note || '').includes('[Amortizado]')
                             || (t.note || '').includes('[Compra BNPL]');
@@ -9810,7 +9827,7 @@
                 let cT = '', iB = '', iClass = '';
                 if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
                 else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pendiente]') || t.note.includes('[Amortizado]') || t.note.includes('[Compra BNPL]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pago inicial proyectado]') || t.note.includes('[Pendiente]') || t.note.includes('[Amortizado]') || t.note.includes('[Compra BNPL]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
                 else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
                 else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
@@ -9840,6 +9857,8 @@
                         bTxt = 'COMPRA BNPL'; bCls = 'bg-purple-100 text-purple-600 border-purple-200';
                     } else if (t.apAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
                         bTxt = 'AMORTIZADO'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
+                    } else if (t.apAuditRole === 'first_projected' || (t.note && t.note.includes('[Pago inicial proyectado]'))) {
+                        bTxt = 'PAGO INICIAL PROY.'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
                     } else if (nexusIsAfterpayProjectedQuota(t) || (t.note && t.note.includes('[Pendiente]'))) {
                         bTxt = isPast ? 'CUOTA VENCIDA' : 'CUOTA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-teal-100 text-teal-600 border-teal-200';
                     }
