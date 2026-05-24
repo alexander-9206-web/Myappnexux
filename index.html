@@ -2128,7 +2128,7 @@
                 
                 <div class="grid grid-cols-3 gap-3">
                     <div class="col-span-2"><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Nombre</label><input type="text" id="fa-name" required class="form-input text-sm"></div>
-                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda</label><select id="fa-currency" class="form-input text-sm text-center"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
+                    <div><label class="text-[10px] font-black uppercase text-slate-400 ml-2">Moneda</label><select id="fa-currency" class="form-input text-sm text-center" onchange="toggleAccountIdentityFields()"><option value="COP">COP</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="AUD">AUD</option></select></div>
                 </div>
                 
                 <!-- CAMPOS RESTAURADOS: Alcance, Balance, Tipo y Explicaciones -->
@@ -2156,6 +2156,18 @@
                     <label id="fa-balance-lbl" class="text-[10px] font-black uppercase text-slate-400 ml-2">Balance Inicial</label>
                     <input type="text" inputmode="none" readonly onclick="openNumpad(this.id)" data-type="currency" id="fa-balance" required class="form-input text-sm font-black text-center cursor-pointer">
                     <p id="fa-type-helper" class="text-[9px] text-slate-500 mt-2 px-2 hidden leading-tight"></p>
+                </div>
+
+                <div id="fa-identity-fields" class="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3 animate-slideUp">
+                    <p class="text-[8px] font-bold text-slate-500 uppercase leading-relaxed px-1"><i class="fa-solid fa-circle-info text-slate-400 mr-1"></i> Referencia visual en la app. No se solicitan CVV, claves ni datos para operar en línea.</p>
+                    <div>
+                        <label id="fa-account-number-lbl" class="text-[10px] font-black uppercase text-slate-400 ml-2">Nº cuenta (referencia)</label>
+                        <input type="text" id="fa-account-number" class="form-input text-sm font-semibold tracking-wide" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Ej: 1234567890" maxlength="34">
+                    </div>
+                    <div id="fa-bsb-wrap" class="hidden">
+                        <label id="fa-bsb-lbl" class="text-[10px] font-black uppercase text-slate-400 ml-2">BSB</label>
+                        <input type="text" id="fa-bsb" class="form-input text-sm font-semibold tracking-wide" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Ej: 062-000" maxlength="16">
+                    </div>
                 </div>
 
                 <div id="credit-fields" class="hidden animate-slideUp grid grid-cols-2 gap-4 bg-red-50 p-4 rounded-2xl border border-red-100">
@@ -7744,7 +7756,7 @@
                                 const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-credit-card' : 'fa-chart-line');
                                 const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
                                 const sign = a.type === 'credit' ? '-' : '';
-                                const detailText = a.type === 'credit' ? `Cupo: ${fmt(a.limit||0, curr)} | Corte: ${a.cutoffDay||'N/A'} | Pago: ${a.payDay||'N/A'}` : `ID: ${a.id}`;
+                                const detailText = nexusAccountDetailLine(a, curr);
                                 
                                 // APEX FIX: Coloración solo en borde de la tarjeta y soporte para Logo Bancario
                                 const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
@@ -7780,7 +7792,7 @@
                         const icon = 'fa-mobile-screen';
                         const color = a.balance < 0 ? 'theme-val-exp' : (a.balance > 0 ? 'theme-val-inc' : 'theme-text');
                         const sign = '';
-                        const detailText = `App: ${a.platform ? a.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(a.limit||0, curr)}`;
+                        const detailText = nexusAccountDetailLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
@@ -7814,7 +7826,7 @@
                         const icon = 'fa-users';
                         const color = a.balance < 0 ? 'text-red-500' : 'text-orange-500';
                         const sign = '';
-                        const detailText = `Flujo Aislado | ID: ${a.id}`;
+                        const detailText = nexusAccountDetailLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #fff7ed; color: #f97316;';
@@ -7848,7 +7860,7 @@
                         const icon = 'fa-link';
                         const color = a.type === 'credit' ? 'theme-val-exp' : (a.type === 'investment' ? 'theme-val-inc' : 'theme-text');
                         const sign = a.type === 'credit' ? '-' : '';
-                        const detailText = `Conexión Activa | ID: ${a.remoteId || a.id}`;
+                        const detailText = nexusAccountDetailLine(a, curr);
                         
                         const customStyle = a.color ? `background-color: var(--card-bg, #ffffff); border: 2px solid ${a.color};` : 'background-color: var(--card-bg, #ffffff); border: 2px solid transparent;';
                         const iconBg = a.color ? `background-color: ${a.color}; border: 2px solid #ffffff40; color: #ffffff;` : 'background-color: #f3e8ff; color: #a855f7;';
@@ -8016,8 +8028,11 @@
             if($id('fa-type')) $id('fa-type').value = 'liquid';
             if($id('fa-color')) $id('fa-color').value = '#e2e8f0';
             if($id('fa-bank-url')) $id('fa-bank-url').value = '';
+            if($id('fa-account-number')) $id('fa-account-number').value = '';
+            if($id('fa-bsb')) $id('fa-bsb').value = '';
             if($id('fa-custom-logo-b64')) $id('fa-custom-logo-b64').value = '';
             if(typeof updateBankLogoPreview === 'function') updateBankLogoPreview();
+            if(typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
             ['fa-virtual-limit','fa-virtual-term','fa-virtual-payday','fa-limit','fa-cutoff','fa-payday','fa-rate'].forEach(id => {
                 const el = $id(id); if(el) { el.value=''; el.dataset.raw=''; }
             });
@@ -8040,15 +8055,20 @@
             if($id('fa-type')) $id('fa-type').value = acc.type || 'liquid';
             if($id('fa-color')) $id('fa-color').value = acc.color || '#e2e8f0';
             if($id('fa-bank-url')) $id('fa-bank-url').value = acc.bankUrl || '';
+            if($id('fa-account-number')) $id('fa-account-number').value = acc.accountNumber || '';
+            if($id('fa-bsb')) $id('fa-bsb').value = acc.bsb || '';
             const customB64 = $id('fa-custom-logo-b64');
             if(customB64) customB64.value = (acc.logoUrl && acc.logoUrl.startsWith('data:image')) ? acc.logoUrl : '';
             if(typeof updateBankLogoPreview === 'function') {
-                if (acc.logoUrl && acc.logoUrl.startsWith('data:image')) {
-                    const preview = $id('fa-logo-preview');
-                    if (preview) preview.innerHTML = `<img src="${acc.logoUrl}" class="w-full h-full object-cover">`;
+                const preview = $id('fa-logo-preview');
+                if (acc.logoUrl && acc.logoUrl.startsWith('data:image') && preview) {
+                    preview.innerHTML = `<img src="${acc.logoUrl}" class="w-full h-full object-cover">`;
+                } else if (acc.logoUrl && preview) {
+                    preview.innerHTML = `<img src="${acc.logoUrl}" class="w-full h-full object-cover" onerror="this.onerror=null; if(typeof updateBankLogoPreview==='function')updateBankLogoPreview();">`;
                 } else updateBankLogoPreview();
             }
             toggleCreditFields();
+            if (typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
             if(acc.type === 'credit') {
                 const limEl = $id('fa-limit'); if(limEl) { limEl.dataset.raw = String(acc.limit||0); limEl.value = fmt(acc.limit||0, acc.currency); }
                 const cutEl = $id('fa-cutoff'); if(cutEl) { cutEl.dataset.raw = String(acc.cutoffDay||1); cutEl.value = acc.cutoffDay||1; }
@@ -8328,6 +8348,101 @@
             alert('✅ Bóveda compartida desvinculada. No volverá a sincronizarse en este dispositivo.');
         }
         
+        function nexusMaskAccountNumber(raw) {
+            const t = String(raw || '').replace(/\s/g, '');
+            if (!t) return '';
+            if (t.length <= 4) return t;
+            return '•••• ' + t.slice(-4);
+        }
+
+        function nexusAccountIdentityHint(acc) {
+            if (!acc) return '';
+            const bits = [];
+            if (acc.bsb) bits.push((acc.currency === 'AUD' ? 'BSB ' : 'Cód. ') + String(acc.bsb).trim());
+            if (acc.accountNumber) {
+                const pref = (acc.type === 'credit' || acc.type === 'virtual') ? 'Tarj. ' : 'Cta. ';
+                bits.push(pref + nexusMaskAccountNumber(acc.accountNumber));
+            }
+            return bits.join(' · ');
+        }
+
+        function nexusAccountDetailLine(acc, curr) {
+            if (!acc) return '';
+            let base = '';
+            if (acc.type === 'credit') base = `Cupo: ${fmt(acc.limit || 0, curr)} | Corte: ${acc.cutoffDay || 'N/A'} | Pago: ${acc.payDay || 'N/A'}`;
+            else if (acc.type === 'virtual') base = `App: ${acc.platform ? acc.platform.toUpperCase() : 'N/A'} | Cupo: ${fmt(acc.limit || 0, curr)}`;
+            else if (acc.isShared) base = `Conexión Activa | ID: ${acc.remoteId || acc.id}`;
+            else if (acc.type === 'terceros') base = `Cuenta Externa | ID: ${acc.id}`;
+            else base = `ID: ${acc.id}`;
+            const idHint = nexusAccountIdentityHint(acc);
+            return idHint ? (base + ' · ' + idHint) : base;
+        }
+
+        function nexusBuildAccountVaultProfile(acc) {
+            if (!acc) return {};
+            return {
+                type: acc.type || 'liquid',
+                color: acc.color || null,
+                bankUrl: acc.bankUrl || '',
+                logoUrl: acc.logoUrl || '',
+                accountNumber: String(acc.accountNumber || '').trim(),
+                bsb: String(acc.bsb || '').trim(),
+                platform: acc.platform || null,
+                limit: acc.limit || 0,
+                cutoffDay: acc.cutoffDay || 0,
+                payDay: acc.payDay || 0,
+                rate: acc.rate || 0,
+                virtualTerm: acc.virtualTerm || null,
+                profileUpdatedAt: new Date().toISOString()
+            };
+        }
+
+        function nexusApplySharedAccountVaultProfile(acc, profile) {
+            if (!acc || !profile || typeof profile !== 'object') return;
+            ['type', 'color', 'bankUrl', 'logoUrl', 'accountNumber', 'bsb', 'platform', 'limit', 'cutoffDay', 'payDay', 'rate', 'virtualTerm'].forEach(k => {
+                if (profile[k] !== undefined) acc[k] = profile[k];
+            });
+        }
+
+        function nexusAccountVaultProfileSignature(acc) {
+            const p = nexusBuildAccountVaultProfile(acc);
+            return [p.type, p.color, p.bankUrl, p.logoUrl, p.accountNumber, p.bsb, p.platform].join('|');
+        }
+
+        function toggleAccountIdentityFields() {
+            const curr = $id('fa-currency') ? $id('fa-currency').value : 'COP';
+            const type = $id('fa-type') ? $id('fa-type').value : 'liquid';
+            const accLbl = $id('fa-account-number-lbl');
+            const accInp = $id('fa-account-number');
+            const bsbWrap = $id('fa-bsb-wrap');
+            const bsbLbl = $id('fa-bsb-lbl');
+            const bsbInp = $id('fa-bsb');
+            if (accLbl) {
+                if (type === 'credit' || type === 'virtual') accLbl.innerText = 'Nº tarjeta (referencia)';
+                else accLbl.innerText = 'Nº cuenta (referencia)';
+            }
+            if (accInp) {
+                if (type === 'credit') accInp.placeholder = 'Ej: •••• 4242 o últimos dígitos';
+                else if (type === 'virtual') accInp.placeholder = 'Ej: alias o últimos dígitos';
+                else if (curr === 'EUR') accInp.placeholder = 'Ej: IBAN o número de cuenta';
+                else accInp.placeholder = 'Ej: 1234567890';
+            }
+            if (bsbWrap) {
+                const showBsb = curr !== 'COP';
+                bsbWrap.classList.toggle('hidden', !showBsb);
+                if (bsbLbl) {
+                    if (curr === 'AUD') bsbLbl.innerText = 'BSB (Australia)';
+                    else if (curr === 'EUR') bsbLbl.innerText = 'BIC / Sort code (opcional)';
+                    else bsbLbl.innerText = 'Routing / ABA (opcional)';
+                }
+                if (bsbInp) {
+                    if (curr === 'AUD') bsbInp.placeholder = 'Ej: 062-000';
+                    else if (curr === 'EUR') bsbInp.placeholder = 'Ej: DEUTDEFF';
+                    else bsbInp.placeholder = 'Ej: 021000021';
+                }
+            }
+        }
+
         function toggleCreditFields() { 
             const typeEl = $id('fa-type'); const type = typeEl ? typeEl.value : 'liquid'; 
             const scpEl = $id('fa-scope'); const scope = scpEl ? scpEl.value : 'personal';
@@ -8345,11 +8460,13 @@
             } else { 
                 if(lbl) lbl.innerText = 'Balance Inicial'; 
             } 
+
+            if (typeof toggleAccountIdentityFields === 'function') toggleAccountIdentityFields();
             
             // APEX FIX: Textos de ayuda dinámicos para cuentas especiales con Aislamiento Patrimonial
             if (helper) {
                 if (scope === 'shared') {
-                    helper.innerHTML = '<i class="fa-solid fa-satellite-dish text-purple-500 mr-1"></i> <b>Bóveda Compartida:</b> Sincroniza movimientos P2P en tiempo real con otros usuarios. Queda contablemente aislada de tu patrimonio personal para no inflar tu capital ficticiamente.';
+                    helper.innerHTML = '<i class="fa-solid fa-satellite-dish text-purple-500 mr-1"></i> <b>Bóveda Compartida:</b> Sincroniza movimientos, logo y números de cuenta/tarjeta (referencia) con otros usuarios P2P. No incluye datos de seguridad para banca en línea.';
                     helper.classList.remove('hidden');
                 } else if (type === 'terceros') {
                     helper.innerHTML = '<i class="fa-solid fa-users text-orange-500 mr-1"></i> <b>Cuenta de Terceros:</b> Dinero que administras pero no es tuyo (caja menor de tu empresa, encargos, remesas). Totalmente aislada de tu patrimonio y KPIs personales.';
@@ -8378,6 +8495,8 @@
             
             const color = ($id('fa-color') && $id('fa-color').value !== '#e2e8f0') ? $id('fa-color').value : null;
             const bankUrl = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
+            const accountNumber = $id('fa-account-number') ? String($id('fa-account-number').value || '').trim() : '';
+            const bsb = $id('fa-bsb') ? String($id('fa-bsb').value || '').trim() : '';
             const customLogoB64 = $id('fa-custom-logo-b64') ? $id('fa-custom-logo-b64').value : '';
             let logoUrl = null;
             
@@ -8425,13 +8544,21 @@
                 virtualTerm: type === 'virtual' ? (parseInt($id('fa-virtual-term') ? $id('fa-virtual-term').dataset.raw : 0) || 0) : null, 
                 color: color,
                 bankUrl: bankUrl,
-                logoUrl: logoUrl
+                logoUrl: logoUrl,
+                accountNumber: accountNumber,
+                bsb: bsb
             }; 
             
             const wasNew = !id;
             if (id) { 
                 const idx = state.accounts.findIndex(a => a.id === id); 
-                if (idx !== -1) state.accounts[idx] = newAcc; 
+                if (idx !== -1) {
+                    const prev = state.accounts[idx];
+                    if (prev.owner) newAcc.owner = prev.owner;
+                    if (prev.ownerEmail) newAcc.ownerEmail = prev.ownerEmail;
+                    if (prev.syncedOnce) newAcc.syncedOnce = prev.syncedOnce;
+                    state.accounts[idx] = newAcc;
+                }
             } else { 
                 state.accounts.push(newAcc); 
             } 
@@ -12985,11 +13112,16 @@ ${JSON.stringify(dataToAnalyze)}`;
                     name: '👥 ' + (shareData.name || 'Bóveda compartida'), 
                     currency: shareData.currency || (state.settings && state.settings.baseCurrency) || 'COP', 
                     balance: 0, 
-                    type: 'liquid', 
+                    type: shareData.type || 'liquid', 
                     isShared: true, 
                     remoteId: shareData.vaultId,
                     owner: shareData.owner || null,
-                    syncedOnce: false
+                    syncedOnce: false,
+                    logoUrl: shareData.logoUrl || null,
+                    bankUrl: shareData.bankUrl || '',
+                    accountNumber: shareData.accountNumber || '',
+                    bsb: shareData.bsb || '',
+                    color: shareData.color || null
                 };
                 state.accounts.push(newAcc);
                 
@@ -13023,7 +13155,10 @@ ${JSON.stringify(dataToAnalyze)}`;
                 vaultId,
                 name: String(acc.name || '').replace(/^👥\s*/, ''),
                 currency: acc.currency || (state.settings && state.settings.baseCurrency) || 'COP',
-                owner: nexusP2POwnerEmail(acc.ownerEmail || acc.owner)
+                owner: nexusP2POwnerEmail(acc.ownerEmail || acc.owner),
+                type: acc.type || 'liquid',
+                accountNumber: acc.accountNumber || '',
+                bsb: acc.bsb || ''
             };
 
             let token;
@@ -17111,11 +17246,13 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                 let deletedTxs = [...new Set([...(state.deletedSharedTxs || []), ...remoteDel])];
                 if (deletedTxs.length > 200) deletedTxs = deletedTxs.slice(-200);
 
+                const vaultProfile = nexusBuildAccountVaultProfile(a);
                 const sharedPayload = {
                     name: (a.name || '').replace('👥 ', ''),
                     ...buildSharedAclFields(false),
                     balance: a.balance,
                     currency: a.currency,
+                    vaultProfile: vaultProfile,
                     txsMap: txsMap,
                     updatedAt: new Date().toISOString(),
                     joinEnabled: true
@@ -17135,7 +17272,7 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
                     if (ownerUid) sharedPayload.memberUids = arrayUnion(ownerUid);
                 }
 
-                const sharedStr = JSON.stringify({ b: a.balance, sig: nexusSharedPayloadSignature(Object.values(txsMap)), d: deletedTxs });
+                const sharedStr = JSON.stringify({ b: a.balance, sig: nexusSharedPayloadSignature(Object.values(txsMap)), d: deletedTxs, p: nexusAccountVaultProfileSignature(a) });
                 if (!isNewSharedVault && lastCloudSyncHash[sharedCacheKey] === sharedStr) return;
 
                 await setDoc(sharedRef, sharedPayload, { merge: true });
@@ -18934,6 +19071,21 @@ Usa 0 si un campo numérico no aparece. Incluye TODAS las filas de movimientos v
 
                         if (!currentAcc.syncedOnce && data.balance !== undefined) {
                             currentAcc.balance = data.balance;
+                            hasSharedChanges = true;
+                        }
+
+                        if (data.vaultProfile) {
+                            nexusApplySharedAccountVaultProfile(currentAcc, data.vaultProfile);
+                            hasSharedChanges = true;
+                        } else if (data.logoUrl || data.accountNumber || data.bsb) {
+                            nexusApplySharedAccountVaultProfile(currentAcc, {
+                                logoUrl: data.logoUrl,
+                                bankUrl: data.bankUrl,
+                                accountNumber: data.accountNumber,
+                                bsb: data.bsb,
+                                type: data.type,
+                                color: data.color
+                            });
                             hasSharedChanges = true;
                         }
 
