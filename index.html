@@ -236,6 +236,50 @@
             line-height: 1.35;
             word-break: break-word;
         }
+        /* Cuentas / Bóvedas: montos siempre visibles (mismo criterio que auditoría) */
+        #tab-accounts .acc-vault-card,
+        #view-home #accounts-container .theme-card,
+        #account-history-modal .acc-hist-card {
+            min-width: 0;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        #tab-accounts .acc-vault-amt-row,
+        #view-home #accounts-container .acc-vault-amt-row,
+        #account-history-modal .acc-hist-amt-row,
+        #tab-accounts .acc-tx-amt-row {
+            min-width: 0;
+            gap: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #tab-accounts .acc-vault-amt,
+        #view-home #accounts-container .acc-vault-amt,
+        #tab-accounts .acc-group-amt,
+        #tab-accounts .acc-tx-amt,
+        #tab-accounts .acc-summary-amt,
+        #account-history-modal .acc-hist-amt {
+            font-size: clamp(0.62rem, 2.6vw, 0.95rem);
+            line-height: 1.2;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            text-align: right;
+            min-width: 0;
+        }
+        #tab-accounts .acc-summary-amt {
+            text-align: center;
+            flex: none;
+            width: 100%;
+        }
+        #tab-accounts .acc-group-amt-wrap {
+            min-width: 0;
+            max-width: min(52vw, 12rem);
+            flex-shrink: 1;
+        }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
         .fixed.inset-0.flex.items-end > .theme-card::-webkit-scrollbar,
@@ -1716,7 +1760,8 @@
             <div class="flex justify-between items-start gap-3">
                 <div>
                     <h3 id="hist-acc-name" class="text-lg font-black uppercase theme-text">Cuenta</h3>
-                    <p class="text-[10px] font-bold text-slate-400 mt-1">Saldo: <span id="hist-acc-balance" class="text-indigo-600">--</span></p>
+                    <p class="text-[10px] font-bold text-slate-400 mt-1">Saldo:</p>
+                    <p class="nexus-amount-box mt-0.5"><span id="hist-acc-balance" class="acc-hist-amt nexus-amount-fit font-black text-indigo-600">--</span></p>
                 </div>
                 <button type="button" onclick="closeAccountHistory()" class="w-8 h-8 bg-slate-100 rounded-full text-slate-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
             </div>
@@ -5798,19 +5843,144 @@
             return !!(tx && tx.isProjected && String(tx.id || '').startsWith('proj_ap_'));
         }
 
-        function nexusAfterpayProjectedParent(tx) {
-            if (!nexusIsAfterpayProjectedQuota(tx)) return null;
-            const m = String(tx.id).match(/^proj_ap_(.+)_(\d+)$/);
-            if (!m) return null;
-            return (state.tx || []).find(t => t.id === m[1] && t.type === 'afterpay') || null;
+        function nexusIsAfterpayAuditSynthetic(tx) {
+            const id = String((tx && tx.id) || '');
+            return id.startsWith('audit_ap_buy_') || id.startsWith('audit_ap_amort_');
         }
 
-        /** Contrato madre y recon a cero fuera; cuotas proyectadas vigentes de Afterpay sí entran a auditoría. */
+        function nexusParseAfterpayProjectionId(id) {
+            const s = String(id || '');
+            if (!s.startsWith('proj_ap_')) return null;
+            const rest = s.slice(8);
+            const lastU = rest.lastIndexOf('_');
+            if (lastU < 1) return null;
+            const quotaIdx = parseInt(rest.slice(lastU + 1), 10);
+            const parentId = rest.slice(0, lastU);
+            if (!parentId || Number.isNaN(quotaIdx)) return null;
+            return { parentId, quotaIdx };
+        }
+
+        function nexusAfterpayAuditParent(tx) {
+            if (!tx) return null;
+            if (tx.apParentId) {
+                return (state.tx || []).find(t => t.id === tx.apParentId && t.type === 'afterpay') || null;
+            }
+            const parsed = nexusParseAfterpayProjectionId(tx.id);
+            if (parsed) {
+                return (state.tx || []).find(t => t.id === parsed.parentId && t.type === 'afterpay') || null;
+            }
+            const id = String(tx.id || '');
+            if (id.startsWith('audit_ap_buy_')) {
+                const pid = id.slice('audit_ap_buy_'.length);
+                return (state.tx || []).find(t => t.id === pid && t.type === 'afterpay') || null;
+            }
+            if (id.startsWith('audit_ap_amort_')) {
+                const rest = id.slice('audit_ap_amort_'.length);
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                const pid = rest.slice(0, lastU);
+                return (state.tx || []).find(t => t.id === pid && t.type === 'afterpay') || null;
+            }
+            return null;
+        }
+
+        function nexusComputeAfterpayQuotaDate(tx, quotaIndexZeroBased) {
+            const baseDate = getSafeDate(tx.date);
+            const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
+            const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay, 10) : 5;
+            let d = new Date(baseDate.getTime());
+            const i = quotaIndexZeroBased;
+            if (tx.apFreq === 'monthly') d.setMonth(d.getMonth() + i);
+            else d.setDate(d.getDate() + (i * stD));
+            if (i > 0) {
+                let dist = apPayDay - d.getDay();
+                if (dist < 0) dist += 7;
+                d.setDate(d.getDate() + dist);
+            }
+            d.setHours(12, 0, 0, 0);
+            return d;
+        }
+
+        function nexusFindAfterpayPaymentForQuota(parent, quotaOneBased) {
+            if (!parent) return null;
+            const label = (parent.note || (parent.cat && parent.cat.length > 2 ? parent.cat.substring(2) : parent.cat) || '').trim();
+            return (state.tx || []).find(t => {
+                if (t.isProjected || t.type !== 'expense') return false;
+                const m = (t.note || '').match(/\((\d+)\/(\d+)\)/);
+                if (!m || parseInt(m[1], 10) !== quotaOneBased) return false;
+                if (t.apParentId === parent.id) return true;
+                if (!/^\[(Abono|Pago Inicial)\]/i.test(t.note || '')) return false;
+                if (parent.cat && t.cat && t.cat !== parent.cat) return false;
+                const tLabel = (t.note || '').replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
+                return !label || tLabel === label || (label && tLabel.includes(label));
+            }) || null;
+        }
+
+        /** Cronograma Afterpay para auditoría: compra BNPL + amortizado + cuotas futuras. */
+        function nexusBuildAfterpayAuditSchedule(cDisplay) {
+            const rows = [];
+            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
+            const contracts = (state.tx || []).filter(t => t.type === 'afterpay' && !t.apRecon && (t.apPaid || 0) < (t.apQuotas || 4));
+            contracts.forEach(tx => {
+                const quotas = tx.apQuotas || 4;
+                const total = tx.original_amount || tx.amount;
+                const origIA = total / quotas;
+                const iA = convertCurrency(origIA, tx.original_currency || tx.currency, baseCur);
+                const label = (tx.note || (tx.cat && tx.cat.length > 2 ? tx.cat.substring(2) : tx.cat) || 'Afterpay').trim();
+                const curr = tx.original_currency || tx.currency;
+                const paid = tx.apPaid || 0;
+
+                rows.push({
+                    id: 'audit_ap_buy_' + tx.id,
+                    type: 'expense',
+                    renderType: 'afterpay',
+                    amount: convertCurrency(total, curr, baseCur),
+                    original_amount: total,
+                    original_currency: curr,
+                    currency: baseCur,
+                    cat: tx.cat,
+                    accId: tx.accId,
+                    date: tx.date,
+                    note: `[Compra BNPL] ${label} (${quotas} cuotas × ${fmt(origIA, curr)})`,
+                    isProjected: true,
+                    apParentId: tx.id,
+                    apAuditRole: 'purchase',
+                    nexusSkipAuditTotal: true
+                });
+
+                for (let i = 0; i < quotas; i++) {
+                    const qNum = i + 1;
+                    if (nexusFindAfterpayPaymentForQuota(tx, qNum)) continue;
+                    const isPaidSlot = i < paid;
+                    const pId = isPaidSlot ? ('audit_ap_amort_' + tx.id + '_' + i) : ('proj_ap_' + tx.id + '_' + i);
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'afterpay',
+                        amount: iA,
+                        original_amount: origIA,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: tx.cat,
+                        accId: tx.accId,
+                        date: nexusComputeAfterpayQuotaDate(tx, i).toISOString(),
+                        note: isPaidSlot ? `[Amortizado] ${label} (${qNum}/${quotas})` : `[Pendiente] ${label} (${qNum}/${quotas})`,
+                        isProjected: true,
+                        apParentId: tx.id,
+                        apQuotaIndex: i,
+                        apAuditRole: isPaidSlot ? 'amortized' : 'projected'
+                    });
+                }
+            });
+            return rows;
+        }
+
+        /** Contrato madre y recon a cero fuera; cronograma Afterpay (compra + amortizado + futuro) sí entra. */
         function nexusShouldShowTxInAudit(tx) {
             if (!tx) return false;
             if (tx.type === 'afterpay') return false;
-            if (nexusIsAfterpayProjectedQuota(tx)) {
-                const parent = nexusAfterpayProjectedParent(tx);
+            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsAfterpayAuditSynthetic(tx)) {
+                const parent = nexusAfterpayAuditParent(tx);
                 if (!parent || parent.apRecon) return false;
                 return (parent.apPaid || 0) < (parent.apQuotas || 4);
             }
@@ -6015,7 +6185,14 @@
                     const clearCat = tx.note ? tx.note : tx.cat.substring(2).trim(); 
                     const pId = 'proj_ap_'+tx.id+'_'+i;
                     if (!rawTx.some(rt => rt.id === pId)) {
-                        rawTx.push({ id: pId, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: cDisplay }); 
+                        rawTx.push({
+                            id: pId, type: 'expense', renderType: 'afterpay', amount: iA,
+                            original_amount: origIA, original_currency: tx.original_currency || tx.currency,
+                            cat: tx.cat, accId: tx.accId, date: d.toISOString(),
+                            note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`,
+                            isProjected: true, currency: cDisplay,
+                            apParentId: tx.id, apQuotaIndex: i, apAuditRole: 'projected'
+                        });
                     }
                 } 
             });
@@ -7251,12 +7428,14 @@
             
             for(let curr in groups) {
                 const accs = groups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
-                html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm mb-4"><div class="flex justify-between border-b border-slate-100/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-slate-500">Divisa ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
+                const grpTotal = fmt(total, curr);
+                html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm mb-4 min-w-0"><div class="border-b border-slate-100/50 pb-3 mb-3"><div class="flex justify-between items-center gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-slate-500 shrink-0">Divisa ${curr}</h3></div><div class="acc-vault-amt-row mt-2"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Subtotal</span><span class="acc-vault-amt nexus-amount-fit font-black ${total>=0?'theme-val-inc':'theme-val-exp'}" title="${grpTotal}">${grpTotal}</span></div></div><div class="space-y-3">`;
                 accs.forEach(a => { 
                     const icon = a.type === 'liquid' ? 'fa-wallet' : (a.type === 'credit' ? 'fa-chart-line' : 'fa-chart-line'); 
                     const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
                     const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm">` : `<i class="fa-solid ${icon} text-[10px] text-slate-400 w-5 text-center"></i>`;
-                    html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2">${iconHtml}<p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; 
+                    const rowAmt = `${a.type==='credit'?'-':''}${fmt(a.balance, curr)}`;
+                    html += `<div onclick="switchTab('accounts')" class="p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors min-w-0"><div class="flex items-center gap-2 min-w-0"><div class="flex items-center gap-2 min-w-0 flex-1">${iconHtml}<p class="text-[11px] font-black uppercase theme-text truncate">${a.name}</p></div></div><div class="acc-vault-amt-row mt-1.5 pt-1.5 border-t border-slate-100/60"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Saldo</span><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${rowAmt}">${rowAmt}</span></div></div>`; 
                 });
                 html += `</div></div>`;
             }
@@ -7265,17 +7444,20 @@
             if(Object.keys(sharedGroups).length > 0) {
                 for(let curr in sharedGroups) {
                     const accs = sharedGroups[curr]; let total = 0; accs.forEach(a => { if(a.type === 'credit') total -= a.balance; else total += a.balance; });
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm border-purple-100/50 bg-slate-50/50 mb-4"><div class="flex justify-between border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-purple-600"><i class="fa-solid fa-link mr-1"></i> Compartidas ${curr}</h3><span class="text-sm font-black ${total>=0?'theme-val-inc':'theme-val-exp'}">${fmt(total, curr)}</span></div><div class="space-y-3">`;
+                    const grpTotalSh = fmt(total, curr);
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm border-purple-100/50 bg-slate-50/50 mb-4 min-w-0"><div class="border-b border-slate-200/50 pb-3 mb-3"><h3 class="text-xs font-black uppercase text-purple-600"><i class="fa-solid fa-link mr-1"></i> Compartidas ${curr}</h3><div class="acc-vault-amt-row mt-2"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Subtotal</span><span class="acc-vault-amt nexus-amount-fit font-black ${total>=0?'theme-val-inc':'theme-val-exp'}" title="${grpTotalSh}">${grpTotalSh}</span></div></div><div class="space-y-3">`;
                     accs.forEach(a => { 
                         const icon = 'fa-link'; const color = a.type === 'credit' ? 'theme-val-exp' : 'theme-text'; 
                         const iconHtml = a.logoUrl ? `<img src="${a.logoUrl}" class="w-5 h-5 object-cover rounded-full shadow-sm border border-purple-200">` : `<i class="fa-solid ${icon} text-[10px] text-purple-400 w-5 text-center"></i>`;
-                        html += `<div onclick="switchTab('accounts')" class="flex justify-between items-center p-2 hover:bg-white rounded-xl cursor-pointer transition-colors"><div class="flex items-center gap-2">${iconHtml}<p class="text-[11px] font-black uppercase theme-text">${a.name}</p></div><span class="text-xs font-black ${color}">${a.type==='credit'?'-':''}${fmt(a.balance, curr)}</span></div>`; 
+                        const rowAmt = `${a.type==='credit'?'-':''}${fmt(a.balance, curr)}`;
+                        html += `<div onclick="switchTab('accounts')" class="p-2 hover:bg-white rounded-xl cursor-pointer transition-colors min-w-0"><div class="flex items-center gap-2 min-w-0">${iconHtml}<p class="text-[11px] font-black uppercase theme-text truncate">${a.name}</p></div><div class="acc-vault-amt-row mt-1.5 pt-1.5 border-t border-purple-100/60"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Saldo</span><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${rowAmt}">${rowAmt}</span></div></div>`; 
                     });
                     html += `</div></div>`;
                 }
             }
             
             cont.innerHTML = html;
+            requestAnimationFrame(() => fitNexusAmounts(cont));
 
             // APEX FIX: Estado visual del acordeón de cuentas del dashboard
             const accIcon = $id('icon-dash-accounts');
@@ -7373,7 +7555,7 @@
                 else totalAssets += balInBase; 
             });
             
-            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="text-sm font-black theme-text">${fmt(totalAssets, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="text-sm font-black theme-val-exp">${fmt(totalLiabilities, bC)}</p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="text-sm font-black theme-val-inc">${fmt(0, bC)}</p></div>`; 
+            sumContainer.innerHTML = `<div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center min-w-0"><i class="fa-solid fa-wallet text-slate-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Líquido</p><p class="nexus-amount-box mt-1"><span class="acc-summary-amt nexus-amount-fit font-black theme-text" title="${fmt(totalAssets, bC)}">${fmt(totalAssets, bC)}</span></p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center min-w-0"><i class="fa-solid fa-credit-card text-red-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Crédito</p><p class="nexus-amount-box mt-1"><span class="acc-summary-amt nexus-amount-fit font-black theme-val-exp" title="${fmt(totalLiabilities, bC)}">${fmt(totalLiabilities, bC)}</span></p></div><div class="theme-card p-4 rounded-[1.5rem] border shadow-sm text-center min-w-0"><i class="fa-solid fa-chart-line text-emerald-400 mb-2"></i><p class="text-[8px] font-black uppercase opacity-40 theme-text">Inversión</p><p class="nexus-amount-box mt-1"><span class="acc-summary-amt nexus-amount-fit font-black theme-val-inc" title="${fmt(0, bC)}">${fmt(0, bC)}</span></p></div>`; 
             
             if(!state.accounts || state.accounts.length === 0) {
                 listContainer.innerHTML = '<p class="text-xs text-center text-slate-400 font-bold p-8 border border-dashed rounded-2xl">No hay cuentas configuradas.</p>';
@@ -7415,7 +7597,7 @@
                     let subTotal = 0;
                     accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
                     
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-100/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-slate-500 flex items-center shrink-0">Divisa ${curr}</h3><div class="flex items-center gap-3 min-w-0 justify-end"><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'} truncate" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-slate-100 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-100/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-slate-500 flex items-center shrink-0">Divisa ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
                     // APEX FIX: Agrupación interna por tipos de cuenta
                     const accsByType = { liquid: [], credit: [], investment: [] };
@@ -7464,7 +7646,7 @@
                     let subTotal = 0;
                     accs.forEach(a => { subTotal += a.balance; });
                     
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center shrink-0">Virtuales ${curr}</h3><div class="flex items-center gap-3 min-w-0 justify-end"><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'} truncate" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center shrink-0">Virtuales ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
                     accs.forEach(a => {
                         const icon = 'fa-mobile-screen';
@@ -7498,7 +7680,7 @@
                     let subTotal = 0;
                     accs.forEach(a => { subTotal += a.balance; });
                     
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-orange-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-orange-600 flex items-center shrink-0">Terceros ${curr}</h3><div class="flex items-center gap-3 min-w-0 justify-end"><span class="text-sm font-black text-orange-600 truncate" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-orange-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-orange-600 flex items-center shrink-0">Terceros ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black text-orange-600" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
                     accs.forEach(a => {
                         const icon = 'fa-users';
@@ -7532,7 +7714,7 @@
                     let subTotal = 0;
                     accs.forEach(a => { if(a.type === 'credit') subTotal -= a.balance; else subTotal += a.balance; });
                     
-                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center shrink-0">Compartidas ${curr}</h3><div class="flex items-center gap-3 min-w-0 justify-end"><span class="text-sm font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'} truncate" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
+                    html += `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col group relative overflow-hidden border-purple-100/50 bg-slate-50/50 mb-4"><div onclick="toggleAccGroup('${gId}')" class="flex justify-between items-center border-b border-slate-200/50 pb-3 cursor-pointer select-none hover:opacity-70 transition-opacity gap-2 min-w-0"><h3 class="text-xs font-black uppercase text-purple-600 flex items-center shrink-0">Compartidas ${curr}</h3><div class="flex items-center gap-2 min-w-0 justify-end"><div class="acc-group-amt-wrap nexus-amount-box"><span class="acc-group-amt nexus-amount-fit font-black ${subTotal>=0?'theme-val-inc':'theme-val-exp'}" title="${fmt(subTotal, curr)}">${fmt(subTotal, curr)}</span></div><i id="icon-${gId}" class="fa-solid ${eyeIcon} text-[14px] transition-colors shrink-0"></i></div></div><div id="${gId}" class="${dispCls} space-y-3 pt-3 animate-slideUp">`;
                     
                     accs.forEach(a => {
                         const icon = 'fa-link';
@@ -7554,7 +7736,7 @@
             }
 
             listContainer.innerHTML = html;
-            requestAnimationFrame(() => fitNexusAmounts(listContainer));
+            requestAnimationFrame(() => fitNexusAmounts($id('tab-accounts')));
         }
 
         // APEX FIX: Controlador Lógico de Listas Desprendibles (Acordeón) y Persistencia Visual
@@ -7625,6 +7807,7 @@
             if (!state.ui) state.ui = {};
             state.ui['acc_view_' + id] = isOpen;
             saveState();
+            if (isOpen) requestAnimationFrame(() => fitNexusAmounts(el));
         }
 
         function toggleAccountTx(id) {
@@ -7651,15 +7834,17 @@
                     // APEX FIX: Añadir trazabilidad de autor en mini-historial P2P
                     const creatorStr = t.createdBy ? ` • <i class="fa-solid fa-user text-purple-400 mx-0.5"></i> ${t.createdBy.split(' ')[0]}` : '';
 
-                    return `<div class="flex justify-between items-center p-2.5 rounded-xl bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-blue-200 transition-all cursor-pointer shadow-sm mb-1.5" onclick="editTransaction('${t.id}')"><div class="flex flex-col min-w-0 pr-2"><span class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}</span><span class="text-[8px] text-slate-400 font-bold uppercase flex items-center mt-0.5">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorStr}</span></div><div class="flex items-center gap-3 shrink-0"><span class="text-[11px] font-black ${colorCls}">${sign}${fmt(t.amount, t.currency)}</span><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${id}')" class="w-7 h-7 rounded-full bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors shadow-sm active:scale-90"><i class="fa-solid fa-eraser text-[9px]"></i></button></div></div>`;
+                    const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
+                    return `<div class="rounded-xl bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-blue-200 transition-all cursor-pointer shadow-sm mb-1.5 p-2.5 min-w-0 max-w-full overflow-hidden" onclick="editTransaction('${t.id}')"><div class="flex flex-col min-w-0 pr-1"><span class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}</span><span class="text-[8px] text-slate-400 font-bold uppercase flex items-center mt-0.5">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorStr}</span></div><div class="acc-tx-amt-row mt-2 pt-2 border-t border-slate-100/80"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Monto</span><span class="acc-tx-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${id}')" class="w-7 h-7 rounded-full bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors shadow-sm active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[9px]"></i></button></div></div>`;
                 }).join('');
+                requestAnimationFrame(() => fitNexusAmounts(el));
             } else {
                 el.classList.add('hidden'); el.classList.remove('flex');
             }
         }
         
         // APEX FIX: Restauración de funciones del modal de Historial de Cuenta
-        function openAccountHistory(id) { currentHistAccId = id; const acc = state.accounts.find(a => a.id === id); if(!acc) return; const mod = $id('account-history-modal'); if(mod) nexusShowModalInstant(mod); $id('hist-acc-name').innerText = acc.name; $id('hist-acc-balance').innerText = fmt(acc.balance, acc.currency); setHistFilter('all'); }
+        function openAccountHistory(id) { currentHistAccId = id; const acc = state.accounts.find(a => a.id === id); if(!acc) return; const mod = $id('account-history-modal'); if(mod) nexusShowModalInstant(mod); $id('hist-acc-name').innerText = acc.name; const balEl = $id('hist-acc-balance'); const balTxt = fmt(acc.balance, acc.currency); if (balEl) { balEl.innerText = balTxt; balEl.title = balTxt; } setHistFilter('all'); requestAnimationFrame(() => fitNexusAmounts(mod)); }
         function closeAccountHistory() { nexusHideModalInstant($id('account-history-modal')); currentHistAccId = null; }
         function setHistFilter(period) { currentHistPeriod = period; $qAll('#account-history-modal .filter-chip').forEach(b => b.classList.remove('active')); const btn = $id('hf-' + period); if(btn) btn.classList.add('active'); renderHistAccList(); }
         function renderHistAccList() {
@@ -7680,13 +7865,17 @@
                 // APEX FIX: Etiqueta de trazabilidad de autor P2P en el historial detallado
                 const creatorBadge = t.createdBy ? `<span class="bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md ml-1"><i class="fa-solid fa-user"></i> ${t.createdBy.split(' ')[0]}</span>` : '';
 
-                return `<div class="theme-card p-4 rounded-2xl flex justify-between items-center shadow-sm border border-slate-50/50"><div class="flex items-center gap-3 min-w-0 flex-1 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div class="min-w-0"><p class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap">${dDate.toLocaleDateString()} ${timeStr} ${creatorBadge}</p></div></div><div class="flex items-center gap-2 shrink-0"><p class="font-black text-xs ${colorCls}">${sign}${fmt(t.amount, t.currency)}</p><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${currentHistAccId}')" class="w-8 h-8 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors active:scale-90"><i class="fa-solid fa-eraser text-[10px]"></i></button></div></div>`;
+                const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
+                const titleTxt = (t.note || (t.cat ? t.cat.substring(2) : '')).replace(/</g, '&lt;');
+                return `<div class="acc-hist-card theme-card p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-50/50 min-w-0 max-w-full overflow-hidden"><div class="flex items-start gap-2.5 min-w-0 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${titleTxt}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap">${dDate.toLocaleDateString()} ${timeStr} ${creatorBadge}</p></div></div><div class="acc-hist-amt-row flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100/80"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Monto</span><span class="acc-hist-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${currentHistAccId}')" class="w-8 h-8 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[10px]"></i></button></div></div>`;
             }).join('');
+            requestAnimationFrame(() => fitNexusAmounts(list));
         }
 
         function buildAccountCardHtml(a, curr, color, sign, detailText, customStyle, iconBg, iconContent, p2pBtn) {
             const safeId = String(a.id).replace(/'/g, "\\'");
-            return `<div class="flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] transition-all shadow-sm" style="${customStyle}"><div class="flex justify-between items-center gap-2"><div role="button" tabindex="0" onclick="toggleAccountTx('${safeId}')" class="flex items-center gap-3 min-w-0 flex-1 pr-2 cursor-pointer"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div class="min-w-0"><p class="text-xs font-black uppercase theme-text truncate">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${detailText}</p></div></div><div class="flex items-center gap-2 shrink-0 justify-end relative z-10" onclick="event.stopPropagation()"><div class="text-right min-w-0 max-w-[42vw] sm:max-w-[200px] nexus-amount-box"><p class="nexus-amount-fit font-black ${color} leading-tight" title="${sign}${fmt(a.balance, curr)}">${sign}${fmt(a.balance, curr)}</p></div><div class="flex flex-col gap-1 border-l border-slate-200 pl-2 ml-1 shrink-0">${p2pBtn}<button type="button" onclick="editAccount('${safeId}')" class="text-slate-400 hover:text-blue-600 transition-colors p-2 min-w-[32px] min-h-[32px]" title="Editar cuenta"><i class="fa-solid fa-pen text-[11px]"></i></button><button type="button" onclick="openAccountHistory('${safeId}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-2 min-h-[32px]" title="Historial"><i class="fa-solid fa-clock-rotate-left text-[11px]"></i></button></div></div></div><div id="acc-tx-${safeId}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[400px] overflow-y-auto hide-scrollbar"></div></div>`;
+            const balFull = `${sign}${fmt(a.balance, curr)}`;
+            return `<div class="acc-vault-card flex flex-col p-3 hover:bg-slate-50 rounded-[1.25rem] transition-all shadow-sm min-w-0 max-w-full overflow-hidden" style="${customStyle}"><div class="flex justify-between items-start gap-2 min-w-0"><div role="button" tabindex="0" onclick="toggleAccountTx('${safeId}')" class="flex items-center gap-3 min-w-0 flex-1 pr-1 cursor-pointer"><div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm" style="${iconBg}">${iconContent}</div><div class="min-w-0"><p class="text-xs font-black uppercase theme-text truncate">${a.name}</p><p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${detailText}</p></div></div><div class="flex flex-col gap-1 shrink-0 relative z-10" onclick="event.stopPropagation()">${p2pBtn}<button type="button" onclick="editAccount('${safeId}')" class="text-slate-400 hover:text-blue-600 transition-colors p-2 min-w-[32px] min-h-[32px]" title="Editar cuenta"><i class="fa-solid fa-pen text-[11px]"></i></button><button type="button" onclick="openAccountHistory('${safeId}')" class="text-slate-400 hover:text-indigo-600 transition-colors p-2 min-h-[32px]" title="Historial"><i class="fa-solid fa-clock-rotate-left text-[11px]"></i></button></div></div><div class="acc-vault-amt-row mt-2 pt-2 border-t border-slate-200/80"><span class="text-[7px] font-black uppercase text-slate-400 shrink-0">Saldo</span><span class="acc-vault-amt nexus-amount-fit font-black ${color}" title="${balFull}">${balFull}</span></div><div id="acc-tx-${safeId}" class="hidden flex-col gap-2 pt-3 border-t border-slate-200 mt-3 animate-slideUp max-h-[400px] overflow-y-auto hide-scrollbar"></div></div>`;
         }
 
         function resetAccountFormForNew() {
@@ -9419,7 +9608,7 @@
             $qAll('#tab-database button[id^="db-qf-"]').forEach(b => { b.classList.remove('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); b.classList.add('text-slate-400'); });
             const btn = $id('db-qf-' + range); if (btn) { btn.classList.remove('text-slate-400'); btn.classList.add('bg-white', 'shadow-sm', 'theme-text', 'border', 'border-slate-100'); }
             const now = new Date(); const start = new Date(); const end = new Date();
-            if(range === 'hoy') { start.setHours(0,0,0,0); end.setHours(23,59,59,999); } else if(range === 'semana') { start.setDate(now.getDate() - 7); end.setDate(now.getDate() + 7); } else if(range === 'mes') { start.setDate(now.getDate() - 30); end.setDate(now.getDate() + 90); } else if(range === 'all') { start.setFullYear(2000); end.setFullYear(2100); }
+            if(range === 'hoy') { start.setHours(0,0,0,0); end.setHours(23,59,59,999); } else if(range === 'semana') { start.setDate(now.getDate() - 7); end.setDate(now.getDate() + 7); } else if(range === 'mes') { start.setDate(now.getDate() - 30); end.setDate(now.getDate() + 365); } else if(range === 'all') { start.setFullYear(2000); end.setFullYear(2100); }
             const fs = $id('db-filter-start'); if(fs) fs.value = start.toISOString().split('T')[0]; 
             const fe = $id('db-filter-end'); if(fe) fe.value = end.toISOString().split('T')[0]; updateDbCatFilter();
         }
@@ -9482,10 +9671,14 @@
             // Extraemos las proyecciones (cuotas) haciendo bypass temporal de la divisa activa
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
+            const cDisplay = state.settings.baseCurrency || 'COP';
             let projTxs = getEnrichedTx().filter(t => t.isProjected);
+            const apAuditSchedule = nexusBuildAfterpayAuditSchedule(cDisplay);
+            const projIds = new Set(projTxs.map(t => t.id));
+            apAuditSchedule.forEach(r => { if (!projIds.has(r.id)) { projTxs.push(r); projIds.add(r.id); } });
             state.activeCurrency = tempCurr;
 
-            // Flujo real + proyecciones (deudas, recurrentes y cuotas Afterpay vigentes vía nexusShouldShowTxInAudit)
+            // Flujo real + proyecciones + cronograma Afterpay (compra, amortizado, futuro)
             let combinedTxs = [...rawTxList, ...projTxs].filter(nexusShouldShowTxInAudit);
 
             let fTx = combinedTxs.filter(t => { 
@@ -9499,10 +9692,13 @@
                     if (tp === 'afterpay') {
                         const isAp = rType === 'afterpay'
                             || nexusIsAfterpayProjectedQuota(t)
+                            || nexusIsAfterpayAuditSynthetic(t)
                             || (t.cat || '').includes('Afterpay')
                             || (t.note || '').includes('[Abono]')
                             || (t.note || '').includes('[Pago Inicial]')
-                            || (t.note || '').includes('[Pendiente]');
+                            || (t.note || '').includes('[Pendiente]')
+                            || (t.note || '').includes('[Amortizado]')
+                            || (t.note || '').includes('[Compra BNPL]');
                         if (!isAp) return false;
                     }
                     else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
@@ -9528,8 +9724,8 @@
             const curSel = $id('db-currency'); const targetCurr = (curSel && curSel.value !== 'BASE') ? curSel.value : (state.settings.baseCurrency || 'COP');
             
             const tV = fTx.reduce((s,t) => {
-                // APEX FIX: Control contable estricto
-                if (t.isProjected) return s; 
+                // APEX FIX: Control contable estricto (proyecciones y compra BNPL informativa no suman)
+                if (t.isProjected || t.nexusSkipAuditTotal) return s; 
                 
                 const rType = t.renderType || t.type;
                 const amt = convertCurrency(t.original_amount || t.amount, t.original_currency || t.currency, targetCurr);
@@ -9614,7 +9810,7 @@
                 let cT = '', iB = '', iClass = '';
                 if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
                 else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pendiente]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pendiente]') || t.note.includes('[Amortizado]') || t.note.includes('[Compra BNPL]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
                 else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
                 else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
@@ -9640,6 +9836,13 @@
                     const isPast = new Date(t.date) <= new Date(); 
                     let bTxt = isPast ? 'PENDIENTE' : 'PROYECTADO'; 
                     let bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-amber-100 text-amber-600 border-amber-200'; 
+                    if (t.apAuditRole === 'purchase') {
+                        bTxt = 'COMPRA BNPL'; bCls = 'bg-purple-100 text-purple-600 border-purple-200';
+                    } else if (t.apAuditRole === 'amortized' || (t.note && t.note.includes('[Amortizado]'))) {
+                        bTxt = 'AMORTIZADO'; bCls = 'bg-indigo-100 text-indigo-600 border-indigo-200';
+                    } else if (nexusIsAfterpayProjectedQuota(t) || (t.note && t.note.includes('[Pendiente]'))) {
+                        bTxt = isPast ? 'CUOTA VENCIDA' : 'CUOTA FUTURA'; bCls = isPast ? 'bg-red-100 text-red-600 border-red-200' : 'bg-teal-100 text-teal-600 border-teal-200';
+                    }
                     
                     if (t.cat === '⚡ Pendiente Único' && t.priority) {
                         bTxt = `PRIORIDAD ${t.priority === 'high' ? 'ALTA' : (t.priority === 'medium' ? 'MEDIA' : 'BAJA')}`;
@@ -9651,8 +9854,6 @@
                     pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; 
                 } else if (rType === 'afterpay') {
                     pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`; 
-                } else if (nexusIsAfterpayProjectedQuota(t)) {
-                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200"><i class="fa-solid fa-layer-group mr-1"></i>CUOTA AFTERPAY</span>`;
                 } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
                     pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`; 
                 } else if (t.note && t.note.includes('[Pago Inicial]')) {
@@ -9671,8 +9872,8 @@
                 const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
                 
                 const deleteAction = t.isProjected
-                    ? (nexusIsAfterpayProjectedQuota(t)
-                        ? `alert('Cuota proyectada Afterpay: gestiona el contrato en Afterpay Hub (abonar o editar).')`
+                    ? ((nexusIsAfterpayProjectedQuota(t) || nexusIsAfterpayAuditSynthetic(t))
+                        ? `alert('Cronograma Afterpay: gestiona la compra y cuotas en Afterpay Hub.')`
                         : `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')`)
                     : `deleteDatabaseRecord('${t.id}')`;
 
