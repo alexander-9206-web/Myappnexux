@@ -5794,12 +5794,26 @@
             return /^\[(Abono|Pago Inicial)\]/i.test(n);
         }
 
-        /** Afterpay interno: proyecciones y conciliación a cero no entran a auditoría. */
+        function nexusIsAfterpayProjectedQuota(tx) {
+            return !!(tx && tx.isProjected && String(tx.id || '').startsWith('proj_ap_'));
+        }
+
+        function nexusAfterpayProjectedParent(tx) {
+            if (!nexusIsAfterpayProjectedQuota(tx)) return null;
+            const m = String(tx.id).match(/^proj_ap_(.+)_(\d+)$/);
+            if (!m) return null;
+            return (state.tx || []).find(t => t.id === m[1] && t.type === 'afterpay') || null;
+        }
+
+        /** Contrato madre y recon a cero fuera; cuotas proyectadas vigentes de Afterpay sí entran a auditoría. */
         function nexusShouldShowTxInAudit(tx) {
             if (!tx) return false;
             if (tx.type === 'afterpay') return false;
-            if (tx.isProjected && String(tx.id || '').startsWith('proj_ap_')) return false;
-            if (tx.isProjected && /\[Pendiente\]/i.test(tx.note || '') && String(tx.id || '').startsWith('proj_ap_')) return false;
+            if (nexusIsAfterpayProjectedQuota(tx)) {
+                const parent = nexusAfterpayProjectedParent(tx);
+                if (!parent || parent.apRecon) return false;
+                return (parent.apPaid || 0) < (parent.apQuotas || 4);
+            }
             if (nexusIsAfterpayPaymentTx(tx)) {
                 const parent = nexusFindAfterpayParentForPayment(tx);
                 if (parent && parent.apRecon) return false;
@@ -9468,10 +9482,10 @@
             // Extraemos las proyecciones (cuotas) haciendo bypass temporal de la divisa activa
             const tempCurr = state.activeCurrency;
             state.activeCurrency = 'GLOBAL';
-            let projTxs = getEnrichedTx().filter(t => t.isProjected && !String(t.id || '').startsWith('proj_ap_'));
+            let projTxs = getEnrichedTx().filter(t => t.isProjected);
             state.activeCurrency = tempCurr;
 
-            // Unimos flujo real + proyecciones (sin cuotas Afterpay internas; filtro auditoría Afterpay)
+            // Flujo real + proyecciones (deudas, recurrentes y cuotas Afterpay vigentes vía nexusShouldShowTxInAudit)
             let combinedTxs = [...rawTxList, ...projTxs].filter(nexusShouldShowTxInAudit);
 
             let fTx = combinedTxs.filter(t => { 
@@ -9483,7 +9497,12 @@
 
                 if(tp !== 'all') {
                     if (tp === 'afterpay') {
-                        const isAp = rType === 'afterpay' || (t.cat || '').includes('Afterpay') || (t.note || '').includes('[Abono]') || (t.note || '').includes('[Pago Inicial]');
+                        const isAp = rType === 'afterpay'
+                            || nexusIsAfterpayProjectedQuota(t)
+                            || (t.cat || '').includes('Afterpay')
+                            || (t.note || '').includes('[Abono]')
+                            || (t.note || '').includes('[Pago Inicial]')
+                            || (t.note || '').includes('[Pendiente]');
                         if (!isAp) return false;
                     }
                     else if (tp === 'debt' && !(t.cat || '').includes('Deuda') && !(t.cat || '').includes('TC')) return false;
@@ -9595,7 +9614,7 @@
                 let cT = '', iB = '', iClass = '';
                 if (isInflow) { cT = isPar ? 'text-red-700' : 'text-emerald-500'; iB = 'bg-emerald-100 text-emerald-500'; iClass = 'fa-arrow-up'; }
                 else if (rType === 'afterpay') { cT = isPar ? 'text-purple-700' : 'text-purple-500'; iB = 'bg-purple-50 text-purple-500'; iClass = 'fa-layer-group'; }
-                else if (isOutflow && ((t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
+                else if (isOutflow && (nexusIsAfterpayProjectedQuota(t) || (t.cat && t.cat.includes('Afterpay')) || (t.note && (t.note.includes('[Abono]') || t.note.includes('[Pago Inicial]') || t.note.includes('[Pendiente]'))))) { cT = isPar ? 'text-teal-700' : 'text-teal-500'; iB = 'bg-teal-50 text-teal-500'; iClass = 'fa-layer-group'; }
                 else if (isOutflow && (t.cat && (t.cat.includes('Deuda') || t.cat.includes('TC')) || (t.note && t.note.includes('[TC]')))) { cT = isPar ? 'text-red-700' : 'text-orange-500'; iB = 'bg-orange-50 text-orange-500'; iClass = 'fa-landmark'; }
                 else if (isOutflow) { cT = isPar ? 'text-red-700' : 'text-red-500'; iB = 'bg-red-50 text-red-500'; iClass = 'fa-arrow-down'; }
                 else { cT = isPar ? 'text-red-700' : 'text-indigo-500'; iB = 'bg-indigo-50 text-indigo-500'; iClass = 'fa-right-left'; }
@@ -9632,6 +9651,8 @@
                     pBadge = `<span class="text-[8px] ${bCls} px-2 py-0.5 rounded-full ml-2 border">${bTxt}</span>`; 
                 } else if (rType === 'afterpay') {
                     pBadge = `<span class="text-[8px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full ml-2 border border-purple-200">COMPRA BNPL</span>`; 
+                } else if (nexusIsAfterpayProjectedQuota(t)) {
+                    pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200"><i class="fa-solid fa-layer-group mr-1"></i>CUOTA AFTERPAY</span>`;
                 } else if (t.note && (t.note.includes('[Abono Realizado]') || t.note.includes('[Abono]'))) { 
                     pBadge = `<span class="text-[8px] bg-teal-100 text-teal-600 px-2 py-0.5 rounded-full ml-2 border border-teal-200 shadow-sm"><i class="fa-solid fa-check mr-1"></i>CUOTA PAGADA</span>`; 
                 } else if (t.note && t.note.includes('[Pago Inicial]')) {
@@ -9649,7 +9670,11 @@
                 const textTitleClass = isPar ? 'text-red-700' : 'theme-text';
                 const textSubClass = isPar ? 'text-red-500' : 'text-slate-400';
                 
-                const deleteAction = t.isProjected ? `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')` : `deleteDatabaseRecord('${t.id}')`;
+                const deleteAction = t.isProjected
+                    ? (nexusIsAfterpayProjectedQuota(t)
+                        ? `alert('Cuota proyectada Afterpay: gestiona el contrato en Afterpay Hub (abonar o editar).')`
+                        : `alert('Para mantener la integridad, gestiona o elimina este pasivo directamente en la pestaña de Deudas / Pendientes.')`)
+                    : `deleteDatabaseRecord('${t.id}')`;
 
                 const dDate = new Date(t.date);
                 const amtFull = `${sign}${fmt(origAmt, origCur)}`;
@@ -10815,15 +10840,34 @@ ${JSON.stringify(dataToAnalyze)}`;
             return ios || standalone || navigator.standalone === true;
         }
 
+        /** App iOS (WKWebView) con puente Swift para abrir Safari in-app. */
+        function nexusHasNativePaymentBridge() {
+            const mh = window.webkit && window.webkit.messageHandlers;
+            return !!(mh && (mh.openExternalLink || mh.appInterface));
+        }
+
         function nexusLaunchExternalBrowser(url) {
             const u = nexusNormalizePaymentUrl(url);
             if (!u) return false;
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface) {
+            const mh = window.webkit && window.webkit.messageHandlers;
+            if (mh) {
                 try {
-                    window.webkit.messageHandlers.appInterface.postMessage({ action: 'openURL', url: u });
-                    return true;
-                } catch (e) { /* fallback web */ }
+                    if (mh.openExternalLink) {
+                        mh.openExternalLink.postMessage({ url: u });
+                        return true;
+                    }
+                    if (mh.appInterface) {
+                        mh.appInterface.postMessage({ action: 'openURL', url: u });
+                        return true;
+                    }
+                } catch (e) {
+                    console.warn('[NEXUS] puente nativo pago', e);
+                }
             }
+            try {
+                const w = window.open(u, '_blank', 'noopener,noreferrer');
+                if (w) return true;
+            } catch (e) { /* fallback anchor */ }
             const a = document.createElement('a');
             a.href = u;
             a.target = '_blank';
@@ -10844,8 +10888,13 @@ ${JSON.stringify(dataToAnalyze)}`;
         function redirigirPagoDirecto(url) {
             const u = nexusNormalizePaymentUrl(url);
             if (!u) return;
+            if (nexusHasNativePaymentBridge()) {
+                nexusLaunchExternalBrowser(u);
+                return;
+            }
             if (nexusIsIosPwaContext()) {
-                if (nexusLaunchExternalBrowser(u)) return;
+                nexusLaunchExternalBrowser(u);
+                return;
             }
             nexusOpenWebViewer(u, 'Portal de pago / recibo');
         }
