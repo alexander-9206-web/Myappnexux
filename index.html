@@ -784,7 +784,7 @@
                 </div>
                 <div class="space-y-4 pt-4 border-t border-slate-100">
                     <div class="flex items-center justify-between ml-2 mb-2 cursor-pointer select-none group" onclick="toggleDashAccounts()">
-                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-indigo-400 transition-colors">Cuentas (Sumador)</h3>
+                        <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-indigo-400 transition-colors" data-i18n="auto.cuentas_sumador">Cuentas (Sumador)</h3>
                         <i id="icon-dash-accounts" class="fa-solid fa-eye text-indigo-400 text-[12px] mr-2 transition-colors"></i>
                     </div>
                     <div id="accounts-container" data-i18n-skip="user-data" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0 animate-slideUp"></div>
@@ -4476,6 +4476,7 @@
 
         function nexusRequireAuthScreen() {
             document.documentElement.classList.add('nexus-auth-pending');
+            window.__nexusAppShellReady = false;
             sessionUnlocked = false;
             currentUser = null;
             isRootAdminUnlocked = false;
@@ -4495,6 +4496,8 @@
             if (ls) ls.classList.add('hidden');
             const lock = $id('session-lock-screen');
             if (lock) lock.classList.add('hidden');
+            window.__nexusAppShellReady = true;
+            if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
         }
 
         function nexusSanitizeStaleRedirectFlags() {
@@ -6082,10 +6085,12 @@
                 sessionUnlocked = true;
                 nexusHideSessionLock();
             }
+            initNexus();
             if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
                 nexusSetLanguage(state.settings.uiLanguage, { force: true });
+            } else if (typeof nexusApplyI18nToAllTabs === 'function') {
+                nexusApplyI18nToAllTabs();
             }
-            initNexus();
             if (!sessionUnlocked && !founderInstant) return;
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
@@ -6143,6 +6148,10 @@
             document.cookie = "nexus_current_user=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
 
             try { await nexusSignOutSessionForManualLogout(); } catch (e) { console.warn('[NEXUS] logout signOut', e); }
+
+            if (typeof nexusResetI18nOnLogout === 'function') {
+                try { nexusResetI18nOnLogout(); } catch (e) { console.warn('[NEXUS] i18n logout reset', e); }
+            }
 
             nexusRequireAuthScreen();
             hideLoginRoutingLoading();
@@ -7268,23 +7277,25 @@
                 if (!state) return;
                 if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
                 if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
-                const mh = $id('module-header-title');
-                if (mh && typeof getSystemModule === 'function') {
-                    const m = getSystemModule(state.activeTab);
-                    if (m && m.name) mh.textContent = m.name;
-                }
                 if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
                 if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
                 if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
                 requestAnimationFrame(() => {
-                    const sec = state.activeTab ? $id('tab-' + state.activeTab) : null;
-                    if (typeof nexusApplyI18nDom === 'function') try { nexusApplyI18nDom(sec); } catch (e) { /* i18n */ }
+                    if (typeof nexusApplyI18nToAllTabs === 'function') {
+                        try { nexusApplyI18nToAllTabs(); } catch (e) { /* i18n */ }
+                    }
                 });
             });
         }
 
         function nexusUi(text) {
             return (typeof nexusTranslateUiText === 'function') ? nexusTranslateUiText(text) : String(text != null ? text : '');
+        }
+
+        function nexusSetHtml(el, html) {
+            if (!el) return;
+            const raw = html != null ? String(html) : '';
+            el.innerHTML = (typeof nexusUiHtml === 'function') ? nexusUiHtml(raw) : raw;
         }
 
         function nexusInformeFlowCategoryLabel(flowType) {
@@ -7838,9 +7849,9 @@
 
             if (!isSameTab && typeof saveState === 'function') saveState();
 
-            if (typeof nexusGetLanguage === 'function' && nexusGetLanguage() === 'en' && typeof nexusApplyI18nDom === 'function') {
-                const sec = $id('tab-' + id);
-                requestAnimationFrame(() => { try { nexusApplyI18nDom(sec); } catch (e) { /* i18n tab */ } });
+            const sec = $id('tab-' + id);
+            if (sec && typeof nexusI18nRefresh === 'function') {
+                requestAnimationFrame(() => { try { nexusI18nRefresh(sec); } catch (e) { /* i18n tab */ } });
             }
         }
 
@@ -14948,7 +14959,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 if (typeof updateSettingsProfileCard === 'function') updateSettingsProfileCard(userProfile);
                 const em = $id('settings-profile-email'); if(em) em.innerText = userProfile.email;
                 if (typeof updateSettingsProfileCard === 'function') updateSettingsProfileCard(userProfile);
-                const tp = $id('settings-profile-type'); 
+                const tp = $id('settings-profile-type');
                 if(tp) {
                     if (isUserAdmin(userProfile)) {
                         tp.innerHTML = `<i class="fa-solid fa-user-shield text-red-600"></i> Administrador`;
@@ -14966,6 +14977,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
 
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+
+            const settingsTab = $id('tab-settings');
+            if (settingsTab && typeof nexusI18nRefresh === 'function') {
+                requestAnimationFrame(() => { try { nexusI18nRefresh(settingsTab); } catch (e) { /* i18n settings */ } });
+            }
         }
 
         // APEX FIX: Función de control explícito para Biometría
