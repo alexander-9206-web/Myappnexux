@@ -821,8 +821,8 @@
                     </div>
                 </div>
                 <p id="scanner-tx-count" class="text-[9px] font-bold text-blue-700"></p>
-                <div id="scanner-meta-panel" class="theme-card p-4 rounded-2xl border text-[9px] overflow-x-auto"></div>
-                <div id="scanner-tx-table-wrap" class="theme-card p-3 rounded-2xl border overflow-x-auto max-h-[min(55vh,520px)] min-h-[120px] hide-scrollbar"></div>
+                <div id="scanner-meta-panel" data-i18n-skip="user-data" class="theme-card p-4 rounded-2xl border text-[9px] overflow-x-auto"></div>
+                <div id="scanner-tx-table-wrap" data-i18n-skip="user-data" class="theme-card p-3 rounded-2xl border overflow-x-auto max-h-[min(55vh,520px)] min-h-[120px] hide-scrollbar"></div>
                 <div class="flex justify-between items-center bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg">
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total movimientos detectados</p>
                     <p id="scanner-total-val" class="text-xl font-black tracking-tighter tabular-nums">$0.00</p>
@@ -2673,9 +2673,9 @@
                 <div id="ai-key-status" class="hidden shrink-0"></div>
 
                 <div class="flex-1 overflow-y-auto hide-scrollbar space-y-4 pr-2">
-                    <div id="ai-response-container" class="hidden flex flex-col gap-2">
+                    <div id="ai-response-container" data-i18n-skip="ai-user" class="hidden flex flex-col gap-2">
                         <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 shadow-inner">
-                            <div id="ai-response-text" class="text-xs text-slate-700 leading-relaxed space-y-3">
+                            <div id="ai-response-text" data-i18n-skip="ai-user" class="text-xs text-slate-700 leading-relaxed space-y-3">
                                 <!-- Respuesta generada dinámicamente -->
                             </div>
                         </div>
@@ -7101,7 +7101,15 @@
                 if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
                 if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
                 if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
+                requestAnimationFrame(() => {
+                    const sec = state.activeTab ? $id('tab-' + state.activeTab) : null;
+                    if (typeof nexusApplyI18nDom === 'function') try { nexusApplyI18nDom(sec); } catch (e) { /* i18n */ }
+                });
             });
+        }
+
+        function nexusUi(text) {
+            return (typeof nexusTranslateUiText === 'function') ? nexusTranslateUiText(text) : String(text != null ? text : '');
         }
 
         function nexusInformeFlowCategoryLabel(flowType) {
@@ -7654,6 +7662,11 @@
             if (gearBtn) gearBtn.classList.toggle('hidden', id === 'settings');
 
             if (!isSameTab && typeof saveState === 'function') saveState();
+
+            if (typeof nexusGetLanguage === 'function' && nexusGetLanguage() === 'en' && typeof nexusApplyI18nDom === 'function') {
+                const sec = $id('tab-' + id);
+                requestAnimationFrame(() => { try { nexusApplyI18nDom(sec); } catch (e) { /* i18n tab */ } });
+            }
         }
 
         function toggleFab() { 
@@ -8291,7 +8304,13 @@
             charts.period = new Chart(ctx, { type: 'line', data: { labels: l, datasets: [{ data: dataVals, borderColor: state.theme.text, backgroundColor: 'rgba(0,0,0,0.05)', fill: true, tension: 0.4, borderWidth: 2 }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:true, grid:{display:false}, ticks:{font:{size:8, weight:'bold'}}}, y:{display:false}} } }); 
         }
 
-        function populateFilters() { const select = $id('period-cat-filter'); if(!select) return; select.innerHTML = '<option value="all">Todas las Categorías</option>'; getUserCategoryLabels().forEach(c => select.innerHTML += `<option value="${c}">${c}</option>`); }
+        function populateFilters() {
+            const select = $id('period-cat-filter');
+            if (!select) return;
+            const allCat = nexusUi('Todas las Categorías');
+            select.innerHTML = `<option value="all">${allCat}</option>`;
+            getUserCategoryLabels().forEach(c => { select.innerHTML += `<option value="${c}">${c}</option>`; });
+        }
 
         function setPeriodFilter(key, val) { 
             state.periodFilter[key] = val; 
@@ -10126,7 +10145,7 @@
             });
 
             for (const curr in groups) {
-                aS.innerHTML += `<optgroup label="--- Bóvedas en ${curr} ---">`;
+                aS.innerHTML += `<optgroup label="--- ${nexusUi('Bóvedas en')} ${curr} ---">`;
                 groups[curr].forEach(a => { aS.innerHTML += `<option value="${a.id}">${a.name}</option>`; });
                 aS.innerHTML += `</optgroup>`;
             }
