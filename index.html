@@ -6082,10 +6082,10 @@
                 sessionUnlocked = true;
                 nexusHideSessionLock();
             }
+            initNexus();
             if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
                 nexusSetLanguage(state.settings.uiLanguage, { force: true });
             }
-            initNexus();
             if (!sessionUnlocked && !founderInstant) return;
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
@@ -7266,18 +7266,17 @@
             if (typeof nexusOnLanguageChange !== 'function') return;
             nexusOnLanguageChange(function () {
                 if (!state) return;
-                if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
-                if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
-                const mh = $id('module-header-title');
-                if (mh && typeof getSystemModule === 'function') {
-                    const m = getSystemModule(state.activeTab);
-                    if (m && m.name) mh.textContent = m.name;
-                }
-                if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
-                if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
-                if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
                 requestAnimationFrame(() => {
-                    if (typeof nexusApplyI18nDom === 'function') try { nexusApplyI18nDom(); } catch (e) { /* i18n */ }
+                    const tabEl = $id('tab-' + (state.activeTab || 'home'));
+                    if (typeof nexusApplyI18nDom === 'function') {
+                        try { nexusApplyI18nDom(tabEl || null); } catch (e) { /* i18n */ }
+                    }
+                    if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
+                    else if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
+                    else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                    if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
+                    if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
+                    if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
                 });
             });
         }
@@ -7292,9 +7291,12 @@
         }
 
         function nexusI18nRefresh(root) {
-            if (typeof nexusGetLanguage !== 'function' || nexusGetLanguage() !== 'en') return;
+            if (typeof nexusGetLanguage !== 'function' || nexusGetLanguage() === 'es') return;
             if (typeof nexusApplyI18nDom !== 'function') return;
+            if (nexusI18nRefresh._pending) return;
+            nexusI18nRefresh._pending = true;
             requestAnimationFrame(() => {
+                nexusI18nRefresh._pending = false;
                 try { nexusApplyI18nDom(root || null); } catch (e) { /* i18n */ }
             });
         }
@@ -7844,6 +7846,7 @@
             if(id === 'taxes') renderTaxes(); 
             if(id === 'tasks' && isSameTab) renderTasksTab(); 
             if(id === 'projects') renderProjectsTab();
+            if (id === 'home') updateDashboard();
 
             const gearBtn = $id('header-settings-gear-btn');
             if (gearBtn) gearBtn.classList.toggle('hidden', id === 'settings');
