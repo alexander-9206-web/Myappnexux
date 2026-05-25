@@ -5907,6 +5907,9 @@
                 sessionUnlocked = true;
                 nexusHideSessionLock();
             }
+            if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
+                nexusSetLanguage(state.settings.uiLanguage, { force: true });
+            }
             initNexus();
             if (!sessionUnlocked && !founderInstant) return;
             
@@ -7082,8 +7085,35 @@
             if (laterBtn) laterBtn.onclick = () => { sessionStorage.setItem('nexus_pin_banner_ok', '1'); box.remove(); };
         }
 
+        function nexusWireI18nHooks() {
+            if (nexusWireI18nHooks._done) return;
+            nexusWireI18nHooks._done = true;
+            if (typeof nexusOnLanguageChange !== 'function') return;
+            nexusOnLanguageChange(function () {
+                if (!state) return;
+                if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
+                if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
+                const mh = $id('module-header-title');
+                if (mh && typeof getSystemModule === 'function') {
+                    const m = getSystemModule(state.activeTab);
+                    if (m && m.name) mh.textContent = m.name;
+                }
+                if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
+                if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
+                if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
+            });
+        }
+
+        function nexusInformeFlowCategoryLabel(flowType) {
+            const t = (k, fb) => (typeof nexusT === 'function' ? nexusT(k) : fb);
+            if (flowType === 'income') return t('audit.incomeCategory', 'Categoría de ingreso');
+            if (flowType === 'expense') return t('audit.expenseCategory', 'Categoría de gasto');
+            return t('common.category', 'Categoría');
+        }
+
         function initNexus() {
             if (!sessionUnlocked || !currentUser) return;
+            nexusWireI18nHooks();
             nexusWireModalAutoClose();
             installNexusNativeNavigation();
             applyThemeCSS();
@@ -7624,7 +7654,6 @@
             if (gearBtn) gearBtn.classList.toggle('hidden', id === 'settings');
 
             if (!isSameTab && typeof saveState === 'function') saveState();
-            if (typeof nexusApplyI18nDom === 'function') try { nexusApplyI18nDom(); } catch (e) { /* i18n */ }
         }
 
         function toggleFab() { 
@@ -11778,20 +11807,17 @@
             let typeB = $id('informe-type-b') ? $id('informe-type-b').value : 'income';
             const labelA = $id('informe-cat-a') && $id('informe-cat-a').previousElementSibling;
             const labelB = $id('informe-cat-b') && $id('informe-cat-b').previousElementSibling;
-            if (labelA) {
-                labelA.textContent = typeA === 'income' ? 'Categoría de ingreso' : typeA === 'expense' ? 'Categoría de gasto' : 'Categoría';
-            }
-            if (labelB) {
-                labelB.textContent = typeB === 'income' ? 'Categoría de ingreso' : typeB === 'expense' ? 'Categoría de gasto' : 'Categoría';
-            }
+            if (labelA) labelA.textContent = nexusInformeFlowCategoryLabel(typeA);
+            if (labelB) labelB.textContent = nexusInformeFlowCategoryLabel(typeB);
             const optsA = collectInformeCategoryOptions(typeA);
             const optsB = collectInformeCategoryOptions(typeB);
             const buildOpts = (list, typeFilter) => {
+                const t = (k, fb) => (typeof nexusT === 'function' ? nexusT(k) : fb);
                 const allLabel = typeFilter === 'income'
-                    ? '— Todas las categorías de ingreso —'
+                    ? t('audit.allIncomeCategories', '— Todas las categorías de ingreso —')
                     : typeFilter === 'expense'
-                        ? '— Todas las categorías de gasto —'
-                        : '— Todas las categorías —';
+                        ? t('audit.allExpenseCategories', '— Todas las categorías de gasto —')
+                        : t('audit.allCategories', '— Todas las categorías —');
                 let html = `<option value="__all__">${allLabel}</option>`;
                 const byParent = {};
                 list.forEach(c => {
@@ -14695,7 +14721,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             const apsEl = $id('set-audit-page-size'); if(apsEl) apsEl.value = String(state.settings.auditPageSize || 20);
             const langEl = $id('set-language');
             if (langEl) langEl.value = (state.settings.uiLanguage || (typeof nexusGetLanguage === 'function' ? nexusGetLanguage() : 'es') || 'es');
-            if (typeof nexusInitI18n === 'function') try { nexusApplyI18nDom(); } catch (e) { /* i18n opcional */ }
             
             if (typeof renderAiSettingsUI === 'function') renderAiSettingsUI();
 
