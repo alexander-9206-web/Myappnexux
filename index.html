@@ -23,7 +23,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- i18n: prueba locales/ (Cursor) y raíz (GitHub); si fallan los .js, carga es.json + en.json -->
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <!-- i18n en segundo plano (no bloquea login ni arranque) -->
     <script>
     (function () {
         var files = ['nexus-locale-es.js', 'nexus-locale-en.js', 'nexus-i18n.js'];
@@ -31,6 +32,8 @@
             if (idx >= files.length) return cb(true);
             var s = document.createElement('script');
             s.src = base + files[idx];
+            s.async = true;
+            s.defer = true;
             s.onload = function () { loadChain(base, idx + 1, cb); };
             s.onerror = function () {
                 if (base === 'locales/') loadChain('', 0, cb);
@@ -38,9 +41,13 @@
             };
             document.head.appendChild(s);
         }
-        loadChain('locales/', 0, function (ok) {
-            if (!ok) console.warn('[NEXUS i18n] No se encontraron scripts en locales/ ni en la raíz.');
-        });
+        function start() {
+            loadChain('locales/', 0, function (ok) {
+                if (!ok) console.warn('[NEXUS i18n] No se encontraron scripts en locales/ ni en la raíz.');
+            });
+        }
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(start, { timeout: 8000 });
+        else setTimeout(start, 800);
     })();
     </script>
     <style>  
@@ -647,51 +654,44 @@
                 </button>
                 <script>
                 (function nexusGoogleLoginEarlyWire() {
-                    function setBusy(busy) {
-                        var btn = document.getElementById('nexus-google-login-btn');
-                        if (!btn) return;
-                        if (busy) {
-                            btn.disabled = true;
-                            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-slate-400 text-lg"></i> Conectando...';
-                        } else if (!window.__nexusGoogleLoginInFlight) {
-                            btn.disabled = false;
+                    function runGoogleAuth() {
+                        var ch = window.__nexusAuthChannel || document.documentElement.getAttribute('data-nexus-auth-channel') || 'web-popup';
+                        if (typeof window.nexusClearManualLogoutBlock === 'function') window.nexusClearManualLogoutBlock();
+                        if (ch === 'ios-native' && typeof window.nexusGoogleAuthViaNativeRepository === 'function') {
+                            window.nexusGoogleAuthViaNativeRepository();
+                            return true;
                         }
+                        if (typeof window.nexusGoogleAuthViaWebPopup === 'function') {
+                            window.nexusGoogleAuthViaWebPopup();
+                            return true;
+                        }
+                        return false;
                     }
                     function dispatchGoogle(ev) {
                         if (ev) { ev.preventDefault(); ev.stopImmediatePropagation(); }
                         if (window.__nexusGoogleLoginInFlight) return;
                         window.__nexusUserTriggeredGoogleLogin = true;
-                        window.__nexusGoogleLoginInFlight = true;
+                        window.__nexusPendingGoogleClick = true;
                         try {
                             sessionStorage.removeItem('nexus_google_redirect_pending');
                             sessionStorage.removeItem('nexus_auth_use_redirect');
                         } catch (e) {}
-                        setBusy(true);
-                        var ch = window.__nexusAuthChannel || document.documentElement.getAttribute('data-nexus-auth-channel') || 'web-popup';
-                        var tries = 0;
-                        function attempt() {
-                            if (typeof window.nexusClearManualLogoutBlock === 'function') window.nexusClearManualLogoutBlock();
-                            if (ch === 'ios-native' && typeof window.nexusGoogleAuthViaNativeRepository === 'function') {
-                                window.nexusGoogleAuthViaNativeRepository();
-                                return;
-                            }
-                            if (typeof window.nexusGoogleAuthViaWebPopup === 'function') {
-                                window.nexusGoogleAuthViaWebPopup();
-                                return;
-                            }
-                            if (typeof window.nexusSyncGoogleLoginButton === 'function') {
-                                window.nexusSyncGoogleLoginButton();
-                                var btn = document.getElementById('nexus-google-login-btn');
-                                if (btn && typeof btn.onclick === 'function') { btn.onclick(ev); return; }
-                            }
-                            if (++tries < 300) setTimeout(attempt, 50);
-                            else {
-                                window.__nexusGoogleLoginInFlight = false;
-                                setBusy(false);
-                                alert('La app sigue cargando. Espera unos segundos y vuelve a pulsar Continuar con Google.');
-                            }
+                        if (runGoogleAuth()) {
+                            window.__nexusPendingGoogleClick = false;
+                            return;
                         }
-                        attempt();
+                        var tries = 0;
+                        (function waitAuth() {
+                            if (runGoogleAuth()) {
+                                window.__nexusPendingGoogleClick = false;
+                                return;
+                            }
+                            if (++tries < 400) setTimeout(waitAuth, 16);
+                            else {
+                                window.__nexusPendingGoogleClick = false;
+                                alert('La app sigue cargando. Espera un momento y vuelve a pulsar Continuar con Google.');
+                            }
+                        })();
                     }
                     window.nexusEarlyGoogleLoginClick = dispatchGoogle;
                     window.nexusWireGoogleLoginEarly = function () {
@@ -4569,10 +4569,11 @@
             const lock = $id('session-lock-screen');
             if (lock) lock.classList.add('hidden');
             if (typeof nexusSanitizeStaleRedirectFlags === 'function') nexusSanitizeStaleRedirectFlags();
-            if (typeof requestAnimationFrame === 'function' && typeof nexusApplyI18nDom === 'function') {
-                requestAnimationFrame(() => {
-                    try { nexusApplyI18nDom(); } catch (e) { console.warn('[NEXUS i18n]', e); }
-                });
+            if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
+            else if (typeof nexusApplyI18nDom === 'function') {
+                const run = () => { try { nexusApplyI18nDom(); } catch (e) { console.warn('[NEXUS i18n]', e); } };
+                if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 4000 });
+                else setTimeout(run, 200);
             }
         }
 
@@ -5594,7 +5595,6 @@
             let redirectStarted = false;
             window.__nexusGoogleLoginInFlight = true;
             window.__nexusUserTriggeredGoogleLogin = true;
-            nexusSetGoogleLoginButtonBusy(true);
             try {
                 const originErr = nexusAuthOriginBlocked();
                 if (originErr) {
@@ -5610,6 +5610,7 @@
                     preferRedirect: nexusPreferGoogleRedirect()
                 });
                 const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
+                nexusSetGoogleLoginButtonBusy(true);
 
                 if (useRedirectFirst) {
                     sessionStorage.setItem('nexus_auth_use_redirect', '1');
@@ -5684,14 +5685,27 @@
             if (channel === 'ios-native') return nexusGoogleAuthViaNativeRepository();
             return nexusGoogleAuthViaWebPopup();
         }
+        function nexusFlushPendingGoogleLogin() {
+            if (!window.__nexusPendingGoogleClick || !window.__nexusUserTriggeredGoogleLogin) return;
+            if (window.__nexusGoogleLoginInFlight) return;
+            window.__nexusPendingGoogleClick = false;
+            const ch = nexusGetAuthChannel();
+            if (typeof nexusClearManualLogoutBlock === 'function') nexusClearManualLogoutBlock();
+            if (ch === 'ios-native') nexusGoogleAuthViaNativeRepository();
+            else nexusGoogleAuthViaWebPopup();
+        }
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
         window.nexusGoogleAuthViaNativeRepository = nexusGoogleAuthViaNativeRepository;
         window.nexusGoogleAuthViaWebPopup = nexusGoogleAuthViaWebPopup;
         window.nexusSyncGoogleLoginButton = nexusSyncGoogleLoginButton;
+        window.nexusFlushPendingGoogleLogin = nexusFlushPendingGoogleLogin;
         window.nexusHandleGoogleRedirectOnLoad = nexusHandleGoogleRedirectOnLoad;
         window.isNexusNativeContainer = isNexusNativeContainer;
         window.isNexusWebBrowser = isNexusWebBrowser;
+        window.__nexusAuthRuntimeReady = true;
         if (typeof nexusSyncGoogleLoginButton === 'function') nexusSyncGoogleLoginButton();
+        try { nexusFlushPendingGoogleLogin(); } catch (e) { console.warn('[NEXUS] flush pending Google', e); }
+        try { window.dispatchEvent(new Event('nexus-auth-ready')); } catch (e) { /* ignore */ }
 
         async function nexusApplyNativeGoogleCredential(payload, expectedEmail) {
             const idToken = payload?.idToken || payload?.token || '';
