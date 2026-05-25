@@ -13,6 +13,7 @@
     let loadPromise = null;
     let esToEnMap = null;
     let esToEnEntries = null;
+    let enToEsEntries = null;
     let mapCacheLang = null;
     let applyScheduled = false;
     let applyingI18n = false;
@@ -103,6 +104,7 @@
     function invalidateEsToEnCache() {
         esToEnMap = null;
         esToEnEntries = null;
+        enToEsEntries = null;
         mapCacheLang = null;
     }
 
@@ -145,8 +147,17 @@
     function nexusT(key, params, lang) {
         const l = normalizeLang(lang || currentLang);
         const bundles = getBundles();
-        let val = deepGet(bundles[l], key);
-        if (val === undefined && l !== DEFAULT_LANG) val = deepGet(bundles[DEFAULT_LANG], key);
+        let val;
+        if (key && String(key).startsWith('auto.')) {
+            const ak = String(key).slice(5);
+            val = bundles[l] && bundles[l].auto && bundles[l].auto[ak];
+            if (val === undefined && l !== DEFAULT_LANG && bundles[DEFAULT_LANG] && bundles[DEFAULT_LANG].auto) {
+                val = bundles[DEFAULT_LANG].auto[ak];
+            }
+        } else {
+            val = deepGet(bundles[l], key);
+            if (val === undefined && l !== DEFAULT_LANG) val = deepGet(bundles[DEFAULT_LANG], key);
+        }
         if (val === undefined) return key;
         return interpolate(String(val), params);
     }
@@ -158,6 +169,29 @@
     function isUserDataZone(el) {
         if (!el || !el.closest) return false;
         return !!el.closest('[data-i18n-skip]');
+    }
+
+    const DYNAMIC_HOME_IDS = new Set([
+        'net-worth-container', 'accounts-container', 'dash-modules-grid',
+        'dash-tasks-container', 'period-list', 'chart-7days', 'chart-period'
+    ]);
+
+    function isDynamicInjectZone(el) {
+        if (!el || !el.closest) return false;
+        let p = el;
+        while (p) {
+            if (p.id && DYNAMIC_HOME_IDS.has(p.id)) return true;
+            p = p.parentElement;
+        }
+        return false;
+    }
+
+    function getAllAppTabSections() {
+        const doc = global.document;
+        if (!doc) return [];
+        const main = doc.getElementById('nexus-app-main');
+        if (!main) return [];
+        return Array.from(main.querySelectorAll('.tab-content'));
     }
 
     function isUserDynamicOption(el) {
@@ -189,13 +223,41 @@
         if (bag[attr] === undefined) bag[attr] = el.getAttribute(attr) || '';
     }
 
+    function applyDataI18nElements(scope) {
+        applyStructuredDom(scope);
+    }
+
+    function textNodeToSpanish(node) {
+        const entries = getEnToEsEntries();
+        if (!entries.length) return false;
+        const raw = node.textContent;
+        const norm = normalizeText(raw);
+        if (!isValidUiString(norm)) return false;
+        for (let i = 0; i < entries.length; i++) {
+            if (entries[i][0] === norm) {
+                const lead = raw.match(/^\s*/)[0];
+                const trail = raw.match(/\s*$/)[0];
+                node.textContent = lead + entries[i][1] + trail;
+                return true;
+            }
+        }
+        if (origText.has(node)) {
+            node.textContent = origText.get(node);
+            return true;
+        }
+        return false;
+    }
+
     function restoreDomToSpanish(root) {
         const scope = root || global.document.body;
         if (!scope) return;
+        const es = getBundles().es;
         scope.querySelectorAll('[data-i18n]').forEach((el) => {
             const key = el.getAttribute('data-i18n');
-            const es = getBundles().es;
-            const val = deepGet(es, key);
+            let val = deepGet(es, key);
+            if ((!val || val === key) && key && key.startsWith('auto.')) {
+                val = es && es.auto && es.auto[key.slice(5)];
+            }
             if (!val || val === key) return;
             const attr = el.getAttribute('data-i18n-attr');
             if (attr) el.setAttribute(attr, val);
@@ -204,18 +266,39 @@
         const tw = global.document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
         let n;
         while ((n = tw.nextNode())) {
-            if (origText.has(n)) n.textContent = origText.get(n);
+            textNodeToSpanish(n);
         }
         scope.querySelectorAll('option').forEach((el) => {
+            if (isUserDataZone(el) || isUserDynamicOption(el)) return;
             const bag = origAttr.get(el);
-            if (bag && bag._label !== undefined) el.textContent = bag._label;
+            if (bag && bag._label !== undefined) {
+                el.textContent = bag._label;
+                return;
+            }
+            textNodeToSpanish(el);
         });
-        scope.querySelectorAll('input, textarea, select, button, label, [title], [aria-label]').forEach((el) => {
+        const attrNames = ['placeholder', 'title', 'aria-label', 'label'];
+        scope.querySelectorAll('input, textarea, select, button, label, optgroup, [title], [aria-label]').forEach((el) => {
+            if (isUserDataZone(el)) return;
             const bag = origAttr.get(el);
-            if (!bag) return;
-            Object.keys(bag).forEach((attr) => {
-                if (attr === '_label') return;
-                el.setAttribute(attr, bag[attr]);
+            if (bag) {
+                Object.keys(bag).forEach((attr) => {
+                    if (attr === '_label') return;
+                    el.setAttribute(attr, bag[attr]);
+                });
+            }
+            attrNames.forEach((attr) => {
+                if (!el.hasAttribute(attr)) return;
+                const raw = el.getAttribute(attr);
+                const norm = normalizeText(raw);
+                if (!norm || !isValidUiString(norm)) return;
+                const entries = getEnToEsEntries();
+                for (let i = 0; i < entries.length; i++) {
+                    if (entries[i][0] === norm) {
+                        el.setAttribute(attr, entries[i][1]);
+                        return;
+                    }
+                }
             });
         });
     }
@@ -283,6 +366,7 @@
                 if (isUserDataZone(pe)) return NodeFilter.FILTER_REJECT;
                 if (pe.tagName === 'OPTION' && isUserDynamicOption(pe)) return NodeFilter.FILTER_REJECT;
                 if (pe.closest && pe.closest('[data-i18n]')) return NodeFilter.FILTER_REJECT;
+                if (isDynamicInjectZone(pe)) return NodeFilter.FILTER_REJECT;
                 const t = normalizeText(node.textContent);
                 if (!isValidUiString(t)) return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
@@ -428,8 +512,8 @@
     }
 
     function refreshDashboardLabelsOnly() {
-        if (!global.state || !global.state.activeTab) return;
         applySystemModulesI18n();
+        if (typeof global.renderDashboardModules === 'function') global.renderDashboardModules();
     }
 
     function stateActiveTab() {
@@ -438,7 +522,7 @@
 
     /** En Nexus Identity solo traduce el panel de login; nunca el dashboard oculto. */
     function resolveI18nScope(root) {
-        if (root) return root;
+        if (root && root.nodeType === 1) return root;
         const doc = global.document;
         if (!doc) return null;
         const html = doc.documentElement;
@@ -456,56 +540,381 @@
         return doc.getElementById('tab-home') || doc.body;
     }
 
-    function nexusApplyI18nDom(root) {
-        if (!ready || applyingI18n) return;
+    function getEnToEsEntries() {
+        if (!enToEsEntries) {
+            if (!esToEnMap) getEsToEnEntries();
+            const rev = new Map();
+            if (esToEnMap) {
+                esToEnMap.forEach((en, es) => {
+                    if (en && es && en !== es) rev.set(normalizeText(en), es);
+                });
+            }
+            enToEsEntries = [...rev.entries()].sort((a, b) => b[0].length - a[0].length);
+        }
+        return enToEsEntries;
+    }
+
+    function walkDomReverseSpanish(root) {
+        const scope = root || global.document.body;
+        if (!scope) return;
+        const entries = getEnToEsEntries();
+        if (!entries.length) return;
+        const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG']);
+        const attrNames = ['placeholder', 'title', 'aria-label'];
+
+        scope.querySelectorAll('input, textarea').forEach((el) => {
+            if (isUserDataZone(el)) return;
+            attrNames.forEach((attr) => {
+                if (!el.hasAttribute(attr)) return;
+                const raw = el.getAttribute(attr);
+                const norm = normalizeText(raw);
+                if (!norm || !isValidUiString(norm)) return;
+                const bag = origAttr.get(el);
+                if (bag && bag[attr] !== undefined) {
+                    el.setAttribute(attr, bag[attr]);
+                    return;
+                }
+                for (let i = 0; i < entries.length; i++) {
+                    if (entries[i][0] === norm) {
+                        el.setAttribute(attr, entries[i][1]);
+                        return;
+                    }
+                }
+            });
+        });
+
+        scope.querySelectorAll('option').forEach((el) => {
+            if (isUserDataZone(el) || isUserDynamicOption(el)) return;
+            const bag = origAttr.get(el);
+            if (bag && bag._label !== undefined) {
+                el.textContent = bag._label;
+                return;
+            }
+            const norm = normalizeText(el.textContent);
+            if (!isValidUiString(norm)) return;
+            for (let i = 0; i < entries.length; i++) {
+                if (entries[i][0] === norm) {
+                    el.textContent = entries[i][1];
+                    return;
+                }
+            }
+        });
+
+        const walker = global.document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                const pe = node.parentElement;
+                if (!pe || skipTags.has(pe.tagName)) return NodeFilter.FILTER_REJECT;
+                if (isUserDataZone(pe)) return NodeFilter.FILTER_REJECT;
+                if (pe.tagName === 'OPTION' && isUserDynamicOption(pe)) return NodeFilter.FILTER_REJECT;
+                if (pe.closest && pe.closest('[data-i18n]')) return NodeFilter.FILTER_REJECT;
+                if (isDynamicInjectZone(pe)) return NodeFilter.FILTER_REJECT;
+                const t = normalizeText(node.textContent);
+                if (!isValidUiString(t)) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        let node;
+        while ((node = walker.nextNode())) {
+            textNodeToSpanish(node);
+        }
+    }
+
+    function applySpanishToScope(scope) {
+        if (!scope) return;
+        restoreDomToSpanish(scope);
+        applyDataI18nElements(scope);
+        walkDomReverseSpanish(scope);
+        applyDataI18nElements(scope);
+    }
+
+    function applyEnglishToScope(scope) {
+        if (!scope) return;
+        getEsToEnEntries();
+        applyDataI18nElements(scope);
+        walkDomTranslations(scope);
+        applyDataI18nElements(scope);
+    }
+
+    const SETTINGS_ACC_I18N = {
+        security: 'settings.security',
+        ios: 'settings.iosAlerts',
+        engine: 'settings.engineGlobal',
+        visual: 'settings.visual',
+        categories: 'settings.categories',
+        maintenance: 'settings.maintenance',
+        admin: 'settings.adminRoot'
+    };
+
+    function nexusApplySettingsPanelLabels() {
+        const doc = global.document;
+        if (!doc) return;
+        const setText = (id, key) => {
+            const el = doc.getElementById(id);
+            if (!el) return;
+            const v = nexusT(key);
+            if (v && v !== key) el.textContent = v;
+        };
+        const pairs = [
+            ['settings-label-phone', 'settings.phone'],
+            ['settings-label-lastaccess', 'settings.lastAccess'],
+            ['settings-label-bio', 'settings.biometrics'],
+            ['settings-label-transfer', 'settings.transferData'],
+            ['settings-label-transfer-warn', 'settings.transferDataWarn'],
+            ['settings-profile-transfer-empty', 'settings.transferEmpty'],
+            ['settings-label-active-vault', 'settings.activeVault'],
+            ['settings-ai-engine-title', 'settings.aiEngine'],
+            ['settings-label-ai-provider', 'settings.aiProvider'],
+            ['settings-label-ai-model', 'settings.aiModel'],
+            ['settings-label-ai-key', 'settings.aiApiKey'],
+            ['settings-btn-ai-save', 'settings.aiSaveFirebase'],
+            ['settings-backups-title', 'settings.backups'],
+            ['settings-backups-hint', 'settings.backupsHint'],
+            ['settings-label-backup-time', 'settings.backupTime'],
+            ['settings-label-backup-suffix', 'settings.backupSuffix'],
+            ['settings-btn-export', 'settings.exportNow'],
+            ['settings-btn-restore', 'settings.restoreJson'],
+            ['settings-label-records-block', 'settings.recordsPerBlock'],
+            ['settings-label-language-select', 'settings.languageLabel']
+        ];
+        pairs.forEach(([id, key]) => setText(id, key));
+        Object.keys(SETTINGS_ACC_I18N).forEach((accId) => {
+            const item = doc.querySelector('#tab-settings [data-settings-acc-id="' + accId + '"]');
+            if (!item) return;
+            const key = SETTINGS_ACC_I18N[accId];
+            const title = nexusT(key);
+            if (title && title !== key) item.setAttribute('data-settings-acc-title', title);
+        });
+        if (typeof global.refreshSettingsAccordionHeads === 'function') {
+            try { global.refreshSettingsAccordionHeads(); } catch (e) { /* ignore */ }
+        }
+        if (global.userProfile && typeof global.updateSettingsProfileCard === 'function') {
+            try { global.updateSettingsProfileCard(global.userProfile); } catch (e) { /* ignore */ }
+        }
+    }
+
+    function getFullAppI18nRoot() {
+        const doc = global.document;
+        if (!doc) return null;
+        return doc.getElementById('nexus-app-main') || doc.body;
+    }
+
+    function applyGlobalI18nSideEffects() {
+        applySystemModulesI18n();
+        applyTabHeadings();
+        applyStaticControlLabels();
+        applyKnownIds();
+        refreshDashboardLabelsOnly();
+        const tab = stateActiveTab();
+        if (tab && global.getSystemModule) {
+            const m = global.getSystemModule(tab);
+            if (m && m.name) {
+                try { global.document.title = 'NEXUS AR · ' + m.name; } catch (e) { /* ignore */ }
+            }
+        }
+    }
+
+    function nexusApplyI18nDom(root, opts) {
+        if (!ready) return;
+        const options = opts || {};
+        if (applyingI18n && !options.force) return;
         applyingI18n = true;
         try {
             applyDocumentLang(currentLang);
-            if (currentLang === DEFAULT_LANG) {
-                applyKnownIds();
-                return;
-            }
-            getEsToEnEntries();
-            const scope = resolveI18nScope(root);
-            const isHomeTab = scope && scope.id === 'tab-home';
-            if (scope && !isHomeTab) {
-                applyStructuredDom(scope);
-                walkDomTranslations(scope);
-            } else if (scope) {
-                applyStructuredDom(scope);
-            }
-            applySystemModulesI18n();
-            applyTabHeadings();
-            applyStaticControlLabels();
-            applyKnownIds();
-            refreshDashboardLabelsOnly();
-            const tab = stateActiveTab();
-            if (tab && global.getSystemModule) {
-                const m = global.getSystemModule(tab);
-                if (m && m.name) {
-                    try { global.document.title = 'NEXUS AR · ' + m.name; } catch (e) { /* ignore */ }
+            if (options.fullApp && global.__nexusAppShellReady) {
+                const rootFull = getFullAppI18nRoot();
+                if (rootFull) {
+                    if (currentLang === DEFAULT_LANG) applySpanishToScope(rootFull);
+                    else applyEnglishToScope(rootFull);
+                    applyGlobalI18nSideEffects();
+                    return;
+                }
+                const tabs = getAllAppTabSections();
+                if (tabs.length) {
+                    if (currentLang === DEFAULT_LANG) tabs.forEach(applySpanishToScope);
+                    else tabs.forEach(applyEnglishToScope);
+                    applyGlobalI18nSideEffects();
+                    return;
                 }
             }
+            if (currentLang === DEFAULT_LANG) {
+                const scopeEs = resolveI18nScope(root);
+                if (scopeEs) applySpanishToScope(scopeEs);
+                applyGlobalI18nSideEffects();
+                return;
+            }
+            const scope = resolveI18nScope(root);
+            if (scope) applyEnglishToScope(scope);
+            applyGlobalI18nSideEffects();
         } finally {
             applyingI18n = false;
         }
     }
 
-    /** Traducción ligera por pestaña (no bloquea Inicio / dashboard). */
-    function nexusI18nRefresh(root) {
-        if (!ready || !root || currentLang === DEFAULT_LANG) return;
-        if (root.id === 'tab-home') {
-            applyStaticControlLabels();
-            refreshDashboardLabelsOnly();
-            return;
+    function nexusApplyI18nToAllTabs() {
+        return nexusApplyI18nDom(null, { fullApp: true, force: true });
+    }
+
+    function yieldToMain() {
+        return new Promise((resolve) => {
+            if (typeof global.requestAnimationFrame === 'function') global.requestAnimationFrame(() => resolve());
+            else setTimeout(resolve, 0);
+        });
+    }
+
+    function ensureLangProgressOverlay() {
+        const doc = global.document;
+        if (!doc || !doc.body) return null;
+        let el = doc.getElementById('nexus-lang-progress-overlay');
+        if (el) return el;
+        el = doc.createElement('div');
+        el.id = 'nexus-lang-progress-overlay';
+        el.className = 'hidden';
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-modal', 'true');
+        el.setAttribute('aria-labelledby', 'nexus-lang-progress-label');
+        el.innerHTML = '<div id="nexus-lang-progress-card"><p id="nexus-lang-progress-label" class="text-[10px] font-black uppercase tracking-widest text-slate-500 text-center mb-3">Cambiando idioma</p><div id="nexus-lang-progress-bar"><div id="nexus-lang-progress-fill"></div></div><p id="nexus-lang-progress-pct" class="text-center text-lg font-black tabular-nums text-indigo-600 mt-3">0%</p><p id="nexus-lang-progress-step" class="text-[8px] font-bold text-slate-400 text-center mt-2 uppercase tracking-wide">Iniciando…</p></div>';
+        doc.body.appendChild(el);
+        return el;
+    }
+
+    function setLangProgressOverlay(pct, stepLabel) {
+        const overlay = ensureLangProgressOverlay();
+        if (!overlay) return;
+        const fill = global.document.getElementById('nexus-lang-progress-fill');
+        const pctEl = global.document.getElementById('nexus-lang-progress-pct');
+        const stepEl = global.document.getElementById('nexus-lang-progress-step');
+        const label = global.document.getElementById('nexus-lang-progress-label');
+        const p = Math.min(100, Math.max(0, Math.round(pct)));
+        if (fill) fill.style.width = p + '%';
+        if (pctEl) pctEl.textContent = p + '%';
+        if (stepEl && stepLabel) stepEl.textContent = stepLabel;
+        if (label) {
+            label.textContent = currentLang === DEFAULT_LANG
+                ? (nexusT('settings.languageApplyingEs') !== 'settings.languageApplyingEs' ? nexusT('settings.languageApplyingEs') : 'Aplicando español')
+                : (nexusT('settings.languageApplyingEn') !== 'settings.languageApplyingEn' ? nexusT('settings.languageApplyingEn') : 'Applying English');
         }
+    }
+
+    function showLangProgressOverlay() {
+        const overlay = ensureLangProgressOverlay();
+        if (overlay) overlay.classList.remove('hidden');
+        setLangProgressOverlay(0, 'Iniciando…');
+    }
+
+    function hideLangProgressOverlay() {
+        const overlay = global.document && global.document.getElementById('nexus-lang-progress-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    async function nexusApplyFullAppI18nWithProgress() {
+        if (!ready) {
+            const ok = await nexusEnsureLocalesLoaded();
+            if (!ok) return false;
+            ready = true;
+        }
+        const root = getFullAppI18nRoot();
+        const steps = ['Preparando…', 'Traduciendo UI…', 'Módulos', 'Dashboard', 'Listo'];
+        const total = steps.length;
+        let step = 0;
+        const bump = async (msg) => {
+            step += 1;
+            setLangProgressOverlay((step / total) * 100, msg);
+            await yieldToMain();
+        };
+        global.__nexusI18nBatchActive = true;
+        applyingI18n = true;
+        try {
+            applyDocumentLang(currentLang);
+            await bump(steps[0]);
+            if (root) {
+                if (currentLang === DEFAULT_LANG) applySpanishToScope(root);
+                else applyEnglishToScope(root);
+            } else {
+                const tabs = getAllAppTabSections();
+                tabs.forEach((tab) => {
+                    if (currentLang === DEFAULT_LANG) applySpanishToScope(tab);
+                    else applyEnglishToScope(tab);
+                });
+            }
+            await bump(steps[1]);
+            applyGlobalI18nSideEffects();
+            await bump(steps[2]);
+            if (typeof global.updateDashboard === 'function') {
+                try { global.updateDashboard(); } catch (e) { /* ignore */ }
+            }
+            if (typeof global.refreshSettingsAccordionHeads === 'function') {
+                try { global.refreshSettingsAccordionHeads(); } catch (e) { /* ignore */ }
+            }
+            nexusApplySettingsPanelLabels();
+            if (root && currentLang === DEFAULT_LANG) applySpanishToScope(root);
+            else if (root) applyEnglishToScope(root);
+            if (global.state && global.state.activeTab) {
+                const activeId = global.state.activeTab;
+                if (activeId === 'database' && typeof global.renderDatabase === 'function') {
+                    try { global.renderDatabase(); } catch (e) { /* ignore */ }
+                }
+                if (activeId === 'tasks' && typeof global.renderTasksTab === 'function') {
+                    try { global.renderTasksTab(); } catch (e) { /* ignore */ }
+                }
+            }
+            await bump(steps[3]);
+            setLangProgressOverlay(100, steps[4]);
+            await yieldToMain();
+            return true;
+        } finally {
+            applyingI18n = false;
+            global.__nexusI18nBatchActive = false;
+        }
+    }
+
+    async function nexusSetLanguageWithProgress(lang, opts) {
+        const options = Object.assign({ force: true }, opts || {});
+        const next = normalizeLang(lang);
+        showLangProgressOverlay();
+        try {
+            if (!ready || !getBundles().es) {
+                const ok = await nexusEnsureLocalesLoaded();
+                if (!ok) return;
+                ready = true;
+            }
+            currentLang = next;
+            invalidateEsToEnCache();
+            persistLanguage(next);
+            const sel = global.document && global.document.getElementById('set-language');
+            if (sel) sel.value = next;
+            await nexusApplyFullAppI18nWithProgress();
+            global.__nexusI18nBatchActive = true;
+            try {
+                listeners.forEach((fn) => { try { fn(next); } catch (e) { console.warn(e); } });
+            } finally {
+                global.__nexusI18nBatchActive = false;
+            }
+            const root = getFullAppI18nRoot();
+            if (root) {
+                if (currentLang === DEFAULT_LANG) applySpanishToScope(root);
+                else applyEnglishToScope(root);
+            }
+            nexusApplySettingsPanelLabels();
+            applyGlobalI18nSideEffects();
+        } finally {
+            hideLangProgressOverlay();
+        }
+    }
+
+    /** Traducción por pestaña (incluye inicio: estáticos sin zonas dinámicas). */
+    function nexusI18nRefresh(root) {
+        if (!ready || !root) return;
         const run = () => {
             if (applyingI18n) return;
             applyingI18n = true;
             try {
-                getEsToEnEntries();
-                applyStructuredDom(root);
-                walkDomTranslations(root);
+                if (currentLang === DEFAULT_LANG) {
+                    applySpanishToScope(root);
+                    applyGlobalI18nSideEffects();
+                    return;
+                }
+                applyEnglishToScope(root);
+                if (root.id === 'tab-home') applyGlobalI18nSideEffects();
             } catch (e) {
                 console.warn('[NEXUS i18n]', e);
             } finally {
@@ -519,13 +928,36 @@
         }
     }
 
+    /** Restaura UI a español al cerrar sesión (evita Spanglish al reabrir). */
+    function nexusResetI18nOnLogout() {
+        if (!ready) return;
+        const tabs = getAllAppTabSections();
+        if (!tabs.length) return;
+        const savedLang = currentLang;
+        applyingI18n = true;
+        try {
+            currentLang = DEFAULT_LANG;
+            tabs.forEach(applySpanishToScope);
+            applyGlobalI18nSideEffects();
+            if (typeof global.updateDashboard === 'function') {
+                try { global.updateDashboard(); } catch (e) { /* ignore */ }
+            }
+        } finally {
+            currentLang = savedLang;
+            applyingI18n = false;
+        }
+    }
+
     function scheduleApply(opts) {
         const options = opts || {};
         if (applyScheduled && !options.force) return;
         applyScheduled = true;
         const run = () => {
             applyScheduled = false;
-            try { nexusApplyI18nDom(); } catch (e) { console.warn('[NEXUS i18n]', e); }
+            try {
+                const useFull = options.fullApp || !!global.__nexusAppShellReady;
+                nexusApplyI18nDom(null, useFull ? { fullApp: true } : {});
+            } catch (e) { console.warn('[NEXUS i18n]', e); }
         };
         if (options.immediate) {
             setTimeout(run, 0);
@@ -547,13 +979,13 @@
     }
 
     function readStoredLanguage() {
+        if (global.state && global.state.settings && global.state.settings.uiLanguage) {
+            return normalizeLang(global.state.settings.uiLanguage);
+        }
         try {
             const s = global.localStorage.getItem(STORAGE_KEY);
             if (s) return normalizeLang(s);
         } catch (e) { /* ignore */ }
-        if (global.state && global.state.settings && global.state.settings.uiLanguage) {
-            return normalizeLang(global.state.settings.uiLanguage);
-        }
         return DEFAULT_LANG;
     }
 
@@ -572,6 +1004,7 @@
                         global.NEXUS_LOCALES = global.NEXUS_LOCALES || {};
                         global.NEXUS_LOCALES.es = await esR.json();
                         global.NEXUS_LOCALES.en = await enR.json();
+                        invalidateEsToEnCache();
                         return true;
                     }
                 } catch (e) { /* next */ }
@@ -584,6 +1017,9 @@
     function nexusSetLanguage(lang, opts) {
         const options = opts || {};
         const next = normalizeLang(lang);
+        if (options.withProgress !== false && global.__nexusAppShellReady) {
+            return nexusSetLanguageWithProgress(next, options);
+        }
         const run = () => {
             if (next === currentLang && ready && !options.force) return;
             currentLang = next;
@@ -591,7 +1027,7 @@
             persistLanguage(next);
             const sel = global.document && global.document.getElementById('set-language');
             if (sel && sel.value !== next) sel.value = next;
-            scheduleApply({ immediate: true });
+            scheduleApply({ immediate: true, force: true, fullApp: !!global.__nexusAppShellReady });
             listeners.forEach((fn) => { try { fn(next); } catch (e) { console.warn(e); } });
         };
         if (!ready || !getBundles().es) {
@@ -625,11 +1061,11 @@
                 if (!ok) return;
                 ready = true;
                 currentLang = readStoredLanguage();
-                scheduleApply();
+                scheduleApply({ force: true, fullApp: !!global.__nexusAppShellReady });
             });
             return;
         }
-        scheduleApply();
+        scheduleApply({ force: true, fullApp: !!global.__nexusAppShellReady });
     }
 
     function nexusOnLanguageChange(fn) {
@@ -640,12 +1076,22 @@
     global.nexusTranslateUiText = nexusTranslateUiText;
     global.nexusUi = nexusTranslateUiText;
     global.nexusUiHtml = nexusUiHtml;
+    function nexusSetHtml(el, html) {
+        if (!el) return;
+        const raw = html != null ? String(html) : '';
+        el.innerHTML = (typeof nexusUiHtml === 'function') ? nexusUiHtml(raw) : raw;
+    }
+    global.nexusSetHtml = nexusSetHtml;
     global.nexusSetLanguage = nexusSetLanguage;
+    global.nexusSetLanguageWithProgress = nexusSetLanguageWithProgress;
     global.nexusGetLanguage = nexusGetLanguage;
     global.nexusApplyI18nDom = nexusApplyI18nDom;
+    global.nexusApplyI18nToAllTabs = nexusApplyI18nToAllTabs;
     global.nexusI18nRefresh = nexusI18nRefresh;
+    global.nexusResetI18nOnLogout = nexusResetI18nOnLogout;
     global.nexusInitI18n = nexusInitI18n;
     global.nexusApplyI18nBackground = nexusApplyI18nBackground;
+    global.nexusApplySettingsPanelLabels = nexusApplySettingsPanelLabels;
     global.nexusOnLanguageChange = nexusOnLanguageChange;
     global.nexusEnsureLocalesLoaded = nexusEnsureLocalesLoaded;
     global.NEXUS_I18N_SUPPORTED = SUPPORTED.slice();
