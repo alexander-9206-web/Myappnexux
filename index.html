@@ -575,7 +575,11 @@
                 try { sessionStorage.setItem('nexus_google_redirect_pending', '1'); } catch (e) {}
             }
             function wireGoogleBtnWhenReady() {
-                if (typeof window.nexusSyncGoogleLoginButton === 'function') window.nexusSyncGoogleLoginButton();
+                if (typeof window.nexusSyncGoogleLoginButton === 'function') {
+                    window.nexusSyncGoogleLoginButton();
+                    return;
+                }
+                setTimeout(wireGoogleBtnWhenReady, 40);
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireGoogleBtnWhenReady);
             else wireGoogleBtnWhenReady();
@@ -4551,9 +4555,11 @@
 
         async function nexusHandleGoogleRedirectOnLoad() {
             if (!isNexusWebBrowser()) return false;
-            const redirectExpected = /\/__\/auth\/handler/i.test(location.href || '')
-                || (sessionStorage.getItem('nexus_google_redirect_pending') === '1' && /[?&#](?:state|code|apiKey)=/i.test(location.href || ''))
-                || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
+            const href = location.href || '';
+            const hasOAuthParams = /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
+            const redirectExpected = hasOAuthParams
+                && (sessionStorage.getItem('nexus_google_redirect_pending') === '1'
+                    || sessionStorage.getItem('nexus_auth_use_redirect') === '1');
             if (!redirectExpected) return false;
 
             beginLoginRoutingUI('Completando acceso con Google…');
@@ -4571,10 +4577,8 @@
                     }
                 }
                 if (!user) {
-                    if (redirectExpected) {
-                        sessionStorage.removeItem('nexus_google_redirect_pending');
-                        sessionStorage.setItem('nexus_auth_use_redirect', '1');
-                    }
+                    sessionStorage.removeItem('nexus_google_redirect_pending');
+                    sessionStorage.removeItem('nexus_auth_use_redirect');
                     return false;
                 }
 
@@ -4615,9 +4619,13 @@
         }
 
         function showColdStartLogin() {
+            window.__nexusGoogleLoginInFlight = false;
+            window.__nexusUserTriggeredGoogleLogin = false;
+            _loginRoutePhase = null;
             nexusMigrateCloudVaultFlags();
             nexusRequireAuthScreen();
             nexusSanitizeStaleRedirectFlags();
+            hideLoginRoutingLoading();
             nexusSyncGoogleLoginButton();
             showInitialLoginChoice();
             nexusWireModalAutoClose();
@@ -4636,12 +4644,22 @@
 
                 initCloud({ skipAnonymous: true }).catch(() => {});
 
-                const redirectPending = /\/__\/auth\/handler/i.test(location.href || '')
-                    || sessionStorage.getItem('nexus_google_redirect_pending') === '1'
-                    || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
+                const href = location.href || '';
+                const hasOAuthParams = /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
+                const redirectPending = hasOAuthParams
+                    && (sessionStorage.getItem('nexus_google_redirect_pending') === '1'
+                        || sessionStorage.getItem('nexus_auth_use_redirect') === '1');
                 if (redirectPending && isNexusWebBrowser()) {
                     beginLoginRoutingUI('Completando acceso con Google…');
                 }
+                const loginBootTimeout = setTimeout(() => {
+                    if (_loginRoutePhase === 'routing' || _loginRoutePhase === 'app') return;
+                    console.warn('[NEXUS] Arranque login: liberando UI tras espera');
+                    window.__nexusGoogleLoginInFlight = false;
+                    hideLoginRoutingLoading();
+                    resetGoogleLoginButton();
+                    showInitialLoginChoice();
+                }, 12000);
                 try {
                     const handled = await nexusHandleGoogleRedirectOnLoad();
                     if (nexusLoginSessionActive()) return;
@@ -4658,6 +4676,13 @@
                     await initCloud({ skipAnonymous: true }).catch(err => console.warn('[NEXUS] initCloud en arranque', err));
                     fetchLoginUsers(false);
                     showInitialLoginChoice();
+                } finally {
+                    clearTimeout(loginBootTimeout);
+                    resetGoogleLoginButton();
+                    if (!nexusLoginSessionActive() && _loginRoutePhase !== 'routing' && _loginRoutePhase !== 'app') {
+                        hideLoginRoutingLoading();
+                        showInitialLoginChoice();
+                    }
                 }
             })();
         }
