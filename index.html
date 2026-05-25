@@ -87,6 +87,20 @@
         input, textarea, select { -webkit-user-select: auto !important; user-select: auto !important; -webkit-touch-callout: default !important; }
         
         .theme-bg { background-color: var(--app-bg) !important; } .theme-card { background-color: var(--card-bg) !important; transition: background-color 0.3s ease; } .theme-text { color: var(--app-text) !important; transition: color 0.3s ease; } .theme-val-inc { color: var(--val-inc) !important; transition: color 0.3s ease; } .theme-val-exp { color: var(--val-exp) !important; transition: color 0.3s ease; }
+        .settings-accordions { display: flex; flex-direction: column; gap: 0.75rem; width: 100%; }
+        .settings-acc-item { border-radius: 2rem; border: 1px solid rgba(148, 163, 184, 0.25); overflow: hidden; }
+        .settings-acc-item > summary.settings-acc-summary {
+            list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+            padding: 1rem 1.25rem; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.12em;
+            -webkit-user-select: none; user-select: none;
+        }
+        .settings-acc-item > summary.settings-acc-summary::-webkit-details-marker { display: none; }
+        .settings-acc-item > summary.settings-acc-summary::marker { content: ''; }
+        .settings-acc-item[open] > summary .settings-acc-chevron { transform: rotate(180deg); }
+        .settings-acc-chevron { transition: transform 0.2s ease; font-size: 11px; opacity: 0.55; flex-shrink: 0; }
+        .settings-acc-panel { padding: 0 1.25rem 1.25rem; }
+        .settings-acc-panel > .theme-card { border: none; box-shadow: none; padding: 0; border-radius: 0; }
+        #nexus-i18n-overlay { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
         .tab-content { display: none; } .tab-content.active { display: block; }
         /* Una sola pantalla visible: evita ver dos módulos superpuestos al deslizar */
         #nexus-app-main {
@@ -1361,7 +1375,7 @@
                         <h4 class="text-[10px] font-black uppercase text-slate-700 mb-2" data-i18n="settings.language">Idioma de la interfaz</h4>
                         <p class="text-[8px] text-slate-400 mb-2 leading-relaxed" data-i18n="settings.languageHint">Afecta menús, módulos y textos de la interfaz. Los datos y categorías propias no se traducen automáticamente.</p>
                         <label class="text-[8px] font-black text-slate-400 ml-2 uppercase">Idioma / Language</label>
-                        <select id="set-language" class="form-input text-xs mt-1 w-full max-w-xs bg-slate-50 font-bold text-slate-700" onchange="if(typeof nexusSetLanguage==='function'){nexusSetLanguage(this.value);updateSettings();}">
+                        <select id="set-language" class="form-input text-xs mt-1 w-full max-w-xs bg-slate-50 font-bold text-slate-700" onchange="nexusOnLanguageSelect(this.value)">
                             <option value="es" data-i18n="settings.languageEs">Español</option>
                             <option value="en" data-i18n="settings.languageEn">English</option>
                         </select>
@@ -2289,6 +2303,19 @@
     </div>
 
     <!-- MODAL CALCULADORA NUMPAD -->
+    <div id="nexus-i18n-overlay" class="hidden fixed inset-0 z-[200] bg-slate-900/70 flex items-center justify-center p-6" aria-live="polite" aria-busy="true">
+        <div class="theme-card w-full max-w-sm p-6 rounded-[2rem] border shadow-2xl space-y-4 text-center">
+            <div class="w-12 h-12 mx-auto rounded-full bg-indigo-500/15 flex items-center justify-center">
+                <i class="fa-solid fa-language text-indigo-500 text-xl"></i>
+            </div>
+            <p id="nexus-i18n-overlay-label" class="text-[10px] font-black uppercase tracking-widest text-slate-600">Cambiando idioma…</p>
+            <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                <div id="nexus-i18n-overlay-bar" class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-150" style="width:0%"></div>
+            </div>
+            <p id="nexus-i18n-overlay-pct" class="text-[11px] font-black text-indigo-600 tabular-nums">0%</p>
+        </div>
+    </div>
+
     <div id="numpad-modal" class="fixed inset-0 z-[120] hidden bg-slate-900/60 backdrop-blur-md flex flex-col justify-end sm:justify-center" style="-webkit-user-select: none;">
         <div class="bg-slate-100 w-full max-w-md md:max-w-lg mx-auto rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden numpad-modal-content shadow-2xl flex flex-col h-auto sm:max-h-[90vh] mt-auto">
             <div class="bg-white p-5 pb-6 rounded-b-[2rem] shadow-sm shrink-0">
@@ -6086,7 +6113,9 @@
                 nexusHideSessionLock();
             }
             initNexus();
-            if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
+            if (state.settings && state.settings.uiLanguage && typeof nexusApplyLanguageWithProgress === 'function') {
+                nexusApplyLanguageWithProgress(state.settings.uiLanguage).catch(e => console.warn('[NEXUS] boot i18n', e));
+            } else if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
                 nexusSetLanguage(state.settings.uiLanguage, { force: true });
             } else if (typeof nexusApplyI18nToAllTabs === 'function') {
                 nexusApplyI18nToAllTabs();
@@ -7275,15 +7304,131 @@
             if (typeof nexusOnLanguageChange !== 'function') return;
             nexusOnLanguageChange(function () {
                 if (!state) return;
-                if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
-                if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
                 if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
                 if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
                 if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
-                requestAnimationFrame(() => {
-                    if (typeof nexusApplyI18nToAllTabs === 'function') {
-                        try { nexusApplyI18nToAllTabs(); } catch (e) { /* i18n */ }
-                    }
+            });
+        }
+
+        async function nexusOnLanguageSelect(lang) {
+            const sel = $id('set-language');
+            if (sel) {
+                if (sel.value !== lang) sel.value = lang;
+                sel.disabled = true;
+            }
+            try {
+                if (typeof nexusApplyLanguageWithProgress === 'function') {
+                    await nexusApplyLanguageWithProgress(lang);
+                } else if (typeof nexusSetLanguage === 'function') {
+                    nexusSetLanguage(lang, { force: true });
+                    if (typeof nexusApplyI18nToAllTabs === 'function') nexusApplyI18nToAllTabs();
+                }
+            } catch (e) {
+                console.warn('[NEXUS] language switch', e);
+            } finally {
+                if (sel) sel.disabled = false;
+            }
+            if (typeof updateSettings === 'function') updateSettings();
+        }
+
+        function initSettingsAccordions() {
+            const tab = $id('tab-settings');
+            if (!tab || tab.dataset.accordionsReady === '1') return;
+
+            const targets = [];
+            const grid = tab.querySelector('.grid.grid-cols-1');
+            if (grid) {
+                grid.querySelectorAll(':scope > .theme-card:not(#edit-user-wrapper), :scope > #ios-notif-settings-block').forEach(el => targets.push(el));
+            }
+            tab.querySelectorAll(':scope > .theme-card').forEach(el => {
+                if (el.id !== 'edit-user-wrapper' && !targets.includes(el)) targets.push(el);
+            });
+            const maint = tab.querySelector(':scope > .flex.flex-col.gap-3');
+            if (maint && !targets.includes(maint)) targets.push(maint);
+            tab.querySelectorAll('#admin-users-block.theme-card').forEach(el => {
+                if (!targets.includes(el)) targets.push(el);
+            });
+            if (!targets.length) return;
+
+            let wrap = tab.querySelector('.settings-accordions');
+            if (!wrap) {
+                wrap = document.createElement('div');
+                wrap.className = 'settings-accordions w-full md:col-span-2';
+                if (grid) {
+                    const editWrap = $id('edit-user-wrapper');
+                    if (editWrap) grid.insertBefore(wrap, editWrap);
+                    else grid.prepend(wrap);
+                } else {
+                    const hdr = tab.querySelector('.flex.items-center.gap-4');
+                    if (hdr && hdr.nextElementSibling) tab.insertBefore(wrap, hdr.nextElementSibling);
+                    else tab.appendChild(wrap);
+                }
+            }
+
+            targets.forEach((block, idx) => {
+                const titleEl = block.querySelector('h3') || block.querySelector('h4') || block.querySelector('p');
+                let title = 'Configuración';
+                let accent = 'text-slate-500';
+                if (titleEl) {
+                    title = (titleEl.textContent || title).trim();
+                    const cls = titleEl.className || '';
+                    const m = cls.match(/text-([a-z]+)-\d+/);
+                    if (m) accent = 'text-' + m[1] + '-500';
+                }
+                if (block.id === 'ios-notif-settings-block') {
+                    title = 'Alertas iOS';
+                    accent = 'text-indigo-600';
+                } else if (block.querySelector('#set-language')) {
+                    title = 'Motor global, idioma y copias';
+                    accent = 'text-amber-500';
+                } else if (block.querySelector('#set-wealth-view')) {
+                    title = 'Personalización visual';
+                    accent = 'text-rose-500';
+                } else if (block.querySelector('#cat-manage-list')) {
+                    title = 'Gestión de categorías';
+                    accent = 'text-purple-500';
+                } else if (block.querySelector('#btn-init-soft-reset')) {
+                    title = 'Mantenimiento y sesión';
+                    accent = 'text-slate-500';
+                } else if (block.id === 'admin-users-block') {
+                    title = 'Administración (root)';
+                    accent = 'text-red-600';
+                }
+
+                const details = document.createElement('details');
+                details.className = 'settings-acc-item theme-card shadow-sm';
+                details.dataset.accKey = 'acc-' + idx;
+                if (block.querySelector('#set-language')) details.open = true;
+
+                const summary = document.createElement('summary');
+                summary.className = 'settings-acc-summary ' + accent;
+                summary.innerHTML = '<span class="flex items-center gap-2 min-w-0 truncate"><span class="truncate">' + title.replace(/</g, '&lt;') + '</span></span><i class="fa-solid fa-chevron-down settings-acc-chevron"></i>';
+
+                const panel = document.createElement('div');
+                panel.className = 'settings-acc-panel';
+                const header = block.querySelector('h3');
+                if (header && header.parentElement === block) header.remove();
+                while (block.firstChild) panel.appendChild(block.firstChild);
+                details.appendChild(summary);
+                details.appendChild(panel);
+                wrap.appendChild(details);
+                block.remove();
+            });
+
+            tab.dataset.accordionsReady = '1';
+            try {
+                const saved = JSON.parse(sessionStorage.getItem('nexus_settings_acc_open') || '[]');
+                if (Array.isArray(saved) && saved.length) {
+                    wrap.querySelectorAll('.settings-acc-item').forEach((d, i) => {
+                        d.open = saved.includes(String(i)) || !!d.querySelector('#set-language');
+                    });
+                }
+            } catch (e) { /* noop */ }
+            wrap.querySelectorAll('.settings-acc-item').forEach((d) => {
+                d.addEventListener('toggle', () => {
+                    const open = [];
+                    wrap.querySelectorAll('.settings-acc-item').forEach((el, j) => { if (el.open) open.push(String(j)); });
+                    try { sessionStorage.setItem('nexus_settings_acc_open', JSON.stringify(open)); } catch (e) { /* noop */ }
                 });
             });
         }
@@ -14977,6 +15122,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
 
             if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
+
+            if (typeof initSettingsAccordions === 'function') initSettingsAccordions();
 
             const settingsTab = $id('tab-settings');
             if (settingsTab && typeof nexusI18nRefresh === 'function') {
