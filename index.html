@@ -23,8 +23,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
-    <!-- i18n en segundo plano (no bloquea login ni arranque) -->
+    <!-- i18n: prueba locales/ (Cursor) y raíz (GitHub); si fallan los .js, carga es.json + en.json -->
     <script>
     (function () {
         var files = ['nexus-locale-es.js', 'nexus-locale-en.js', 'nexus-i18n.js'];
@@ -32,8 +31,6 @@
             if (idx >= files.length) return cb(true);
             var s = document.createElement('script');
             s.src = base + files[idx];
-            s.async = true;
-            s.defer = true;
             s.onload = function () { loadChain(base, idx + 1, cb); };
             s.onerror = function () {
                 if (base === 'locales/') loadChain('', 0, cb);
@@ -41,13 +38,9 @@
             };
             document.head.appendChild(s);
         }
-        function start() {
-            loadChain('locales/', 0, function (ok) {
-                if (!ok) console.warn('[NEXUS i18n] No se encontraron scripts en locales/ ni en la raíz.');
-            });
-        }
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(start, { timeout: 8000 });
-        else setTimeout(start, 800);
+        loadChain('locales/', 0, function (ok) {
+            if (!ok) console.warn('[NEXUS i18n] No se encontraron scripts en locales/ ni en la raíz.');
+        });
     })();
     </script>
     <style>  
@@ -578,26 +571,11 @@
             document.documentElement.setAttribute('data-nexus-auth-channel', channel);
             window.__nexusAuthChannel = channel;
             var href = location.href || '';
-            try {
-                if (!/\/__\/auth\/handler/i.test(href) && !/[?&#](?:state|code)=/i.test(href)) {
-                    sessionStorage.removeItem('nexus_google_redirect_pending');
-                    sessionStorage.removeItem('nexus_auth_use_redirect');
-                } else if (/\/__\/auth\/handler/i.test(href)) {
-                    sessionStorage.setItem('nexus_google_redirect_pending', '1');
-                }
-            } catch (e) {}
+            if (channel === 'web-popup' && (/\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href))) {
+                try { sessionStorage.setItem('nexus_google_redirect_pending', '1'); } catch (e) {}
+            }
             function wireGoogleBtnWhenReady() {
-                if (typeof window.nexusEarlyGoogleLoginClick === 'function') {
-                    var b = document.getElementById('nexus-google-login-btn');
-                    if (b && b.dataset.nexusEarlyWired !== '1' && typeof window.nexusWireGoogleLoginEarly === 'function') {
-                        window.nexusWireGoogleLoginEarly();
-                    }
-                }
-                if (typeof window.nexusSyncGoogleLoginButton === 'function') {
-                    window.nexusSyncGoogleLoginButton();
-                    return;
-                }
-                setTimeout(wireGoogleBtnWhenReady, 40);
+                if (typeof window.nexusSyncGoogleLoginButton === 'function') window.nexusSyncGoogleLoginButton();
             }
             if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireGoogleBtnWhenReady);
             else wireGoogleBtnWhenReady();
@@ -652,57 +630,6 @@
                     <svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg>
                     Continuar con Google
                 </button>
-                <script>
-                (function nexusGoogleLoginEarlyWire() {
-                    function runGoogleAuth() {
-                        var ch = window.__nexusAuthChannel || document.documentElement.getAttribute('data-nexus-auth-channel') || 'web-popup';
-                        if (typeof window.nexusClearManualLogoutBlock === 'function') window.nexusClearManualLogoutBlock();
-                        if (ch === 'ios-native' && typeof window.nexusGoogleAuthViaNativeRepository === 'function') {
-                            window.nexusGoogleAuthViaNativeRepository();
-                            return true;
-                        }
-                        if (typeof window.nexusGoogleAuthViaWebPopup === 'function') {
-                            window.nexusGoogleAuthViaWebPopup();
-                            return true;
-                        }
-                        return false;
-                    }
-                    function dispatchGoogle(ev) {
-                        if (ev) { ev.preventDefault(); ev.stopImmediatePropagation(); }
-                        if (window.__nexusGoogleLoginInFlight) return;
-                        window.__nexusUserTriggeredGoogleLogin = true;
-                        window.__nexusPendingGoogleClick = true;
-                        try {
-                            sessionStorage.removeItem('nexus_google_redirect_pending');
-                            sessionStorage.removeItem('nexus_auth_use_redirect');
-                        } catch (e) {}
-                        if (runGoogleAuth()) {
-                            window.__nexusPendingGoogleClick = false;
-                            return;
-                        }
-                        var tries = 0;
-                        (function waitAuth() {
-                            if (runGoogleAuth()) {
-                                window.__nexusPendingGoogleClick = false;
-                                return;
-                            }
-                            if (++tries < 400) setTimeout(waitAuth, 16);
-                            else {
-                                window.__nexusPendingGoogleClick = false;
-                                alert('La app sigue cargando. Espera un momento y vuelve a pulsar Continuar con Google.');
-                            }
-                        })();
-                    }
-                    window.nexusEarlyGoogleLoginClick = dispatchGoogle;
-                    window.nexusWireGoogleLoginEarly = function () {
-                        var btn = document.getElementById('nexus-google-login-btn');
-                        if (!btn || btn.dataset.nexusEarlyWired === '1') return;
-                        btn.dataset.nexusEarlyWired = '1';
-                        btn.addEventListener('click', dispatchGoogle, true);
-                    };
-                    window.nexusWireGoogleLoginEarly();
-                })();
-                </script>
 
                 <div class="relative flex items-center py-2">
                     <div class="flex-grow border-t border-white/10"></div>
@@ -3189,13 +3116,9 @@
                 <button type="button" onclick="nexusOpenWebViewerExternal()" class="w-full max-w-xs bg-emerald-500 text-white py-4 rounded-2xl font-black uppercase text-xs shadow-lg active:scale-95"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Abrir portal de pago</button>
             </div>
         </div>
-        <!-- NEXUS AR — JavaScript monolítico (mapa: docs/MODULOS-NEXUS.md · secciones MÓDULO XX en script) -->
+
+        <!-- NEXUS AR — JavaScript monolítico (regenerar: node scripts/merge-nexus-monolith.mjs) -->
         <script>
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 00-CORE-RUNTIME — Runtime Nexus, UI, admin, categorías, utilidades
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         const $id = id => document.getElementById(id); const $qAll = sel => document.querySelectorAll(sel);
 
         /** Núcleo UI: estado en Nexus.store + acciones registradas (delegación data-nexus-action). */
@@ -4568,18 +4491,10 @@
 
         function nexusReleaseAppShell() {
             document.documentElement.classList.remove('nexus-auth-pending');
-            window.__nexusAppShellReady = true;
             const ls = $id('login-screen');
             if (ls) ls.classList.add('hidden');
             const lock = $id('session-lock-screen');
             if (lock) lock.classList.add('hidden');
-            if (typeof nexusSanitizeStaleRedirectFlags === 'function') nexusSanitizeStaleRedirectFlags();
-            if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
-            else if (typeof nexusApplyI18nDom === 'function') {
-                const run = () => { try { nexusApplyI18nDom(); } catch (e) { console.warn('[NEXUS i18n]', e); } };
-                if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 4000 });
-                else setTimeout(run, 200);
-            }
         }
 
         function nexusSanitizeStaleRedirectFlags() {
@@ -4636,11 +4551,9 @@
 
         async function nexusHandleGoogleRedirectOnLoad() {
             if (!isNexusWebBrowser()) return false;
-            const href = location.href || '';
-            const hasOAuthParams = /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
-            const redirectExpected = hasOAuthParams
-                && (sessionStorage.getItem('nexus_google_redirect_pending') === '1'
-                    || sessionStorage.getItem('nexus_auth_use_redirect') === '1');
+            const redirectExpected = /\/__\/auth\/handler/i.test(location.href || '')
+                || (sessionStorage.getItem('nexus_google_redirect_pending') === '1' && /[?&#](?:state|code|apiKey)=/i.test(location.href || ''))
+                || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
             if (!redirectExpected) return false;
 
             beginLoginRoutingUI('Completando acceso con Google…');
@@ -4658,8 +4571,10 @@
                     }
                 }
                 if (!user) {
-                    sessionStorage.removeItem('nexus_google_redirect_pending');
-                    sessionStorage.removeItem('nexus_auth_use_redirect');
+                    if (redirectExpected) {
+                        sessionStorage.removeItem('nexus_google_redirect_pending');
+                        sessionStorage.setItem('nexus_auth_use_redirect', '1');
+                    }
                     return false;
                 }
 
@@ -4699,23 +4614,11 @@
                 || (sessionUnlocked && currentUser));
         }
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 01-AUTH-IDENTITY — Nexus Identity, Google, sesión, bootApp, utilidades transversales
-           ═══════════════════════════════════════════════════════════════════════════ */
-
-        /* · 01.1 — Pantalla login y routing UI */
-
         function showColdStartLogin() {
-            window.__nexusGoogleLoginInFlight = false;
-            window.__nexusUserTriggeredGoogleLogin = false;
-            _loginRoutePhase = null;
             nexusMigrateCloudVaultFlags();
             nexusRequireAuthScreen();
             nexusSanitizeStaleRedirectFlags();
-            hideLoginRoutingLoading();
-            if (typeof resetGoogleLoginButton === 'function') resetGoogleLoginButton();
-            else if (typeof nexusSyncGoogleLoginButton === 'function') nexusSyncGoogleLoginButton();
+            nexusSyncGoogleLoginButton();
             showInitialLoginChoice();
             nexusWireModalAutoClose();
             installNexusNativeNavigation();
@@ -4733,22 +4636,12 @@
 
                 initCloud({ skipAnonymous: true }).catch(() => {});
 
-                const href = location.href || '';
-                const hasOAuthParams = /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
-                const redirectPending = hasOAuthParams
-                    && (sessionStorage.getItem('nexus_google_redirect_pending') === '1'
-                        || sessionStorage.getItem('nexus_auth_use_redirect') === '1');
+                const redirectPending = /\/__\/auth\/handler/i.test(location.href || '')
+                    || sessionStorage.getItem('nexus_google_redirect_pending') === '1'
+                    || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
                 if (redirectPending && isNexusWebBrowser()) {
                     beginLoginRoutingUI('Completando acceso con Google…');
                 }
-                const loginBootTimeout = setTimeout(() => {
-                    if (_loginRoutePhase === 'routing' || _loginRoutePhase === 'app') return;
-                    console.warn('[NEXUS] Arranque login: liberando UI tras espera');
-                    window.__nexusGoogleLoginInFlight = false;
-                    hideLoginRoutingLoading();
-                    resetGoogleLoginButton();
-                    showInitialLoginChoice();
-                }, 12000);
                 try {
                     const handled = await nexusHandleGoogleRedirectOnLoad();
                     if (nexusLoginSessionActive()) return;
@@ -4758,7 +4651,6 @@
                         fetchLoginUsers(false);
                         showInitialLoginChoice();
                     }
-
                 } catch (e) {
                     if (nexusLoginSessionActive()) return;
                     nexusSanitizeStaleRedirectFlags();
@@ -4766,13 +4658,6 @@
                     await initCloud({ skipAnonymous: true }).catch(err => console.warn('[NEXUS] initCloud en arranque', err));
                     fetchLoginUsers(false);
                     showInitialLoginChoice();
-                } finally {
-                    clearTimeout(loginBootTimeout);
-                    resetGoogleLoginButton();
-                    if (!nexusLoginSessionActive() && _loginRoutePhase !== 'routing' && _loginRoutePhase !== 'app') {
-                        hideLoginRoutingLoading();
-                        showInitialLoginChoice();
-                    }
                 }
             })();
         }
@@ -4861,8 +4746,6 @@
         }
 
         const GOOGLE_LOGIN_BTN_HTML = `<svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg> Continuar con Google`;
-
-        /* · 01.2 — Canales OAuth (web / iOS) */
 
         function nexusGetAuthChannel() {
             const h = window.webkit && window.webkit.messageHandlers;
@@ -5034,8 +4917,6 @@
         }
 
         /** Tras Google/Firebase: si ya hay usuarios → cliente normal; si no → administrador fundador. */
-        /* · 01.3 — Post-Google y bootstrap */
-
         async function routeAfterFirebaseAuth(fbAuthUser, displayName, photoURL) {
             _loginRoutePhase = 'routing';
             try {
@@ -5563,8 +5444,6 @@
         // ============================================================================
         // --- PUENTE DE AUTENTICACIÓN NATIVA (IOS SWIFT) Y GOOGLE OAUTH ---
         // ============================================================================
-        /* · 01.4 — Google popup / redirect */
-
         function nexusSetGoogleLoginButtonBusy(busy) {
             const btn = $id('nexus-google-login-btn');
             if (!btn) return;
@@ -5614,6 +5493,7 @@
             let redirectStarted = false;
             window.__nexusGoogleLoginInFlight = true;
             window.__nexusUserTriggeredGoogleLogin = true;
+            nexusSetGoogleLoginButtonBusy(true);
             try {
                 const originErr = nexusAuthOriginBlocked();
                 if (originErr) {
@@ -5629,7 +5509,6 @@
                     preferRedirect: nexusPreferGoogleRedirect()
                 });
                 const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
-                nexusSetGoogleLoginButtonBusy(true);
 
                 if (useRedirectFirst) {
                     sessionStorage.setItem('nexus_auth_use_redirect', '1');
@@ -5704,27 +5583,13 @@
             if (channel === 'ios-native') return nexusGoogleAuthViaNativeRepository();
             return nexusGoogleAuthViaWebPopup();
         }
-        function nexusFlushPendingGoogleLogin() {
-            if (!window.__nexusPendingGoogleClick || !window.__nexusUserTriggeredGoogleLogin) return;
-            if (window.__nexusGoogleLoginInFlight) return;
-            window.__nexusPendingGoogleClick = false;
-            const ch = nexusGetAuthChannel();
-            if (typeof nexusClearManualLogoutBlock === 'function') nexusClearManualLogoutBlock();
-            if (ch === 'ios-native') nexusGoogleAuthViaNativeRepository();
-            else nexusGoogleAuthViaWebPopup();
-        }
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
         window.nexusGoogleAuthViaNativeRepository = nexusGoogleAuthViaNativeRepository;
         window.nexusGoogleAuthViaWebPopup = nexusGoogleAuthViaWebPopup;
         window.nexusSyncGoogleLoginButton = nexusSyncGoogleLoginButton;
-        window.nexusFlushPendingGoogleLogin = nexusFlushPendingGoogleLogin;
         window.nexusHandleGoogleRedirectOnLoad = nexusHandleGoogleRedirectOnLoad;
         window.isNexusNativeContainer = isNexusNativeContainer;
         window.isNexusWebBrowser = isNexusWebBrowser;
-        window.__nexusAuthRuntimeReady = true;
-        if (typeof nexusSyncGoogleLoginButton === 'function') nexusSyncGoogleLoginButton();
-        try { nexusFlushPendingGoogleLogin(); } catch (e) { console.warn('[NEXUS] flush pending Google', e); }
-        try { window.dispatchEvent(new Event('nexus-auth-ready')); } catch (e) { /* ignore */ }
 
         async function nexusApplyNativeGoogleCredential(payload, expectedEmail) {
             const idToken = payload?.idToken || payload?.token || '';
@@ -5973,8 +5838,6 @@
             await handleNativeGoogleAuthPayload({ idToken, email, name, photoUrl });
         };
 
-        /* · 01.5 — PIN y bloqueo de sesión */
-
         function nexusIsRequirePinEnabled() {
             return !!(state && state.settings && state.settings.requirePin === true);
         }
@@ -6088,8 +5951,6 @@
 
 
 
-
-        /* · 01.6 — bootApp y logout */
 
         async function bootApp(opts) {
             if (!currentUser) throw new Error('Sesión no autenticada');
@@ -6222,16 +6083,8 @@
                 nexusHideSessionLock();
             }
             initNexus();
-            const uiLang = state.settings && state.settings.uiLanguage;
-            if (uiLang && typeof nexusSetLanguage === 'function') {
-                const applyStoredLang = () => {
-                    try { nexusSetLanguage(uiLang); } catch (e) { console.warn('[NEXUS i18n]', e); }
-                };
-                if (typeof requestIdleCallback === 'function') {
-                    requestIdleCallback(applyStoredLang, { timeout: 5000 });
-                } else {
-                    setTimeout(applyStoredLang, 400);
-                }
+            if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
+                nexusSetLanguage(state.settings.uiLanguage, { force: true });
             }
             if (!sessionUnlocked && !founderInstant) return;
             
@@ -6297,11 +6150,637 @@
             fetchLoginUsers(false);
             showInitialLoginChoice();
         }
+        
+        function setApMode(mode) {
+            const btnNew = $id('ap-mode-new');
+            const btnRecon = $id('ap-mode-recon');
+            const paidSelect = $id('f-ap-paid');
+            const paidWrap = $id('ap-paid-wrap');
+            const modeHint = $id('ap-mode-hint');
+            const accLbl = $id('f-account') ? $id('f-account').previousElementSibling : null;
+            const isRecon = mode === 'recon';
 
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 02-INICIO-HOME — Estado global, initNexus, dashboard, recordatorios
-           ═══════════════════════════════════════════════════════════════════════════ */
+            if (btnNew) {
+                if (!isRecon) { btnNew.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.remove('text-teal-600/50'); }
+                else { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
+            }
+            if (btnRecon) {
+                if (isRecon) { btnRecon.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.remove('text-teal-600/50'); }
+                else { btnRecon.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.add('text-teal-600/50'); }
+            }
+            if (paidWrap) paidWrap.classList.toggle('hidden', !isRecon);
+            if (modeHint) modeHint.classList.toggle('hidden', !isRecon);
+            if (paidSelect && isRecon && paidSelect.value === '') paidSelect.value = '0';
+            if (accLbl && $id('f-type') && $id('f-type').value === 'afterpay') {
+                accLbl.innerText = isRecon ? 'Cuenta origen (referencia)' : 'Cuenta (1er abono)';
+            }
+        }
 
+        function nexusIsApReconModeSelected() {
+            const btn = $id('ap-mode-recon');
+            return !!(btn && btn.classList.contains('bg-white'));
+        }
+
+        /** Registra el 1er abono real (cuota proyectada) en cuenta y auditoría. El contrato madre nunca sale de Afterpay. */
+        function nexusCreateAfterpayFirstPayment(apContract, apAcc) {
+            if (!apContract || !apAcc || apContract.apRecon) return null;
+            if ((apContract.apPaid || 0) >= 1) return null;
+            const quotas = apContract.apQuotas || 4;
+            const rawDeductAmt = (apContract.original_amount || apContract.amount) / quotas;
+            let deductAmt = rawDeductAmt;
+            if (apAcc.currency !== apContract.currency) deductAmt = convertCurrency(rawDeductAmt, apContract.currency, apAcc.currency);
+            if (nexusIsLiabAccount(apAcc)) apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
+            const label = (apContract.note || (apContract.cat && apContract.cat.length > 2 ? apContract.cat.substring(2) : apContract.cat) || '').trim();
+            const apPayTx = buildTransactionSchema({
+                type: 'expense',
+                amount: rawDeductAmt,
+                cat: apContract.cat,
+                accId: apAcc.id,
+                date: apContract.date,
+                note: `[Pago Inicial] ${label} (1/${quotas})`,
+                currency: apContract.currency,
+                costType: apContract.costType || 'fixed'
+            });
+            apPayTx.apParentId = apContract.id;
+            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
+            apContract.apPaid = 1;
+            state.tx.push(apPayTx);
+            saveCloudTx(apPayTx);
+            return apPayTx;
+        }
+
+        function nexusFindAfterpayParentForPayment(payTx) {
+            if (!payTx) return null;
+            if (payTx.apParentId) {
+                return (state.tx || []).find(t => t.id === payTx.apParentId && t.type === 'afterpay') || null;
+            }
+            const note = payTx.note || '';
+            const m = note.match(/\((\d+)\/(\d+)\)/);
+            if (!m) return null;
+            const label = note.replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
+            return (state.tx || []).find(t => {
+                if (t.type !== 'afterpay') return false;
+                if (payTx.accId && t.accId !== payTx.accId) return false;
+                if (payTx.cat && t.cat !== payTx.cat) return false;
+                const tLabel = (t.note || (t.cat && t.cat.length > 2 ? t.cat.substring(2) : t.cat) || '').trim();
+                return tLabel === label || (label && tLabel.includes(label));
+            }) || null;
+        }
+
+        function nexusIsAfterpayPaymentTx(tx) {
+            if (!tx || tx.isProjected) return false;
+            const n = tx.note || '';
+            return /^\[(Abono|Pago Inicial)\]/i.test(n);
+        }
+
+        function nexusIsAfterpayProjectedQuota(tx) {
+            return !!(tx && tx.isProjected && String(tx.id || '').startsWith('proj_ap_'));
+        }
+
+        function nexusIsAfterpayAuditSynthetic(tx) {
+            const id = String((tx && tx.id) || '');
+            return id.startsWith('audit_ap_buy_') || id.startsWith('audit_ap_amort_');
+        }
+
+        function nexusParseAfterpayProjectionId(id) {
+            const s = String(id || '');
+            if (!s.startsWith('proj_ap_')) return null;
+            const rest = s.slice(8);
+            const lastU = rest.lastIndexOf('_');
+            if (lastU < 1) return null;
+            const quotaIdx = parseInt(rest.slice(lastU + 1), 10);
+            const parentId = rest.slice(0, lastU);
+            if (!parentId || Number.isNaN(quotaIdx)) return null;
+            return { parentId, quotaIdx };
+        }
+
+        function nexusAfterpayAuditParent(tx) {
+            if (!tx) return null;
+            if (tx.apParentId) {
+                return (state.tx || []).find(t => t.id === tx.apParentId && t.type === 'afterpay') || null;
+            }
+            const parsed = nexusParseAfterpayProjectionId(tx.id);
+            if (parsed) {
+                return (state.tx || []).find(t => t.id === parsed.parentId && t.type === 'afterpay') || null;
+            }
+            const id = String(tx.id || '');
+            if (id.startsWith('audit_ap_buy_')) {
+                const pid = id.slice('audit_ap_buy_'.length);
+                return (state.tx || []).find(t => t.id === pid && t.type === 'afterpay') || null;
+            }
+            if (id.startsWith('audit_ap_amort_')) {
+                const rest = id.slice('audit_ap_amort_'.length);
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                const pid = rest.slice(0, lastU);
+                return (state.tx || []).find(t => t.id === pid && t.type === 'afterpay') || null;
+            }
+            return null;
+        }
+
+        function nexusComputeAfterpayQuotaDate(tx, quotaIndexZeroBased) {
+            const baseDate = getSafeDate(tx.date);
+            const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
+            const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay, 10) : 5;
+            let d = new Date(baseDate.getTime());
+            const i = quotaIndexZeroBased;
+            if (tx.apFreq === 'monthly') d.setMonth(d.getMonth() + i);
+            else d.setDate(d.getDate() + (i * stD));
+            if (i > 0) {
+                let dist = apPayDay - d.getDay();
+                if (dist < 0) dist += 7;
+                d.setDate(d.getDate() + dist);
+            }
+            d.setHours(12, 0, 0, 0);
+            return d;
+        }
+
+        function nexusFindAfterpayPaymentForQuota(parent, quotaOneBased) {
+            if (!parent) return null;
+            const label = (parent.note || (parent.cat && parent.cat.length > 2 ? parent.cat.substring(2) : parent.cat) || '').trim();
+            return (state.tx || []).find(t => {
+                if (t.isProjected || t.type !== 'expense') return false;
+                const m = (t.note || '').match(/\((\d+)\/(\d+)\)/);
+                if (!m || parseInt(m[1], 10) !== quotaOneBased) return false;
+                if (t.apParentId && t.apParentId !== parent.id) return false;
+                if (t.apParentId === parent.id) return true;
+                if (!/^\[(Abono|Pago Inicial)\]/i.test(t.note || '')) return false;
+                if (parent.cat && t.cat && t.cat !== parent.cat) return false;
+                const tLabel = (t.note || '').replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
+                return !label || tLabel === label || (label && tLabel.includes(label));
+            }) || null;
+        }
+
+        /** Cronograma Afterpay en auditoría: no recortar por rango de fechas (control futuro). */
+        function nexusAfterpayAuditExemptFromDateFilter(tx) {
+            if (tx && tx.apAuditRole === 'amortized') return true;
+            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsAfterpayAuditSynthetic(tx)) return true;
+            if (nexusIsAfterpayPaymentTx(tx)) {
+                const parent = nexusFindAfterpayParentForPayment(tx);
+                return !!(parent && !parent.apRecon && (parent.apPaid || 0) < (parent.apQuotas || 4));
+            }
+            return false;
+        }
+
+        /** Cronograma Afterpay para auditoría: compra BNPL + amortizado + cuotas futuras. */
+        function nexusBuildAfterpayAuditSchedule(cDisplay) {
+            const rows = [];
+            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
+            const contracts = (state.tx || []).filter(t => t.type === 'afterpay' && !t.apRecon && (t.apPaid || 0) < (t.apQuotas || 4));
+            contracts.forEach(tx => {
+                const quotas = tx.apQuotas || 4;
+                const total = tx.original_amount || tx.amount;
+                const origIA = total / quotas;
+                const iA = convertCurrency(origIA, tx.original_currency || tx.currency, baseCur);
+                const label = (tx.note || (tx.cat && tx.cat.length > 2 ? tx.cat.substring(2) : tx.cat) || 'Afterpay').trim();
+                const curr = tx.original_currency || tx.currency;
+                const paid = tx.apPaid || 0;
+
+                rows.push({
+                    id: 'audit_ap_buy_' + tx.id,
+                    type: 'expense',
+                    renderType: 'afterpay',
+                    amount: convertCurrency(total, curr, baseCur),
+                    original_amount: total,
+                    original_currency: curr,
+                    currency: baseCur,
+                    cat: tx.cat,
+                    accId: tx.accId,
+                    date: tx.date,
+                    note: `[Compra BNPL] ${label} (${quotas} cuotas × ${fmt(origIA, curr)})`,
+                    isProjected: true,
+                    apParentId: tx.id,
+                    apAuditRole: 'purchase',
+                    nexusSkipAuditTotal: true
+                });
+
+                // Cuotas amortizadas (misma lógica que Agenda: fechas de cronograma + abonos reales)
+                for (let i = 0; i < paid; i++) {
+                    const qNum = i + 1;
+                    const paidTx = nexusFindAfterpayPaymentForQuota(tx, qNum);
+                    const schedDate = nexusComputeAfterpayQuotaDate(tx, i).toISOString();
+                    const amortRow = {
+                        id: 'audit_ap_amort_' + tx.id + '_' + i,
+                        type: 'expense',
+                        renderType: 'afterpay',
+                        amount: iA,
+                        original_amount: origIA,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: tx.cat,
+                        accId: paidTx ? paidTx.accId : tx.accId,
+                        date: schedDate,
+                        note: paidTx ? (paidTx.note || `[Abono Realizado] ${label} (${qNum}/${quotas})`) : `[Amortizado] ${label} (${qNum}/${quotas})`,
+                        isProjected: false,
+                        apParentId: tx.id,
+                        apQuotaIndex: i,
+                        apAuditRole: 'amortized',
+                        nexusSkipAuditTotal: true
+                    };
+                    if (paidTx) {
+                        amortRow.amount = convertCurrency(paidTx.original_amount || paidTx.amount, paidTx.original_currency || paidTx.currency, baseCur);
+                        amortRow.original_amount = paidTx.original_amount || paidTx.amount;
+                        amortRow.original_currency = paidTx.original_currency || paidTx.currency;
+                        amortRow.nexusAuditMirrorsTxId = paidTx.id;
+                    }
+                    rows.push(amortRow);
+                }
+
+                // Cuotas pendientes (alineado con getEnrichedTx / Agenda)
+                for (let i = paid; i < quotas; i++) {
+                    const qNum = i + 1;
+                    if (nexusFindAfterpayPaymentForQuota(tx, qNum)) continue;
+                    const isFirstQuota = qNum === 1 && paid === 0;
+                    const pId = 'proj_ap_' + tx.id + '_' + i;
+                    const noteLine = isFirstQuota
+                        ? `[Pago inicial proyectado] ${label} (${qNum}/${quotas})`
+                        : `[Pendiente] ${label} (${qNum}/${quotas})`;
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'afterpay',
+                        amount: iA,
+                        original_amount: origIA,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: tx.cat,
+                        accId: tx.accId,
+                        date: nexusComputeAfterpayQuotaDate(tx, i).toISOString(),
+                        note: noteLine,
+                        isProjected: true,
+                        apParentId: tx.id,
+                        apQuotaIndex: i,
+                        apAuditRole: isFirstQuota ? 'first_projected' : 'projected'
+                    });
+                }
+            });
+            return rows;
+        }
+
+        function nexusIsDebtAuditSynthetic(tx) {
+            const id = String((tx && tx.id) || '');
+            return id.startsWith('audit_loan_') || id.startsWith('audit_cc_') || id.startsWith('audit_pend_');
+        }
+
+        function nexusIsDebtProjectedQuota(tx) {
+            const id = String((tx && tx.id) || '');
+            return !!(tx && tx.isProjected && (id.startsWith('proj_loan_') || id.startsWith('proj_pend_') || id.startsWith('audit_loan_proj_')));
+        }
+
+        function nexusLoanIsActive(l) {
+            if (!l) return false;
+            const paid = l.paidQuotas || 0;
+            if (l.id.startsWith('pend_')) return paid < 1;
+            const term = l.term || 0;
+            return term > 0 && paid < term;
+        }
+
+        function nexusDebtAuditParent(tx) {
+            if (!tx) return null;
+            if (tx.loanParentId) return (state.loans || []).find(l => l.id === tx.loanParentId) || null;
+            const id = String(tx.id || '');
+            if (id.startsWith('audit_cc_buy_')) return (state.loans || []).find(l => l.id === id.slice('audit_cc_buy_'.length)) || null;
+            if (id.startsWith('audit_loan_amort_') || id.startsWith('audit_loan_proj_')) {
+                const rest = id.replace(/^audit_loan_(amort|proj)_/, '');
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                return (state.loans || []).find(l => l.id === rest.slice(0, lastU)) || null;
+            }
+            if (id.startsWith('proj_loan_')) {
+                const rest = id.slice('proj_loan_'.length);
+                const lastU = rest.lastIndexOf('_');
+                if (lastU < 0) return null;
+                return (state.loans || []).find(l => l.id === rest.slice(0, lastU)) || null;
+            }
+            return null;
+        }
+
+        function nexusComputeLoanQuotaDate(l, quotaIndexZeroBased) {
+            const baseDate = getSafeDate(l.date);
+            let pD;
+            if (l.isCC && l.cardId) {
+                const card = (state.accounts || []).find(a => a.id === l.cardId);
+                if (card && card.cutoffDay && card.payDay) {
+                    const pDate = new Date(baseDate);
+                    const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
+                    pD = new Date(pDate.getFullYear(), pDate.getMonth() + addM + quotaIndexZeroBased, card.payDay, 12, 0, 0);
+                } else {
+                    pD = new Date(baseDate);
+                    pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
+                    pD.setHours(12, 0, 0, 0);
+                }
+            } else if (l.id.startsWith('pend_')) {
+                pD = new Date(baseDate);
+                pD.setHours(12, 0, 0, 0);
+            } else {
+                pD = new Date(baseDate);
+                pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
+                pD.setHours(12, 0, 0, 0);
+            }
+            return pD;
+        }
+
+        function nexusFindLoanPaymentForQuota(loan, quotaOneBased) {
+            if (!loan) return null;
+            const tag = `(${quotaOneBased}/${loan.term})`;
+            const baseName = String(loan.name || '').split(' (')[0];
+            return (state.tx || []).find(t => {
+                if (!t || t.isProjected) return false;
+                const n = t.note || '';
+                if (!n.includes('[Abono]') && !(t.cat || '').includes('Abono TC') && !(t.cat || '').includes('Pago Deuda')) return false;
+                if (!n.includes(tag)) return false;
+                return n.includes(loan.name) || (baseName && n.includes(baseName));
+            }) || null;
+        }
+
+        /** Cronograma de deudas / TC para auditoría (amortizado + futuro + compra TC). */
+        function nexusBuildDebtAuditSchedule(cDisplay) {
+            const rows = [];
+            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
+            (state.loans || []).forEach(l => {
+                if (!nexusLoanIsActive(l)) return;
+                const curr = l.original_currency || l.currency || baseCur;
+                const paid = l.paidQuotas || 0;
+                const n = l.term || 1;
+                const P_orig = l.original_total || l.total;
+                const r = (l.rate || 0) / 100;
+                const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+                let bal_run = P_orig;
+                const card = l.isCC && l.cardId ? (state.accounts || []).find(a => a.id === l.cardId) : null;
+                const accId = card ? card.id : null;
+
+                if (l.isCC) {
+                    rows.push({
+                        id: 'audit_cc_buy_' + l.id,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(P_orig, curr, baseCur),
+                        original_amount: P_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: '💳 Pago TC',
+                        accId,
+                        date: l.date,
+                        note: `[Compra TC] ${l.name} (${n} cuotas × ${fmt(A_orig, curr)})`,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'purchase',
+                        nexusSkipAuditTotal: true
+                    });
+                }
+
+                for (let i = 0; i < paid; i++) {
+                    const qNum = i + 1;
+                    const payTx = nexusFindLoanPaymentForQuota(l, qNum);
+                    const int_orig = bal_run * r;
+                    const prin_orig = A_orig - int_orig;
+                    const schedDate = nexusComputeLoanQuotaDate(l, i).toISOString();
+                    const amortRow = {
+                        id: 'audit_loan_amort_' + l.id + '_' + i,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(A_orig, curr, baseCur),
+                        original_amount: A_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
+                        accId: payTx ? payTx.accId : accId,
+                        date: schedDate,
+                        note: payTx ? (payTx.note || `[Abono Realizado] ${l.name} (${qNum}/${n})`) : `[Amortizado] ${l.name} (${qNum}/${n})`,
+                        isProjected: false,
+                        loanParentId: l.id,
+                        loanAuditRole: 'amortized',
+                        nexusSkipAuditTotal: true
+                    };
+                    if (payTx) {
+                        amortRow.amount = convertCurrency(payTx.original_amount || payTx.amount, payTx.original_currency || payTx.currency, baseCur);
+                        amortRow.original_amount = payTx.original_amount || payTx.amount;
+                        amortRow.original_currency = payTx.original_currency || payTx.currency;
+                        amortRow.nexusAuditMirrorsTxId = payTx.id;
+                    }
+                    rows.push(amortRow);
+                    bal_run -= prin_orig;
+                    if (bal_run < 0.01) bal_run = 0;
+                }
+
+                for (let i = paid; i < n; i++) {
+                    if (nexusFindLoanPaymentForQuota(l, i + 1)) continue;
+                    const int_orig = bal_run * r;
+                    const prin_orig = A_orig - int_orig;
+                    bal_run -= prin_orig;
+                    if (bal_run < 0.01) bal_run = 0;
+                    const pId = 'proj_loan_' + l.id + '_' + i;
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'debt',
+                        amount: convertCurrency(A_orig, curr, baseCur),
+                        original_amount: A_orig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
+                        accId,
+                        date: nexusComputeLoanQuotaDate(l, i).toISOString(),
+                        note: `[Pendiente] ${l.name} (${i + 1}/${n}) · Cap:${fmt(prin_orig, curr)} | Int:${fmt(int_orig, curr)}`,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'projected',
+                        priority: l.priority
+                    });
+                }
+
+                if (l.id.startsWith('pend_') && paid < 1) {
+                    const amtOrig = l.original_balance || l.balance || l.total;
+                    const pId = 'proj_pend_' + l.id;
+                    rows.push({
+                        id: pId,
+                        type: 'expense',
+                        renderType: 'single_debt',
+                        amount: convertCurrency(amtOrig, curr, baseCur),
+                        original_amount: amtOrig,
+                        original_currency: curr,
+                        currency: baseCur,
+                        cat: `⚡ ${l.name}`,
+                        accId: null,
+                        date: nexusComputeLoanQuotaDate(l, 0).toISOString(),
+                        note: l.name,
+                        isProjected: true,
+                        loanParentId: l.id,
+                        loanAuditRole: 'projected',
+                        priority: l.priority || 'medium'
+                    });
+                }
+            });
+            return rows;
+        }
+
+        /** Cronograma Afterpay / deudas: no recortar por rango de fechas (control futuro). */
+        function nexusAuditExemptFromDateFilter(tx) {
+            if (nexusAfterpayAuditExemptFromDateFilter(tx)) return true;
+            if (tx && (tx.loanAuditRole || nexusIsDebtAuditSynthetic(tx) || nexusIsDebtProjectedQuota(tx))) return true;
+            const id = String((tx && tx.id) || '');
+            if (id.startsWith('proj_loan_') || id.startsWith('proj_pend_')) return true;
+            return false;
+        }
+
+        /** Contrato madre y recon a cero fuera; filas de cronograma (Afterpay / deudas) siempre visibles. */
+        function nexusShouldShowTxInAudit(tx) {
+            if (!tx) return false;
+            if (tx.type === 'afterpay') return false;
+            if (tx.apAuditRole || tx.loanAuditRole || nexusIsAfterpayAuditSynthetic(tx) || nexusIsDebtAuditSynthetic(tx)) return true;
+            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsDebtProjectedQuota(tx)) return true;
+            if (tx.isProjected && (String(tx.id || '').startsWith('proj_loan_') || String(tx.id || '').startsWith('proj_pend_') || String(tx.id || '').startsWith('proj_recur_'))) return true;
+            if (nexusIsAfterpayPaymentTx(tx)) {
+                const parent = nexusFindAfterpayParentForPayment(tx);
+                if (parent && parent.apRecon) return false;
+                return true;
+            }
+            return true;
+        }
+
+        /** Buscador auditoría (mismo criterio que Afterpay: nombre + categoría + cuentas). */
+        function nexusAuditTxMatchesSearch(tx, q) {
+            if (!q) return true;
+            const parts = [tx.note || '', tx.cat || '', tx.nexusAuditLabel || ''];
+            const accFrom = (state.accounts || []).find(a => a.id === tx.accId);
+            const accTo = (state.accounts || []).find(a => a.id === tx.toAccId);
+            if (accFrom && accFrom.name) parts.push(accFrom.name);
+            if (accTo && accTo.name) parts.push(accTo.name);
+            return parts.join(' ').toLowerCase().includes(q);
+        }
+
+        const NEXUS_FILTER_DEFAULTS = {
+            calendar: 'week',
+            databaseQuick: 'mes',
+            periodType: 'all',
+            periodCat: 'all',
+            histAccount: 'all',
+            apFreq: 'fortnightly',
+            apSort: 'desc',
+            taskPriority: 'all',
+            statsType: 'expense',
+            calTimelineCurrency: 'ALL'
+        };
+
+        function nexusEnsureStateFilterDefaults() {
+            if (!state) return;
+            if (!state.periodFilter || typeof state.periodFilter !== 'object') {
+                state.periodFilter = { type: NEXUS_FILTER_DEFAULTS.periodType, cat: NEXUS_FILTER_DEFAULTS.periodCat };
+            }
+            const validCal = ['week', 'month', 'all', 'custom'];
+            if (!validCal.includes(state.calendarFilter)) state.calendarFilter = NEXUS_FILTER_DEFAULTS.calendar;
+            if (!state.statsType) state.statsType = NEXUS_FILTER_DEFAULTS.statsType;
+            if (state.settings && !state.settings.apDefaultFreq) state.settings.apDefaultFreq = NEXUS_FILTER_DEFAULTS.apFreq;
+        }
+
+        function nexusResetPeriodFilters() {
+            if (!state) return;
+            state.periodFilter = { type: NEXUS_FILTER_DEFAULTS.periodType, cat: NEXUS_FILTER_DEFAULTS.periodCat };
+            $qAll('#view-period .filter-chip').forEach(b => b.classList.remove('active'));
+            const act = $id('f-type-all');
+            if (act) act.classList.add('active');
+            if (typeof populateFilters === 'function') populateFilters();
+            const catSel = $id('period-cat-filter');
+            if (catSel) catSel.value = 'all';
+        }
+
+        function initCalendarTab() {
+            calMonthOffset = 0;
+            calSelectedDate = null;
+            const calCurr = $id('cal-filter-currency');
+            if (calCurr) calCurr.value = NEXUS_FILTER_DEFAULTS.calTimelineCurrency;
+            setCalendarFilter(NEXUS_FILTER_DEFAULTS.calendar);
+        }
+
+        function initAfterpayTab() {
+            apSortOrder = NEXUS_FILTER_DEFAULTS.apSort;
+            apShowDuplicates = false;
+            const dupBtn = $id('ap-dup-btn');
+            if (dupBtn) dupBtn.className = 'bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase shadow-sm active:scale-95 flex items-center gap-1.5 transition-colors';
+            const sortBtn = $id('ap-sort-btn');
+            if (sortBtn) sortBtn.innerHTML = '<i class="fa-solid fa-arrow-down-short-wide text-xs"></i> DESC';
+            const search = $id('ap-filter-search');
+            if (search) search.value = '';
+            renderAfterpay();
+        }
+
+        function initTasksTab() {
+            taskPriorityFilter = NEXUS_FILTER_DEFAULTS.taskPriority;
+            taskCalSelectedDate = null;
+            taskCalMonthOffset = 0;
+            $qAll('#tab-tasks .filter-chip').forEach(b => b.classList.remove('active'));
+            const btn = $id('f-task-all');
+            if (btn) btn.classList.add('active');
+            const clearBtn = $id('task-cal-clear-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
+            renderTasksTab();
+        }
+
+        function nexusDefaultApFreq() {
+            return (state && state.settings && state.settings.apDefaultFreq) || NEXUS_FILTER_DEFAULTS.apFreq;
+        }
+        
+        // APEX FIX: Forzar actualización de caché y sistema (Integrado a UI Modal)
+        function forceAppUpdate() {
+            triggerUIConfirm('¿Restablecer configuraciones globales?\n\nEl sistema restaurará la vista, colores y divisas por defecto, además limpiará la caché de red nativa.', 'update_app');
+        }
+
+        const NEXUS_WEB_UPDATE_KEY = 'nexus_last_web_update';
+        const NEXUS_WEB_UPDATE_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+
+        function formatWebUpdateDate(ts) {
+            if (!ts) return '—';
+            try { return new Date(ts).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return '—'; }
+        }
+
+        function refreshWebUpdateStatus() {
+            const el = $id('web-update-status');
+            if (!el) return;
+            const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
+            const next = last ? last + NEXUS_WEB_UPDATE_INTERVAL_MS : Date.now();
+            const due = !last || Date.now() >= next;
+            el.textContent = last
+                ? (due ? `Actualización automática pendiente · última: ${formatWebUpdateDate(last)}` : `Próxima auto-actualización: ${formatWebUpdateDate(next)}`)
+                : 'Auto-actualización cada 3 días al abrir la app';
+        }
+
+        function markWebUpdateDone() {
+            localStorage.setItem(NEXUS_WEB_UPDATE_KEY, String(Date.now()));
+            refreshWebUpdateStatus();
+        }
+
+        function applyWebAppUpdate(silent) {
+            markWebUpdateDone();
+            if ('caches' in window) { caches.keys().then(names => { for (let name of names) caches.delete(name); }); }
+            if ('serviceWorker' in navigator) { navigator.serviceWorker.getRegistrations().then(regs => { for (const r of regs) r.unregister(); }); }
+            document.cookie.split(';').forEach(c => { document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/'); });
+            const q = silent ? '?auto=' : '?v=';
+            window.location.href = window.location.pathname + q + Date.now();
+        }
+
+        function checkScheduledWebUpdate() {
+            const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
+            if (!last || (Date.now() - last) >= NEXUS_WEB_UPDATE_INTERVAL_MS) {
+                sessionStorage.setItem('nexus_web_auto_update', '1');
+                applyWebAppUpdate(true);
+                return true;
+            }
+            refreshWebUpdateStatus();
+            return false;
+        }
+
+        function forceWebUpdate() {
+            triggerUIConfirm('¿Instalar actualizaciones ahora?\n\nRecarga la app limpiando caché PWA. También se programa auto-actualización cada 3 días.', 'update_web_app');
+        }
+        
+        function forceNativeCacheWipe() {
+            if (window.webkit && window.webkit.messageHandlers.appInterface) {
+                window.webkit.messageHandlers.appInterface.postMessage({
+                    action: "clearCache"
+                });
+            }
+        }
+        
         function saveState() { 
             if (!currentUser || !sessionUnlocked || !state) return;
             if (typeof nexusPurgeExpiredDeletedTxArchive === 'function') nexusPurgeExpiredDeletedTxArchive();
@@ -6329,10 +6808,15 @@
             const scope = root && root.querySelectorAll ? root : document;
             scope.querySelectorAll('.nexus-amount-fit').forEach(el => {
                 el.style.fontSize = '';
+                const box = el.closest('.nexus-amount-box') || el.parentElement;
+                if (box && box !== el) {
+                    box.style.maxWidth = box.style.maxWidth || '';
+                }
                 let size = parseFloat(getComputedStyle(el).fontSize) || 14;
-                const min = 8;
+                const min = 7;
                 let guard = 0;
-                while (el.scrollWidth > el.clientWidth && size > min && guard < 24) {
+                const maxW = (box && box.clientWidth) ? box.clientWidth : el.clientWidth;
+                while (el.scrollWidth > maxW && size > min && guard < 28) {
                     size -= 1;
                     el.style.fontSize = size + 'px';
                     guard++;
@@ -6356,6 +6840,91 @@
         }
 
         function convertCurrency(amount, fromCode, toCode) { if (!amount) return 0; if(fromCode === toCode) return amount; return (amount / (LIVE_RATES[fromCode] || 1)) * (LIVE_RATES[toCode] || 1); }
+
+        /** Flujo de caja real (no proyección ni pasivos internos Afterpay). */
+        function nexusIsRealCashflowTx(t) {
+            if (!t || t.isProjected) return false;
+            if (t.type === 'isolated' || t.type === 'afterpay') return false;
+            if (t.renderType === 'afterpay' || t.apInternalOnly) return false;
+            return t.type === 'income' || t.type === 'expense' || t.type === 'transfer';
+        }
+        /** Abonos reales a deuda/TC: ya reflejados en saldo de bóveda/préstamo; no duplicar en presupuesto 50/30/20. */
+        function nexusIsDebtPaymentTx(t) {
+            if (!t || t.type !== 'expense') return false;
+            const cat = String(t.cat || '').toLowerCase();
+            const note = String(t.note || '').toLowerCase();
+            return cat.includes('abono') || cat.includes('pago deuda') || cat.includes('pago tc') || note.includes('[abono]');
+        }
+        function nexusEntityCurrencyCode(ent) {
+            return ent && (ent.original_currency || ent.currency);
+        }
+        function nexusMatchesActiveCurrency(ent, displayCur) {
+            if (!ent || displayCur === 'GLOBAL') return true;
+            return nexusEntityCurrencyCode(ent) === displayCur;
+        }
+        function nexusLoanRemainingBalance(l) {
+            if (!l) return 0;
+            const P = l.original_total || l.total || 0;
+            const r = (l.rate || 0) / 100;
+            const n = l.term || 1;
+            const paid = l.paidQuotas || 0;
+            if (paid >= n) return 0;
+            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            let balance = P;
+            for (let j = 0; j < paid; j++) balance -= (A - (balance * r));
+            return Math.max(0, balance);
+        }
+        function nexusAfterpayPendingAmount(t) {
+            const quotas = t.apQuotas || 4;
+            const paid = t.apPaid || 0;
+            if (paid >= quotas) return 0;
+            const unit = (t.original_amount || t.amount) / quotas;
+            return unit * (quotas - paid);
+        }
+        function nexusGetPatrimonyEligibleAccounts() {
+            return (state.accounts || []).filter(a => {
+                if (!a || !a.id) return false;
+                if (a.isShared || a.type === 'terceros') return false;
+                if (typeof nexusIsAccountTombstoned === 'function' && nexusIsAccountTombstoned(a.id, a.remoteId)) return false;
+                return true;
+            });
+        }
+        function nexusGetPatrimonyAfterpayContracts() {
+            const purged = typeof nexusGetPurgedTxIdSet === 'function' ? nexusGetPurgedTxIdSet() : new Set(state.deletedTxIds || []);
+            return (state.tx || []).filter(t => t && t.type === 'afterpay' && !purged.has(t.id) && !t.auditArchived);
+        }
+        function nexusGetPatrimonyLoansForLiabilities() {
+            return (state.loans || []).filter(l => {
+                if (!l || !l.id) return false;
+                if (l.isCC && l.cardId) return false;
+                return nexusLoanRemainingBalance(l) > 0;
+            });
+        }
+        /** Refresco unificado tras borrar/editar datos (todos los módulos vinculados al SSoT). */
+        function nexusRefreshAllModules() {
+            if (typeof updateDashboard === 'function') updateDashboard();
+            const tab = state.activeTab;
+            if (tab === 'database' && typeof renderDatabase === 'function') renderDatabase();
+            else if (tab === 'afterpay' && typeof renderAfterpay === 'function') renderAfterpay();
+            else if (tab === 'analysis' && typeof renderAnalysis === 'function') renderAnalysis();
+            else if (tab === 'report' && typeof renderReport === 'function') renderReport();
+            else if (tab === 'finances' && typeof renderFinancesUnified === 'function') renderFinancesUnified();
+            else if (tab === 'budget' && typeof renderBudgetTab === 'function') renderBudgetTab();
+            else if (tab === 'calendar' && typeof renderCalendar === 'function') renderCalendar();
+            else if (tab === 'loans' && typeof renderLoansList === 'function') renderLoansList();
+            else if (tab === 'tasks' && typeof renderTasksTab === 'function') renderTasksTab();
+            else if (tab === 'accounts' && typeof renderAccountsTab === 'function') renderAccountsTab();
+            if (typeof currentHistAccId !== 'undefined' && currentHistAccId) {
+                const acc = (state.accounts || []).find(a => a.id === currentHistAccId);
+                if (acc) {
+                    const balEl = $id('hist-acc-balance');
+                    if (balEl) balEl.innerText = fmt(acc.balance, acc.currency);
+                    if (typeof renderHistAccList === 'function') renderHistAccList();
+                } else if (typeof closeAccountHistory === 'function') closeAccountHistory();
+            }
+            const archMod = $id('deleted-tx-archive-modal');
+            if (archMod && !archMod.classList.contains('hidden') && typeof renderDeletedTxArchiveList === 'function') renderDeletedTxArchiveList();
+        }
         function buildTransactionSchema(baseObj) { const baseCurrency = state.settings.baseCurrency || 'USD'; return { ...baseObj, id: baseObj.id || 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), original_amount: baseObj.amount, currency_code: baseObj.currency, base_amount: convertCurrency(baseObj.amount, baseObj.currency, baseCurrency), flags: { isAfterpay: baseObj.type === 'afterpay' } }; }
         const getActiveAccounts = () => { if (state.activeCurrency === 'GLOBAL') { const base = state.settings.baseCurrency; return (state.accounts || []).map(a => ({ ...a, original_balance: a.balance, original_currency: a.currency, balance: convertCurrency(a.balance, a.currency, base), limit: convertCurrency(a.limit || 0, a.currency, base), currency: base, isVirtual: true })); } return (state.accounts || []).filter(a => a.currency === state.activeCurrency); };
         const getActiveTx = () => {
@@ -6408,8 +6977,8 @@
             const now = new Date(); now.setHours(0,0,0,0);
             const cDisplay = state.activeCurrency === 'GLOBAL' ? (state.settings.baseCurrency || 'COP') : state.activeCurrency;
 
-            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx)
-            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4)); 
+            // 1. AFTERPAY: Se extrae del SSoT puro (state.tx), filtrado por divisa activa
+            const apTx = state.tx.filter(t => t.type === 'afterpay' && (t.apPaid || 0) < (t.apQuotas || 4) && nexusMatchesActiveCurrency(t, cDisplay)); 
             
             apTx.forEach(tx => { 
                 const quotas = tx.apQuotas || 4; 
@@ -6435,13 +7004,20 @@
                     const clearCat = tx.note ? tx.note : tx.cat.substring(2).trim(); 
                     const pId = 'proj_ap_'+tx.id+'_'+i;
                     if (!rawTx.some(rt => rt.id === pId)) {
-                        rawTx.push({ id: pId, type: 'expense', amount: iA, original_amount: origIA, original_currency: tx.original_currency || tx.currency, cat: tx.cat, accId: tx.accId, date: d.toISOString(), note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`, isProjected: true, currency: cDisplay }); 
+                        rawTx.push({
+                            id: pId, type: 'expense', renderType: 'afterpay', amount: iA,
+                            original_amount: origIA, original_currency: tx.original_currency || tx.currency,
+                            cat: tx.cat, accId: tx.accId, date: d.toISOString(),
+                            note: `[Pendiente] ${clearCat} (${i+1}/${quotas})`,
+                            isProjected: true, currency: cDisplay,
+                            apParentId: tx.id, apQuotaIndex: i, apAuditRole: 'projected'
+                        });
                     }
                 } 
             });
             
-            // 2. LOANS: Se extrae del SSoT puro (state.loans)
-            state.loans.forEach(l => {
+            // 2. LOANS: Se extrae del SSoT puro (state.loans), filtrado por divisa activa
+            (state.loans || []).filter(l => nexusMatchesActiveCurrency(l, cDisplay)).forEach(l => {
                 const P_orig = l.original_total || l.total;
                 const r = l.rate / 100; const n = l.term; 
                 const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
@@ -6504,6 +7080,7 @@
         }
 
         function getContextTx(baseTx) { const now = new Date(); return baseTx.filter(t => { const d = new Date(t.date); if(state.context === 'day') return d.toDateString() === now.toDateString(); if(state.context === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); return d.getFullYear() === now.getFullYear(); }); }
+        function getNextPayDate(b, t) { let d = new Date(b); d.setHours(0,0,0,0); let c = d.getDay(); let x = t - c; if(x < 0) x += 7; d.setDate(d.getDate() + x); return d; }
 
         function updateBankLogoPreview() {
             const urlInput = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
@@ -6644,7 +7221,7 @@
             else if (id === 'tasks') renderTasksTab();
             else if (id === 'projects') renderProjectsTab();
             else if (id === 'home') updateDashboard();
-            else if (id === 'scanner') initScanner();
+            else if (id === 'scanner') nexusRestoreScannerUI();
         }
 
         function showFounderSetupBannerIfNeeded() {
@@ -6683,8 +7260,57 @@
             if (laterBtn) laterBtn.onclick = () => { sessionStorage.setItem('nexus_pin_banner_ok', '1'); box.remove(); };
         }
 
+        function nexusWireI18nHooks() {
+            if (nexusWireI18nHooks._done) return;
+            nexusWireI18nHooks._done = true;
+            if (typeof nexusOnLanguageChange !== 'function') return;
+            nexusOnLanguageChange(function () {
+                if (!state) return;
+                requestAnimationFrame(() => {
+                    const tabEl = $id('tab-' + (state.activeTab || 'home'));
+                    if (typeof nexusApplyI18nDom === 'function') {
+                        try { nexusApplyI18nDom(tabEl || null); } catch (e) { /* i18n */ }
+                    }
+                    if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
+                    else if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
+                    else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                    if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
+                    if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
+                    if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
+                });
+            });
+        }
+
+        function nexusUi(text) {
+            return (typeof nexusTranslateUiText === 'function') ? nexusTranslateUiText(text) : String(text != null ? text : '');
+        }
+
+        function nexusSetHtml(el, html) {
+            if (!el) return;
+            el.innerHTML = (typeof nexusUiHtml === 'function') ? nexusUiHtml(html) : html;
+        }
+
+        function nexusI18nRefresh(root) {
+            if (typeof nexusGetLanguage !== 'function' || nexusGetLanguage() === 'es') return;
+            if (typeof nexusApplyI18nDom !== 'function') return;
+            if (nexusI18nRefresh._pending) return;
+            nexusI18nRefresh._pending = true;
+            requestAnimationFrame(() => {
+                nexusI18nRefresh._pending = false;
+                try { nexusApplyI18nDom(root || null); } catch (e) { /* i18n */ }
+            });
+        }
+
+        function nexusInformeFlowCategoryLabel(flowType) {
+            const t = (k, fb) => (typeof nexusT === 'function' ? nexusT(k) : fb);
+            if (flowType === 'income') return t('audit.incomeCategory', 'Categoría de ingreso');
+            if (flowType === 'expense') return t('audit.expenseCategory', 'Categoría de gasto');
+            return t('common.category', 'Categoría');
+        }
+
         function initNexus() {
             if (!sessionUnlocked || !currentUser) return;
+            nexusWireI18nHooks();
             nexusWireModalAutoClose();
             installNexusNativeNavigation();
             applyThemeCSS();
@@ -7156,12 +7782,14 @@
             ctx = ctx || 'day'; state.context = ctx; $qAll('.v-btn').forEach(b => b.classList.remove('active')); const btnCtx = $id('btn-' + ctx); if (btnCtx) btnCtx.classList.add('active');
             if(ctx !== 'day') document.body.classList.add('is-red-mode'); else document.body.classList.remove('is-red-mode');
             const viewDay = $id('view-day'); const viewPeriod = $id('view-period'); const wealthTitle = $id('wealth-title');
-            if(ctx === 'day') { if (viewDay) viewDay.classList.remove('hidden'); if (viewPeriod) viewPeriod.classList.add('hidden'); if (wealthTitle) wealthTitle.innerText = "Patrimonio Global Unificado"; } 
-            else { if (viewDay) viewDay.classList.add('hidden'); if (viewPeriod) viewPeriod.classList.remove('hidden'); if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; }
+            if(ctx === 'day') { if (viewDay) viewDay.classList.remove('hidden'); if (viewPeriod) viewPeriod.classList.add('hidden'); if (wealthTitle) wealthTitle.innerText = nexusUi('Patrimonio Global Unificado'); } 
+            else { if (viewDay) viewDay.classList.add('hidden'); if (viewPeriod) viewPeriod.classList.remove('hidden'); if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? nexusUi('Patrimonio Este Mes') : nexusUi('Patrimonio Este Año'); }
             state.periodFilter = { type: 'all', cat: 'all' }; updateDashboard(); if(state.activeTab === 'analysis') renderAnalysis();
         }
 
-        
+        // APEX FIX: Motor de Renderizado Sólido (Previene Flashing y Scroll Resets al actualizar datos)
+
+
         function switchTab(id) {
             id = id || 'home';
             const prevTab = state.activeTab;
@@ -7225,10 +7853,7 @@
 
             if (!isSameTab && typeof saveState === 'function') saveState();
 
-            if (typeof nexusI18nRefresh === 'function') {
-                const tabEl = $id('tab-' + id);
-                if (tabEl) nexusI18nRefresh(tabEl);
-            }
+            nexusI18nRefresh($id('tab-' + id));
         }
 
         function toggleFab() { 
@@ -7922,156 +8547,6 @@
         }
 
         // TABS
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-
-        /* ── Reubicado desde 01-Auth: NAV-HELPERS ── */
-        function updateBankLogoPreview() {
-            const urlInput = $id('fa-bank-url') ? $id('fa-bank-url').value.trim() : '';
-            const preview = $id('fa-logo-preview');
-            const customB64 = $id('fa-custom-logo-b64');
-            if (customB64) customB64.value = ''; // Resetear el logo custom si el usuario escribe una URL
-            if (!preview) return;
-            if (urlInput) {
-                let logoUrl = urlInput;
-                const lowerUrl = urlInput.toLowerCase();
-                // APEX FIX: Detección inteligente de activos (Imágenes directas o Firebase) vs Dominios
-                if (!(lowerUrl.match(/\.(jpeg|jpg|gif|png|svg|webp)(\?.*)?$/) || lowerUrl.includes('firebasestorage') || lowerUrl.includes('drive.google') || lowerUrl.includes('image'))) {
-                    let domain = urlInput.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
-                    if (domain) logoUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
-                }
-                if (logoUrl) {
-                    preview.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<i class=\\'fa-solid fa-link text-slate-300 text-[10px]\\'></i>';">`;
-                    return;
-                }
-            }
-            preview.innerHTML = '<i class="fa-solid fa-link text-slate-300 text-[10px]"></i>';
-        }
-
-        function processAccountLogoUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = new Image();
-                img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    const MAX_SIZE = 128;
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > height) {
-                        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
-                    } else {
-                        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
-                    }
-                    canvas.width = width; canvas.height = height;
-                    ctx.drawImage(img, 0, 0, width, height);
-                    const dataUrl = canvas.toDataURL('image/png'); 
-                    const customB64 = $id('fa-custom-logo-b64');
-                    if (customB64) customB64.value = dataUrl;
-                    const urlInput = $id('fa-bank-url');
-                    if (urlInput) urlInput.value = ''; // Limpiar la URL para evitar conflictos
-                    const preview = $id('fa-logo-preview');
-                    if (preview) preview.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover">`;
-                }
-                img.src = e.target.result;
-            }
-            reader.readAsDataURL(file);
-        }
-
-        /** Restablece viewport: sin desplazamiento horizontal ni capas fantasma. */
-        function nexusResetViewportLayers() {
-            try {
-                document.documentElement.scrollLeft = 0;
-                document.body.scrollLeft = 0;
-                document.documentElement.style.transform = 'none';
-                document.body.style.transform = 'none';
-                const main = $id('nexus-app-main');
-                if (main) {
-                    main.scrollLeft = 0;
-                    main.style.transform = 'none';
-                }
-                if (window.scrollX) window.scrollTo(0, window.scrollY || 0);
-            } catch (e) { /* noop */ }
-        }
-
-        /** Navegación estática: sin pila history ni gesto atrás/adelante por pestaña (UI tipo app nativa). */
-        function installNexusNativeNavigation() {
-            if (window.__nexusNavInstalled) return;
-            window.__nexusNavInstalled = true;
-            const base = location.pathname + location.search;
-            try {
-                history.replaceState({ nexusLock: 1 }, '', base);
-            } catch (e) { /* noop */ }
-            window.addEventListener('popstate', function() {
-                try { history.pushState({ nexusLock: 1 }, '', base); } catch (e) { /* noop */ }
-                nexusResetViewportLayers();
-                if (state && state.activeTab && typeof switchTab === 'function') switchTab(state.activeTab);
-            });
-            window.addEventListener('pageshow', function(ev) {
-                if (ev.persisted) {
-                    nexusResetViewportLayers();
-                    if (state && state.activeTab && typeof switchTab === 'function') switchTab(state.activeTab);
-                }
-            });
-            if (!window.__nexusSwipeLockInstalled) {
-                window.__nexusSwipeLockInstalled = true;
-                let _nxSx = 0, _nxSy = 0, _nxEdge = false;
-                document.addEventListener('touchstart', function(e) {
-                    if (e.touches.length !== 1) return;
-                    _nxSx = e.touches[0].clientX;
-                    _nxSy = e.touches[0].clientY;
-                    _nxEdge = _nxSx < 52;
-                }, { passive: true, capture: true });
-                document.addEventListener('touchmove', function(e) {
-                    if (e.touches.length !== 1) return;
-                    const dx = e.touches[0].clientX - _nxSx;
-                    const dy = e.touches[0].clientY - _nxSy;
-                    const inOpenModal = e.target && e.target.closest && e.target.closest(
-                        '.fixed.inset-0[id$="-modal"]:not(.hidden), #numpad-modal:not(.hidden), #nexus-doc-viewer:not(.hidden), #nexus-web-viewer:not(.hidden)'
-                    );
-                    if (inOpenModal && Math.abs(dx) > 5) {
-                        e.preventDefault();
-                        return;
-                    }
-                    if (_nxEdge && dx > 8 && Math.abs(dx) > Math.abs(dy)) {
-                        e.preventDefault();
-                        return;
-                    }
-                    const allowH = e.target && e.target.closest && e.target.closest('[data-nexus-hscroll], .overflow-x-auto, table, .cal-grid');
-                    if (allowH && Math.abs(dx) > Math.abs(dy)) return;
-                    if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.15) {
-                        e.preventDefault();
-                    }
-                }, { passive: false, capture: true });
-            }
-            nexusResetViewportLayers();
-        }
-
-        function refreshActiveTabView() {
-            const id = (state && state.activeTab) || 'home';
-            if (id === 'loans') renderLoansList();
-            else if (id === 'analysis') renderAnalysis();
-            else if (id === 'afterpay') renderAfterpay();
-            else if (id === 'report') renderReport();
-            else if (id === 'accounts') renderAccountsTab();
-            else if (id === 'settings') renderSettingsTab();
-            else if (id === 'database') renderDatabase();
-            else if (id === 'calendar') renderCalendar();
-            else if (id === 'finances') renderFinancesUnified();
-            else if (id === 'budget') renderBudgetTab();
-            else if (id === 'taxes') renderTaxes();
-            else if (id === 'tasks') renderTasksTab();
-            else if (id === 'projects') renderProjectsTab();
-            else if (id === 'home') updateDashboard();
-            else if (id === 'scanner') nexusRestoreScannerUI();
-        }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 04-MODULO-CUENTAS — Módulo Cuentas / bóvedas / reordenar cuentas
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderAccountsTab() {
             if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             nexusApplyAccountTombstonesToState();
@@ -9195,11 +9670,6 @@
             else loanCalMonthOffset += val;
             renderLoansList();
         }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 05-MODULO-DEUDAS — Módulo Deudas
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderLoansList() {
             const listPending = $id('loans-list-pending'); const listPaidContainer = $id('loans-list-paid-container'); const listPaid = $id('loans-list-paid'); const summary = $id('loans-summary-container'); if (!listPending || !summary) return;
             const activeLoans = getActiveLoans();
@@ -11021,11 +11491,6 @@
             } 
             renderDatabase(); 
         }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 06-MODULO-AUDITORIA — Módulo Auditoría SSoT
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderDatabase() { 
             const fsEl = $id('db-filter-start'); const feEl = $id('db-filter-end'); const ftEl = $id('db-filter-type'); const fcEl = $id('db-filter-cat'); const fCurrEl = $id('db-filter-currency'); if(!fsEl || !feEl || !ftEl || !fcEl) return;
             const st = new Date(fsEl.value); const en = new Date(feEl.value); en.setHours(23,59,59); const tp = ftEl.value; const ct = fcEl.value; const fCurr = fCurrEl ? fCurrEl.value : 'all';
@@ -12048,11 +12513,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             }, 100);
         }
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 07-MODULO-ANALITICA — Módulo Analítica
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderAnalysis() {
             const now = new Date();
             
@@ -12159,11 +12619,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             nexusI18nRefresh($id('tab-analysis'));
         }
         // FINANZAS PERSONALES UNIFICADO
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 08-MODULO-FINANZAS — Módulo Finanzas
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderFinancesUnified() {
             const cont = $id('finances-unified-content'); if (!cont) return;
             const bC = state.settings.baseCurrency; const now = new Date(); const enrichedTx = getEnrichedTx();
@@ -12217,15 +12672,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             });
             const mNet = mInc - mExp;
 
-            nexusSetHtml(cont, `<div role="button" tabindex="0" onclick="openKpiInsight('fin-networth')" class="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] shadow-lg flex justify-between items-center mb-6 cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"><div><p class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto <i class="fa-solid fa-circle-info opacity-60"></i></p><p class="text-[8px] md:text-[10px] opacity-50 uppercase">Activos Totales - Pasivos Totales</p></div><p class="nexus-amount-fit font-black ${netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(netWorth, bC)}</p></div><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">KPIs Finanzas Personales</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8"><div role="button" tabindex="0" onclick="openKpiInsight('fin-emergency')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Cobertura Emergencia <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${emergencyFundMonths >= 3 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${emergencyFundMonths} <span class="text-[10px]">Meses</span></h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-savings')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Tasa Ahorro Promedio <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate > 0 ? 'text-amber-500' : 'theme-val-exp')} tabular-nums">${savingsRate.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtload')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Carga Deuda Mensual <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${monthlyDebtLoad <= 30 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${monthlyDebtLoad.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtasset')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Endeudamiento <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${debtToAsset <= 40 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${debtToAsset.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden mb-6"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Balance General Simplificado</h3></div><div class="p-5 space-y-3"><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Activos Líquidos</p><p class="text-sm font-mono font-bold theme-text">${fmt(liquidAssets, bC)}</p></div><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(investmentAssets, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-blue-500">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between mt-2 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(shortTermLiabilities, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Largo Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-red-500">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(allLiabilities, bC)}</p></div></div></div><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden h-fit"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Estado de Resultados (Mes Actual)</h3></div><div class="p-5 space-y-3"><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-sm font-mono font-bold theme-text">${fmt(mInc, bC)}</p></div><div class="pt-3 pb-3 border-y border-slate-100/50 my-2"><p class="text-[9px] font-black uppercase text-slate-400 mb-2">Estructura de Gastos</p><div class="flex justify-between mb-1"><p class="text-[10px] font-bold text-slate-500">Gastos Fijos</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mFixed, bC)}</p></div><div class="flex justify-between"><p class="text-[10px] font-bold text-slate-500">Gastos Variables</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mVar, bC)}</p></div></div><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-exp">Gastos Totales</p><p class="text-sm font-mono font-bold theme-val-exp">${fmt(mExp, bC)}</p></div><div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mt-3"><p class="text-[9px] md:text-[10px] font-black uppercase text-slate-500">Utilidad Neta</p><p class="text-lg md:text-2xl font-black ${mNet >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(mNet, bC)}</p></div></div></div></div>`);
+            nexusSetHtml(cont, `<div role="button" tabindex="0" onclick="openKpiInsight('fin-networth')" class="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] shadow-lg flex justify-between items-center mb-6 cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"><div><p class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto <i class="fa-solid fa-circle-info opacity-60"></i></p><p class="text-[8px] md:text-[10px] opacity-50 uppercase">Activos Totales - Pasivos Totales</p></div><p class="nexus-amount-fit font-black ${netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(netWorth, bC)}</p></div><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">KPIs Finanzas Personales</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8"><div role="button" tabindex="0" onclick="openKpiInsight('fin-emergency')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Cobertura Emergencia <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${emergencyFundMonths >= 3 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${emergencyFundMonths} <span class="text-[10px]">Meses</span></h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-savings')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Tasa Ahorro Promedio <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate > 0 ? 'text-amber-500' : 'theme-val-exp')} tabular-nums">${savingsRate.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtload')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Carga Deuda Mensual <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${monthlyDebtLoad <= 30 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${monthlyDebtLoad.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtasset')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Endeudamiento <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${debtToAsset <= 40 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${debtToAsset.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden mb-6"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Balance General Simplificado</h3></div><div class="p-5 space-y-3"><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Activos Líquidos</p><p class="text-sm font-mono font-bold theme-text">${fmt(liquidAssets, bC)}</p></div><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(investmentAssets, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-blue-500">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between mt-2 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(shortTermLiabilities, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Largo Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-red-500">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(allLiabilities, bC)}</p></div></div></div><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden h-fit"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Estado de Resultados (Mes Actual)</h3></div><div class="p-5 space-y-3"><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-sm font-mono font-bold theme-text">${fmt(mInc, bC)}</p></div><div class="pt-3 pb-3 border-y border-slate-100/50 my-2"><p class="text-[9px] font-black uppercase text-slate-400 mb-2">Estructura de Gastos</p><div class="flex justify-between mb-1"><p class="text-[10px] font-bold text-slate-500">Gastos Fijos</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mFixed, bC)}</p></div><div class="flex justify-between"><p class="text-[10px] font-bold text-slate-500">Gastos Variables</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mVar, bC)}</p></div></div><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-exp">Gastos Totales</p><p class="text-sm font-mono font-bold theme-val-exp">${fmt(mExp, bC)}</p></div><div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mt-3"><p class="text-[9px] md:text-[10px] font-black uppercase text-slate-500">Utilidad Neta</p><p class="text-lg md:text-2xl font-black ${mNet >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(mNet, bC)}</p></div></div></div></div>`;
             nexusI18nRefresh(cont);
         }
         // PRESUPUESTOS Y METAS
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 09-MODULO-PRESUPUESTOS — Módulo Presupuestos
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderBudgetTab() {
             const cont = $id('budget-unified-content'); if (!cont) return;
             const now = new Date(); const enrichedTx = getEnrichedTx();
@@ -12776,11 +13226,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             renderTasksTab();
         }
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 10-MODULO-TAREAS — Módulo Tareas
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderTasksTab() {
             if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             if (typeof clearNativeAppBadge === 'function') clearNativeAppBadge(); // renderTasksTab clear badge
@@ -13284,11 +13729,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             sel.innerHTML = html;
         }
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 11-MODULO-PROYECTOS — Módulo Proyectos
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderProjectsTab() {
             if (typeof scheduleP2PListenersAttach === 'function') scheduleP2PListenersAttach(true);
             if(!state.projects) state.projects = [];
@@ -13706,11 +14146,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             triggerUIDelete('phase', projId, phaseIdx);
         }
         // REPORT
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 12-MODULO-DIRECTIVA — Módulo Directiva
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderReport() {
             const bC = state.settings.baseCurrency; const rb = $id('rep-base-curr'); if(rb) rb.innerText = bC;
             let totAssets = 0; let totLiab = 0;
@@ -13746,7 +14181,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             
             const rAT = $id('rep-assets-text'); if(rAT) rAT.innerText = nexusUi('Mide liquidez e inversión. Crece al retener capital y adquirir bienes.');
             const rLT = $id('rep-liabilities-text'); if(rLT) rLT.innerText = nexusUi('Obligaciones totales. Aumenta al usar crédito o apalancamiento.');
-            const rST = $id('rep-savings-text'); if(rST) rST.innerText = nexusUi(savingsRate >= 20 ? 'Retención óptima. Alta eficiencia entre ingreso y gasto operativo.' : (savingsRate > 0 ? 'Margen ajustado. El costo de vida consume el flujo principal.' : 'Déficit operativo. Fuga de capital por exceso de gastos.'));
+            const rST = $id('rep-savings-text'); if(rST) rST.innerText = nexusUi(savingsRate >= 20 ? 'Retención óptima. Alta eficiencia entre ingreso y gasto operativo.' : (savingsRate > 0 ? 'Margen ajustado. El costo de vida consume el flujo principal.' : 'Déficit operativo. Fuga de capital por exceso de gastos.');
             const rHT = $id('rep-health-text'); if(rHT) rHT.innerText = debtRatio <= 40 ? 'Apalancamiento sano. Riesgo estructural bajo y controlado.' : 'Sobregiro estructural. Causado por deuda excesiva vs patrimonio.';
 
             // NEW CODE FOR 6 MONTHS TREND
@@ -13808,11 +14243,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             saveState();
             renderTaxes();
         }
-
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 13-MODULO-IMPUESTOS — Módulo Impuestos
-           ═══════════════════════════════════════════════════════════════════════════ */
 
         function renderTaxes() {
             const curr = $id('tax-currency') ? $id('tax-currency').value : 'COP';
@@ -13897,503 +14327,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
             renderAfterpay();
         }
-
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-
-        /* ── Reubicado desde 01-Auth: AFTERPAY-AUDIT-UTILS ── */
-        function setApMode(mode) {
-            const btnNew = $id('ap-mode-new');
-            const btnRecon = $id('ap-mode-recon');
-            const paidSelect = $id('f-ap-paid');
-            const paidWrap = $id('ap-paid-wrap');
-            const modeHint = $id('ap-mode-hint');
-            const accLbl = $id('f-account') ? $id('f-account').previousElementSibling : null;
-            const isRecon = mode === 'recon';
-
-            if (btnNew) {
-                if (!isRecon) { btnNew.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.remove('text-teal-600/50'); }
-                else { btnNew.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnNew.classList.add('text-teal-600/50'); }
-            }
-            if (btnRecon) {
-                if (isRecon) { btnRecon.classList.add('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.remove('text-teal-600/50'); }
-                else { btnRecon.classList.remove('bg-white', 'text-teal-700', 'shadow-sm'); btnRecon.classList.add('text-teal-600/50'); }
-            }
-            if (paidWrap) paidWrap.classList.toggle('hidden', !isRecon);
-            if (modeHint) modeHint.classList.toggle('hidden', !isRecon);
-            if (paidSelect && isRecon && paidSelect.value === '') paidSelect.value = '0';
-            if (accLbl && $id('f-type') && $id('f-type').value === 'afterpay') {
-                accLbl.innerText = isRecon ? 'Cuenta origen (referencia)' : 'Cuenta (1er abono)';
-            }
-        }
-
-        function nexusIsApReconModeSelected() {
-            const btn = $id('ap-mode-recon');
-            return !!(btn && btn.classList.contains('bg-white'));
-        }
-
-        /** Registra el 1er abono real (cuota proyectada) en cuenta y auditoría. El contrato madre nunca sale de Afterpay. */
-        function nexusCreateAfterpayFirstPayment(apContract, apAcc) {
-            if (!apContract || !apAcc || apContract.apRecon) return null;
-            if ((apContract.apPaid || 0) >= 1) return null;
-            const quotas = apContract.apQuotas || 4;
-            const rawDeductAmt = (apContract.original_amount || apContract.amount) / quotas;
-            let deductAmt = rawDeductAmt;
-            if (apAcc.currency !== apContract.currency) deductAmt = convertCurrency(rawDeductAmt, apContract.currency, apAcc.currency);
-            if (nexusIsLiabAccount(apAcc)) apAcc.balance += deductAmt; else apAcc.balance -= deductAmt;
-            const label = (apContract.note || (apContract.cat && apContract.cat.length > 2 ? apContract.cat.substring(2) : apContract.cat) || '').trim();
-            const apPayTx = buildTransactionSchema({
-                type: 'expense',
-                amount: rawDeductAmt,
-                cat: apContract.cat,
-                accId: apAcc.id,
-                date: apContract.date,
-                note: `[Pago Inicial] ${label} (1/${quotas})`,
-                currency: apContract.currency,
-                costType: apContract.costType || 'fixed'
-            });
-            apPayTx.apParentId = apContract.id;
-            if (userProfile && userProfile.name) apPayTx.createdBy = userProfile.name;
-            apContract.apPaid = 1;
-            state.tx.push(apPayTx);
-            saveCloudTx(apPayTx);
-            return apPayTx;
-        }
-
-        function nexusFindAfterpayParentForPayment(payTx) {
-            if (!payTx) return null;
-            if (payTx.apParentId) {
-                return (state.tx || []).find(t => t.id === payTx.apParentId && t.type === 'afterpay') || null;
-            }
-            const note = payTx.note || '';
-            const m = note.match(/\((\d+)\/(\d+)\)/);
-            if (!m) return null;
-            const label = note.replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
-            return (state.tx || []).find(t => {
-                if (t.type !== 'afterpay') return false;
-                if (payTx.accId && t.accId !== payTx.accId) return false;
-                if (payTx.cat && t.cat !== payTx.cat) return false;
-                const tLabel = (t.note || (t.cat && t.cat.length > 2 ? t.cat.substring(2) : t.cat) || '').trim();
-                return tLabel === label || (label && tLabel.includes(label));
-            }) || null;
-        }
-
-        function nexusIsAfterpayPaymentTx(tx) {
-            if (!tx || tx.isProjected) return false;
-            const n = tx.note || '';
-            return /^\[(Abono|Pago Inicial)\]/i.test(n);
-        }
-
-        function nexusIsAfterpayProjectedQuota(tx) {
-            return !!(tx && tx.isProjected && String(tx.id || '').startsWith('proj_ap_'));
-        }
-
-        function nexusIsAfterpayAuditSynthetic(tx) {
-            const id = String((tx && tx.id) || '');
-            return id.startsWith('audit_ap_buy_') || id.startsWith('audit_ap_amort_');
-        }
-
-        function nexusParseAfterpayProjectionId(id) {
-            const s = String(id || '');
-            if (!s.startsWith('proj_ap_')) return null;
-            const rest = s.slice(8);
-            const lastU = rest.lastIndexOf('_');
-            if (lastU < 1) return null;
-            const quotaIdx = parseInt(rest.slice(lastU + 1), 10);
-            const parentId = rest.slice(0, lastU);
-            if (!parentId || Number.isNaN(quotaIdx)) return null;
-            return { parentId, quotaIdx };
-        }
-
-        function nexusComputeAfterpayQuotaDate(tx, quotaIndexZeroBased) {
-            const baseDate = getSafeDate(tx.date);
-            const stD = tx.apFreq === 'fortnightly' ? 14 : 7;
-            const apPayDay = state.settings.apPayDay !== undefined ? parseInt(state.settings.apPayDay, 10) : 5;
-            let d = new Date(baseDate.getTime());
-            const i = quotaIndexZeroBased;
-            if (tx.apFreq === 'monthly') d.setMonth(d.getMonth() + i);
-            else d.setDate(d.getDate() + (i * stD));
-            if (i > 0) {
-                let dist = apPayDay - d.getDay();
-                if (dist < 0) dist += 7;
-                d.setDate(d.getDate() + dist);
-            }
-            d.setHours(12, 0, 0, 0);
-            return d;
-        }
-
-        function nexusFindAfterpayPaymentForQuota(parent, quotaOneBased) {
-            if (!parent) return null;
-            const label = (parent.note || (parent.cat && parent.cat.length > 2 ? parent.cat.substring(2) : parent.cat) || '').trim();
-            return (state.tx || []).find(t => {
-                if (t.isProjected || t.type !== 'expense') return false;
-                const m = (t.note || '').match(/\((\d+)\/(\d+)\)/);
-                if (!m || parseInt(m[1], 10) !== quotaOneBased) return false;
-                if (t.apParentId && t.apParentId !== parent.id) return false;
-                if (t.apParentId === parent.id) return true;
-                if (!/^\[(Abono|Pago Inicial)\]/i.test(t.note || '')) return false;
-                if (parent.cat && t.cat && t.cat !== parent.cat) return false;
-                const tLabel = (t.note || '').replace(/^\[(Abono|Pago Inicial)\]\s*/i, '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
-                return !label || tLabel === label || (label && tLabel.includes(label));
-            }) || null;
-        }
-
-        /** Cronograma Afterpay en auditoría: no recortar por rango de fechas (control futuro). */
-        function nexusAfterpayAuditExemptFromDateFilter(tx) {
-            if (tx && tx.apAuditRole === 'amortized') return true;
-            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsAfterpayAuditSynthetic(tx)) return true;
-            if (nexusIsAfterpayPaymentTx(tx)) {
-                const parent = nexusFindAfterpayParentForPayment(tx);
-                return !!(parent && !parent.apRecon && (parent.apPaid || 0) < (parent.apQuotas || 4));
-            }
-            return false;
-        }
-
-        /** Cronograma Afterpay para auditoría: compra BNPL + amortizado + cuotas futuras. */
-        function nexusBuildAfterpayAuditSchedule(cDisplay) {
-            const rows = [];
-            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
-            const contracts = (state.tx || []).filter(t => t.type === 'afterpay' && !t.apRecon && (t.apPaid || 0) < (t.apQuotas || 4));
-            contracts.forEach(tx => {
-                const quotas = tx.apQuotas || 4;
-                const total = tx.original_amount || tx.amount;
-                const origIA = total / quotas;
-                const iA = convertCurrency(origIA, tx.original_currency || tx.currency, baseCur);
-                const label = (tx.note || (tx.cat && tx.cat.length > 2 ? tx.cat.substring(2) : tx.cat) || 'Afterpay').trim();
-                const curr = tx.original_currency || tx.currency;
-                const paid = tx.apPaid || 0;
-
-                rows.push({
-                    id: 'audit_ap_buy_' + tx.id,
-                    type: 'expense',
-                    renderType: 'afterpay',
-                    amount: convertCurrency(total, curr, baseCur),
-                    original_amount: total,
-                    original_currency: curr,
-                    currency: baseCur,
-                    cat: tx.cat,
-                    accId: tx.accId,
-                    date: tx.date,
-                    note: `[Compra BNPL] ${label} (${quotas} cuotas × ${fmt(origIA, curr)})`,
-                    isProjected: true,
-                    apParentId: tx.id,
-                    apAuditRole: 'purchase',
-                    nexusSkipAuditTotal: true
-                });
-
-                // Cuotas amortizadas (misma lógica que Agenda: fechas de cronograma + abonos reales)
-                for (let i = 0; i < paid; i++) {
-                    const qNum = i + 1;
-                    const paidTx = nexusFindAfterpayPaymentForQuota(tx, qNum);
-                    const schedDate = nexusComputeAfterpayQuotaDate(tx, i).toISOString();
-                    const amortRow = {
-                        id: 'audit_ap_amort_' + tx.id + '_' + i,
-                        type: 'expense',
-                        renderType: 'afterpay',
-                        amount: iA,
-                        original_amount: origIA,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: tx.cat,
-                        accId: paidTx ? paidTx.accId : tx.accId,
-                        date: schedDate,
-                        note: paidTx ? (paidTx.note || `[Abono Realizado] ${label} (${qNum}/${quotas})`) : `[Amortizado] ${label} (${qNum}/${quotas})`,
-                        isProjected: false,
-                        apParentId: tx.id,
-                        apQuotaIndex: i,
-                        apAuditRole: 'amortized',
-                        nexusSkipAuditTotal: true
-                    };
-                    if (paidTx) {
-                        amortRow.amount = convertCurrency(paidTx.original_amount || paidTx.amount, paidTx.original_currency || paidTx.currency, baseCur);
-                        amortRow.original_amount = paidTx.original_amount || paidTx.amount;
-                        amortRow.original_currency = paidTx.original_currency || paidTx.currency;
-                        amortRow.nexusAuditMirrorsTxId = paidTx.id;
-                    }
-                    rows.push(amortRow);
-                }
-
-                // Cuotas pendientes (alineado con getEnrichedTx / Agenda)
-                for (let i = paid; i < quotas; i++) {
-                    const qNum = i + 1;
-                    if (nexusFindAfterpayPaymentForQuota(tx, qNum)) continue;
-                    const isFirstQuota = qNum === 1 && paid === 0;
-                    const pId = 'proj_ap_' + tx.id + '_' + i;
-                    const noteLine = isFirstQuota
-                        ? `[Pago inicial proyectado] ${label} (${qNum}/${quotas})`
-                        : `[Pendiente] ${label} (${qNum}/${quotas})`;
-                    rows.push({
-                        id: pId,
-                        type: 'expense',
-                        renderType: 'afterpay',
-                        amount: iA,
-                        original_amount: origIA,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: tx.cat,
-                        accId: tx.accId,
-                        date: nexusComputeAfterpayQuotaDate(tx, i).toISOString(),
-                        note: noteLine,
-                        isProjected: true,
-                        apParentId: tx.id,
-                        apQuotaIndex: i,
-                        apAuditRole: isFirstQuota ? 'first_projected' : 'projected'
-                    });
-                }
-            });
-            return rows;
-        }
-
-        function nexusIsDebtAuditSynthetic(tx) {
-            const id = String((tx && tx.id) || '');
-            return id.startsWith('audit_loan_') || id.startsWith('audit_cc_') || id.startsWith('audit_pend_');
-        }
-
-        function nexusIsDebtProjectedQuota(tx) {
-            const id = String((tx && tx.id) || '');
-            return !!(tx && tx.isProjected && (id.startsWith('proj_loan_') || id.startsWith('proj_pend_') || id.startsWith('audit_loan_proj_')));
-        }
-
-        function nexusLoanIsActive(l) {
-            if (!l) return false;
-            const paid = l.paidQuotas || 0;
-            if (l.id.startsWith('pend_')) return paid < 1;
-            const term = l.term || 0;
-            return term > 0 && paid < term;
-        }
-
-        function nexusComputeLoanQuotaDate(l, quotaIndexZeroBased) {
-            const baseDate = getSafeDate(l.date);
-            let pD;
-            if (l.isCC && l.cardId) {
-                const card = (state.accounts || []).find(a => a.id === l.cardId);
-                if (card && card.cutoffDay && card.payDay) {
-                    const pDate = new Date(baseDate);
-                    const addM = pDate.getDate() > card.cutoffDay ? 2 : 1;
-                    pD = new Date(pDate.getFullYear(), pDate.getMonth() + addM + quotaIndexZeroBased, card.payDay, 12, 0, 0);
-                } else {
-                    pD = new Date(baseDate);
-                    pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
-                    pD.setHours(12, 0, 0, 0);
-                }
-            } else if (l.id.startsWith('pend_')) {
-                pD = new Date(baseDate);
-                pD.setHours(12, 0, 0, 0);
-            } else {
-                pD = new Date(baseDate);
-                pD.setMonth(pD.getMonth() + quotaIndexZeroBased + 1);
-                pD.setHours(12, 0, 0, 0);
-            }
-            return pD;
-        }
-
-        function nexusFindLoanPaymentForQuota(loan, quotaOneBased) {
-            if (!loan) return null;
-            const tag = `(${quotaOneBased}/${loan.term})`;
-            const baseName = String(loan.name || '').split(' (')[0];
-            return (state.tx || []).find(t => {
-                if (!t || t.isProjected) return false;
-                const n = t.note || '';
-                if (!n.includes('[Abono]') && !(t.cat || '').includes('Abono TC') && !(t.cat || '').includes('Pago Deuda')) return false;
-                if (!n.includes(tag)) return false;
-                return n.includes(loan.name) || (baseName && n.includes(baseName));
-            }) || null;
-        }
-
-        /** Cronograma de deudas / TC para auditoría (amortizado + futuro + compra TC). */
-        function nexusBuildDebtAuditSchedule(cDisplay) {
-            const rows = [];
-            const baseCur = cDisplay || state.settings.baseCurrency || 'COP';
-            (state.loans || []).forEach(l => {
-                if (!nexusLoanIsActive(l)) return;
-                const curr = l.original_currency || l.currency || baseCur;
-                const paid = l.paidQuotas || 0;
-                const n = l.term || 1;
-                const P_orig = l.original_total || l.total;
-                const r = (l.rate || 0) / 100;
-                const A_orig = (r === 0) ? P_orig / n : P_orig * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-                let bal_run = P_orig;
-                const card = l.isCC && l.cardId ? (state.accounts || []).find(a => a.id === l.cardId) : null;
-                const accId = card ? card.id : null;
-
-                if (l.isCC) {
-                    rows.push({
-                        id: 'audit_cc_buy_' + l.id,
-                        type: 'expense',
-                        renderType: 'debt',
-                        amount: convertCurrency(P_orig, curr, baseCur),
-                        original_amount: P_orig,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: '💳 Pago TC',
-                        accId,
-                        date: l.date,
-                        note: `[Compra TC] ${l.name} (${n} cuotas × ${fmt(A_orig, curr)})`,
-                        isProjected: true,
-                        loanParentId: l.id,
-                        loanAuditRole: 'purchase',
-                        nexusSkipAuditTotal: true
-                    });
-                }
-
-                for (let i = 0; i < paid; i++) {
-                    const qNum = i + 1;
-                    const payTx = nexusFindLoanPaymentForQuota(l, qNum);
-                    const int_orig = bal_run * r;
-                    const prin_orig = A_orig - int_orig;
-                    const schedDate = nexusComputeLoanQuotaDate(l, i).toISOString();
-                    const amortRow = {
-                        id: 'audit_loan_amort_' + l.id + '_' + i,
-                        type: 'expense',
-                        renderType: 'debt',
-                        amount: convertCurrency(A_orig, curr, baseCur),
-                        original_amount: A_orig,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
-                        accId: payTx ? payTx.accId : accId,
-                        date: schedDate,
-                        note: payTx ? (payTx.note || `[Abono Realizado] ${l.name} (${qNum}/${n})`) : `[Amortizado] ${l.name} (${qNum}/${n})`,
-                        isProjected: false,
-                        loanParentId: l.id,
-                        loanAuditRole: 'amortized',
-                        nexusSkipAuditTotal: true
-                    };
-                    if (payTx) {
-                        amortRow.amount = convertCurrency(payTx.original_amount || payTx.amount, payTx.original_currency || payTx.currency, baseCur);
-                        amortRow.original_amount = payTx.original_amount || payTx.amount;
-                        amortRow.original_currency = payTx.original_currency || payTx.currency;
-                        amortRow.nexusAuditMirrorsTxId = payTx.id;
-                    }
-                    rows.push(amortRow);
-                    bal_run -= prin_orig;
-                    if (bal_run < 0.01) bal_run = 0;
-                }
-
-                for (let i = paid; i < n; i++) {
-                    if (nexusFindLoanPaymentForQuota(l, i + 1)) continue;
-                    const int_orig = bal_run * r;
-                    const prin_orig = A_orig - int_orig;
-                    bal_run -= prin_orig;
-                    if (bal_run < 0.01) bal_run = 0;
-                    const pId = 'proj_loan_' + l.id + '_' + i;
-                    rows.push({
-                        id: pId,
-                        type: 'expense',
-                        renderType: 'debt',
-                        amount: convertCurrency(A_orig, curr, baseCur),
-                        original_amount: A_orig,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: l.isCC ? '💳 Pago TC' : '💳 Pago Deuda',
-                        accId,
-                        date: nexusComputeLoanQuotaDate(l, i).toISOString(),
-                        note: `[Pendiente] ${l.name} (${i + 1}/${n}) · Cap:${fmt(prin_orig, curr)} | Int:${fmt(int_orig, curr)}`,
-                        isProjected: true,
-                        loanParentId: l.id,
-                        loanAuditRole: 'projected',
-                        priority: l.priority
-                    });
-                }
-
-                if (l.id.startsWith('pend_') && paid < 1) {
-                    const amtOrig = l.original_balance || l.balance || l.total;
-                    const pId = 'proj_pend_' + l.id;
-                    rows.push({
-                        id: pId,
-                        type: 'expense',
-                        renderType: 'single_debt',
-                        amount: convertCurrency(amtOrig, curr, baseCur),
-                        original_amount: amtOrig,
-                        original_currency: curr,
-                        currency: baseCur,
-                        cat: `⚡ ${l.name}`,
-                        accId: null,
-                        date: nexusComputeLoanQuotaDate(l, 0).toISOString(),
-                        note: l.name,
-                        isProjected: true,
-                        loanParentId: l.id,
-                        loanAuditRole: 'projected',
-                        priority: l.priority || 'medium'
-                    });
-                }
-            });
-            return rows;
-        }
-
-        /** Cronograma Afterpay / deudas: no recortar por rango de fechas (control futuro). */
-        function nexusAuditExemptFromDateFilter(tx) {
-            if (nexusAfterpayAuditExemptFromDateFilter(tx)) return true;
-            if (tx && (tx.loanAuditRole || nexusIsDebtAuditSynthetic(tx) || nexusIsDebtProjectedQuota(tx))) return true;
-            const id = String((tx && tx.id) || '');
-            if (id.startsWith('proj_loan_') || id.startsWith('proj_pend_')) return true;
-            return false;
-        }
-
-        /** Contrato madre y recon a cero fuera; filas de cronograma (Afterpay / deudas) siempre visibles. */
-        function nexusShouldShowTxInAudit(tx) {
-            if (!tx) return false;
-            if (tx.type === 'afterpay') return false;
-            if (tx.apAuditRole || tx.loanAuditRole || nexusIsAfterpayAuditSynthetic(tx) || nexusIsDebtAuditSynthetic(tx)) return true;
-            if (nexusIsAfterpayProjectedQuota(tx) || nexusIsDebtProjectedQuota(tx)) return true;
-            if (tx.isProjected && (String(tx.id || '').startsWith('proj_loan_') || String(tx.id || '').startsWith('proj_pend_') || String(tx.id || '').startsWith('proj_recur_'))) return true;
-            if (nexusIsAfterpayPaymentTx(tx)) {
-                const parent = nexusFindAfterpayParentForPayment(tx);
-                if (parent && parent.apRecon) return false;
-                return true;
-            }
-            return true;
-        }
-
-        /** Buscador auditoría (mismo criterio que Afterpay: nombre + categoría + cuentas). */
-        function nexusAuditTxMatchesSearch(tx, q) {
-            if (!q) return true;
-            const parts = [tx.note || '', tx.cat || '', tx.nexusAuditLabel || ''];
-            const accFrom = (state.accounts || []).find(a => a.id === tx.accId);
-            const accTo = (state.accounts || []).find(a => a.id === tx.toAccId);
-            if (accFrom && accFrom.name) parts.push(accFrom.name);
-            if (accTo && accTo.name) parts.push(accTo.name);
-            return parts.join(' ').toLowerCase().includes(q);
-        }
-
-        const NEXUS_FILTER_DEFAULTS = {
-            calendar: 'week',
-            databaseQuick: 'mes',
-            periodType: 'all',
-            periodCat: 'all',
-            histAccount: 'all',
-            apFreq: 'fortnightly',
-            apSort: 'desc',
-            taskPriority: 'all',
-            statsType: 'expense',
-            calTimelineCurrency: 'ALL'
-        };
-
-        function nexusEnsureStateFilterDefaults() {
-            if (!state) return;
-            if (!state.periodFilter || typeof state.periodFilter !== 'object') {
-                state.periodFilter = { type: NEXUS_FILTER_DEFAULTS.periodType, cat: NEXUS_FILTER_DEFAULTS.periodCat };
-            }
-            const validCal = ['week', 'month', 'all', 'custom'];
-            if (!validCal.includes(state.calendarFilter)) state.calendarFilter = NEXUS_FILTER_DEFAULTS.calendar;
-            if (!state.statsType) state.statsType = NEXUS_FILTER_DEFAULTS.statsType;
-            if (state.settings && !state.settings.apDefaultFreq) state.settings.apDefaultFreq = NEXUS_FILTER_DEFAULTS.apFreq;
-        }
-
-        function nexusResetPeriodFilters() {
-            if (!state) return;
-            state.periodFilter = { type: NEXUS_FILTER_DEFAULTS.periodType, cat: NEXUS_FILTER_DEFAULTS.periodCat };
-            $qAll('#view-period .filter-chip').forEach(b => b.classList.remove('active'));
-            const act = $id('f-type-all');
-            if (act) act.classList.add('active');
-            if (typeof populateFilters === 'function') populateFilters();
-            const catSel = $id('period-cat-filter');
-            if (catSel) catSel.value = 'all';
-        }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 14-MODULO-AFTERPAY — Módulo Afterpay
-           ═══════════════════════════════════════════════════════════════════════════ */
 
         function renderAfterpay() {
             const totalPendingEl = $id('ap-total-pending'); const availableEl = $id('ap-available'); const scheduleList = $id('ap-schedule-list'); const activeList = $id('ap-active-list');
@@ -14793,11 +14726,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             else calSelectedDate = dateStr;
             renderCalendar();
         }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 15-MODULO-AGENDA — Módulo Agenda
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderCalendar() {
             const now = new Date(); now.setHours(0,0,0,0);
             const viewDate = new Date(now.getFullYear(), now.getMonth() + calMonthOffset, 1);
@@ -14996,11 +14924,6 @@ ${JSON.stringify(dataToAnalyze)}`;
         }
 
         // CONFIGURACIÓN
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 16-MODULO-CONFIGURACION — Módulo Configuración / Ajustes
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderSettingsTab() {
             $id('set-base-currency').value = state.settings.baseCurrency || 'COP';
             const apLimEl = $id('set-ap-limit'); if(apLimEl) { apLimEl.dataset.raw = state.settings.apLimit || 5000000; apLimEl.value = fmt(state.settings.apLimit || 5000000, state.settings.apCurrency || 'AUD'); }
@@ -15210,11 +15133,6 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
         }
         // APEX FIX: Función para renderizar dinámicamente el orden del Dashboard
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 03-MENUS-DASHBOARD — Grid módulos dashboard, reordenar módulos
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         function renderDashboardModules() {
             const grid = $id('dash-modules-grid');
             if(!grid) return;
@@ -17187,11 +17105,6 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             const fileInput = $id('nexusFileScanner');
             if (fileInput) fileInput.click();
         }
-
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 17-MODULO-ESCANER — Módulo Escáner IA
-           ═══════════════════════════════════════════════════════════════════════════ */
 
         function renderScannerReportUI(report, opts) {
             if (!report) return;
@@ -21162,111 +21075,6 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             return u;
         }
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-
-        /* ── Reubicado desde 01-Auth: INITS-WEB-UPDATE ── */
-        function initCalendarTab() {
-            calMonthOffset = 0;
-            calSelectedDate = null;
-            const calCurr = $id('cal-filter-currency');
-            if (calCurr) calCurr.value = NEXUS_FILTER_DEFAULTS.calTimelineCurrency;
-            setCalendarFilter(NEXUS_FILTER_DEFAULTS.calendar);
-        }
-
-        function initAfterpayTab() {
-            apSortOrder = NEXUS_FILTER_DEFAULTS.apSort;
-            apShowDuplicates = false;
-            const dupBtn = $id('ap-dup-btn');
-            if (dupBtn) dupBtn.className = 'bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase shadow-sm active:scale-95 flex items-center gap-1.5 transition-colors';
-            const sortBtn = $id('ap-sort-btn');
-            if (sortBtn) sortBtn.innerHTML = '<i class="fa-solid fa-arrow-down-short-wide text-xs"></i> DESC';
-            const search = $id('ap-filter-search');
-            if (search) search.value = '';
-            renderAfterpay();
-        }
-
-        function initTasksTab() {
-            taskPriorityFilter = NEXUS_FILTER_DEFAULTS.taskPriority;
-            taskCalSelectedDate = null;
-            taskCalMonthOffset = 0;
-            $qAll('#tab-tasks .filter-chip').forEach(b => b.classList.remove('active'));
-            const btn = $id('f-task-all');
-            if (btn) btn.classList.add('active');
-            const clearBtn = $id('task-cal-clear-btn');
-            if (clearBtn) clearBtn.classList.add('hidden');
-            renderTasksTab();
-        }
-
-        function nexusDefaultApFreq() {
-            return (state && state.settings && state.settings.apDefaultFreq) || NEXUS_FILTER_DEFAULTS.apFreq;
-        }
-        
-        // APEX FIX: Forzar actualización de caché y sistema (Integrado a UI Modal)
-        function forceAppUpdate() {
-            triggerUIConfirm('¿Restablecer configuraciones globales?\n\nEl sistema restaurará la vista, colores y divisas por defecto, además limpiará la caché de red nativa.', 'update_app');
-        }
-
-        const NEXUS_WEB_UPDATE_KEY = 'nexus_last_web_update';
-        const NEXUS_WEB_UPDATE_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
-
-        function formatWebUpdateDate(ts) {
-            if (!ts) return '—';
-            try { return new Date(ts).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return '—'; }
-        }
-
-        function refreshWebUpdateStatus() {
-            const el = $id('web-update-status');
-            if (!el) return;
-            const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
-            const next = last ? last + NEXUS_WEB_UPDATE_INTERVAL_MS : Date.now();
-            const due = !last || Date.now() >= next;
-            el.textContent = last
-                ? (due ? `Actualización automática pendiente · última: ${formatWebUpdateDate(last)}` : `Próxima auto-actualización: ${formatWebUpdateDate(next)}`)
-                : 'Auto-actualización cada 3 días al abrir la app';
-        }
-
-        function markWebUpdateDone() {
-            localStorage.setItem(NEXUS_WEB_UPDATE_KEY, String(Date.now()));
-            refreshWebUpdateStatus();
-        }
-
-        function applyWebAppUpdate(silent) {
-            markWebUpdateDone();
-            if ('caches' in window) { caches.keys().then(names => { for (let name of names) caches.delete(name); }); }
-            if ('serviceWorker' in navigator) { navigator.serviceWorker.getRegistrations().then(regs => { for (const r of regs) r.unregister(); }); }
-            document.cookie.split(';').forEach(c => { document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/'); });
-            const q = silent ? '?auto=' : '?v=';
-            window.location.href = window.location.pathname + q + Date.now();
-        }
-
-        function checkScheduledWebUpdate() {
-            const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
-            if (!last || (Date.now() - last) >= NEXUS_WEB_UPDATE_INTERVAL_MS) {
-                sessionStorage.setItem('nexus_web_auto_update', '1');
-                applyWebAppUpdate(true);
-                return true;
-            }
-            refreshWebUpdateStatus();
-            return false;
-        }
-
-        function forceWebUpdate() {
-            triggerUIConfirm('¿Instalar actualizaciones ahora?\n\nRecarga la app limpiando caché PWA. También se programa auto-actualización cada 3 días.', 'update_web_app');
-        }
-        
-        function forceNativeCacheWipe() {
-            if (window.webkit && window.webkit.messageHandlers.appInterface) {
-                window.webkit.messageHandlers.appInterface.postMessage({
-                    action: "clearCache"
-                });
-            }
-        }
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 18-SSOT-FIREBASE-P2P — IndexedDB, Firebase, P2P, initCloud
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         async function initCloud(opts) {
             const skipAnonymous = !!(opts && opts.skipAnonymous);
             if (window.db) {
@@ -21794,11 +21602,6 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             updateCloudBadge(false, false);
         });
 
-
-        /* ═══════════════════════════════════════════════════════════════════════════
-           MÓDULO 99-BOOT-LOGIN — window.onload, handlers login finales
-           ═══════════════════════════════════════════════════════════════════════════ */
-
         window.onload = async () => {
             // Activar Evento Global de Scroll para Lazy Loading
             if (typeof syncIosNotificationUIVisibility === 'function') syncIosNotificationUIVisibility();
@@ -22145,7 +21948,6 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             const sel = $id('login-user-selection'); if (sel) sel.classList.add('hidden');
             const pin = $id('login-pin-section'); if (pin) pin.classList.add('hidden');
             const neu = $id('login-new-section'); if (neu) neu.classList.add('hidden');
-            fetchLoginUsers(false);
         }
 
         function showExistingUsers() {
