@@ -6082,10 +6082,10 @@
                 sessionUnlocked = true;
                 nexusHideSessionLock();
             }
-            initNexus();
             if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
                 nexusSetLanguage(state.settings.uiLanguage, { force: true });
             }
+            initNexus();
             if (!sessionUnlocked && !founderInstant) return;
             
             if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
@@ -7266,39 +7266,25 @@
             if (typeof nexusOnLanguageChange !== 'function') return;
             nexusOnLanguageChange(function () {
                 if (!state) return;
+                if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
+                if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
+                const mh = $id('module-header-title');
+                if (mh && typeof getSystemModule === 'function') {
+                    const m = getSystemModule(state.activeTab);
+                    if (m && m.name) mh.textContent = m.name;
+                }
+                if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
+                if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
+                if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
                 requestAnimationFrame(() => {
-                    const tabEl = $id('tab-' + (state.activeTab || 'home'));
-                    if (typeof nexusApplyI18nDom === 'function') {
-                        try { nexusApplyI18nDom(tabEl || null); } catch (e) { /* i18n */ }
-                    }
-                    if (state.activeTab === 'home' && typeof updateDashboard === 'function') updateDashboard();
-                    else if (state.activeTab === 'settings' && typeof renderSettingsTab === 'function') renderSettingsTab();
-                    else if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
-                    if (typeof updateModuleVisibility === 'function') updateModuleVisibility();
-                    if (typeof refreshInformeCategoryOptions === 'function') refreshInformeCategoryOptions();
-                    if (typeof nexusUpdateAccountBalanceLabel === 'function') nexusUpdateAccountBalanceLabel();
+                    const sec = state.activeTab ? $id('tab-' + state.activeTab) : null;
+                    if (typeof nexusApplyI18nDom === 'function') try { nexusApplyI18nDom(sec); } catch (e) { /* i18n */ }
                 });
             });
         }
 
         function nexusUi(text) {
             return (typeof nexusTranslateUiText === 'function') ? nexusTranslateUiText(text) : String(text != null ? text : '');
-        }
-
-        function nexusSetHtml(el, html) {
-            if (!el) return;
-            el.innerHTML = (typeof nexusUiHtml === 'function') ? nexusUiHtml(html) : html;
-        }
-
-        function nexusI18nRefresh(root) {
-            if (typeof nexusGetLanguage !== 'function' || nexusGetLanguage() === 'es') return;
-            if (typeof nexusApplyI18nDom !== 'function') return;
-            if (nexusI18nRefresh._pending) return;
-            nexusI18nRefresh._pending = true;
-            requestAnimationFrame(() => {
-                nexusI18nRefresh._pending = false;
-                try { nexusApplyI18nDom(root || null); } catch (e) { /* i18n */ }
-            });
         }
 
         function nexusInformeFlowCategoryLabel(flowType) {
@@ -7782,8 +7768,8 @@
             ctx = ctx || 'day'; state.context = ctx; $qAll('.v-btn').forEach(b => b.classList.remove('active')); const btnCtx = $id('btn-' + ctx); if (btnCtx) btnCtx.classList.add('active');
             if(ctx !== 'day') document.body.classList.add('is-red-mode'); else document.body.classList.remove('is-red-mode');
             const viewDay = $id('view-day'); const viewPeriod = $id('view-period'); const wealthTitle = $id('wealth-title');
-            if(ctx === 'day') { if (viewDay) viewDay.classList.remove('hidden'); if (viewPeriod) viewPeriod.classList.add('hidden'); if (wealthTitle) wealthTitle.innerText = nexusUi('Patrimonio Global Unificado'); } 
-            else { if (viewDay) viewDay.classList.add('hidden'); if (viewPeriod) viewPeriod.classList.remove('hidden'); if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? nexusUi('Patrimonio Este Mes') : nexusUi('Patrimonio Este Año'); }
+            if(ctx === 'day') { if (viewDay) viewDay.classList.remove('hidden'); if (viewPeriod) viewPeriod.classList.add('hidden'); if (wealthTitle) wealthTitle.innerText = "Patrimonio Global Unificado"; } 
+            else { if (viewDay) viewDay.classList.add('hidden'); if (viewPeriod) viewPeriod.classList.remove('hidden'); if (wealthTitle) wealthTitle.innerText = ctx === 'month' ? "Patrimonio Este Mes" : "Patrimonio Este Año"; }
             state.periodFilter = { type: 'all', cat: 'all' }; updateDashboard(); if(state.activeTab === 'analysis') renderAnalysis();
         }
 
@@ -7834,7 +7820,7 @@
             
             // Actualización In-Place de Datos (Fricción Cero)
             if(id === 'loans') renderLoansList(); 
-            if(id === 'analysis') renderAnalysis();
+            if(id === 'analysis') renderAnalysis(); 
             if(id === 'afterpay' && isSameTab) renderAfterpay(); 
             if(id === 'report') renderReport(); 
             if(id === 'accounts') renderAccountsTab(); 
@@ -7846,14 +7832,16 @@
             if(id === 'taxes') renderTaxes(); 
             if(id === 'tasks' && isSameTab) renderTasksTab(); 
             if(id === 'projects') renderProjectsTab();
-            if (id === 'home') updateDashboard();
 
             const gearBtn = $id('header-settings-gear-btn');
             if (gearBtn) gearBtn.classList.toggle('hidden', id === 'settings');
 
             if (!isSameTab && typeof saveState === 'function') saveState();
 
-            nexusI18nRefresh($id('tab-' + id));
+            if (typeof nexusGetLanguage === 'function' && nexusGetLanguage() === 'en' && typeof nexusApplyI18nDom === 'function') {
+                const sec = $id('tab-' + id);
+                requestAnimationFrame(() => { try { nexusApplyI18nDom(sec); } catch (e) { /* i18n tab */ } });
+            }
         }
 
         function toggleFab() { 
@@ -8176,7 +8164,7 @@
                      }
                 }
                 state.activeCurrency = origActiveCurr; // Restaurar divisa global
-                nexusSetHtml(nwCont, html);
+                nwCont.innerHTML = html;
             }
 
             const nwTotEl = $id('net-worth-total'); if(nwTotEl) nwTotEl.innerText = fmt(uNW, bC);
@@ -8310,7 +8298,7 @@
             }
 
             html += `</div></div>`;
-            nexusSetHtml(cont, html);
+            cont.innerHTML = html;
             cont.classList.remove('hidden');
         }
 
@@ -8413,7 +8401,7 @@
         function closeWealthInfoModal() { nexusHideModalInstant($id('wealth-info-modal')); }
         function renderAccounts() {
             const cont = $id('accounts-container'); if(!cont) return;
-            if(!state.accounts || state.accounts.length === 0) { nexusSetHtml(cont, `<div class="text-center p-8 border border-slate-100 rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas</p></div>`); return; }
+            if(!state.accounts || state.accounts.length === 0) { cont.innerHTML = `<div class="text-center p-8 border border-slate-100 rounded-3xl"><p class="text-xs font-bold text-slate-400 uppercase">Sin cuentas</p></div>`; return; }
             
             const groups = {}; const sharedGroups = {}; 
             
@@ -8460,7 +8448,7 @@
                 }
             }
             
-            nexusSetHtml(cont, html);
+            cont.innerHTML = html;
             requestAnimationFrame(() => fitNexusAmounts(cont));
 
             // APEX FIX: Estado visual del acordeón de cuentas del dashboard
@@ -9673,7 +9661,7 @@
         function renderLoansList() {
             const listPending = $id('loans-list-pending'); const listPaidContainer = $id('loans-list-paid-container'); const listPaid = $id('loans-list-paid'); const summary = $id('loans-summary-container'); if (!listPending || !summary) return;
             const activeLoans = getActiveLoans();
-            if (activeLoans.length === 0) { summary.classList.add('hidden'); nexusSetHtml(listPending, `<div class="text-center p-8 border border-dashed border-amber-200 rounded-3xl bg-amber-50/30 col-span-2"><p class="text-xs font-bold text-amber-600/70 uppercase">No tienes pasivos estructurados vigentes</p></div>`); if(listPaidContainer) listPaidContainer.classList.add('hidden'); nexusI18nRefresh($id('tab-loans')); return; }
+            if (activeLoans.length === 0) { summary.classList.add('hidden'); listPending.innerHTML = `<div class="text-center p-8 border border-dashed border-amber-200 rounded-3xl bg-amber-50/30 col-span-2"><p class="text-xs font-bold text-amber-600/70 uppercase">No tienes pasivos estructurados vigentes</p></div>`; if(listPaidContainer) listPaidContainer.classList.add('hidden'); return; }
             summary.classList.remove('hidden'); let totalDebt = 0; let totalMonthlyPayment = 0; let weightedRateSum = 0; let htmlPending = ''; let htmlPaid = '';
             activeLoans.forEach(l => {
                 let quota = 0; if(l.rate === 0) quota = l.total / l.term; else { const r = l.rate / 100; quota = (l.total * r) / (1 - Math.pow(1 + r, -l.term)); }
@@ -9710,9 +9698,8 @@
                 const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${creditorBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan(event, '${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4 gap-2"><div class="min-w-0 flex-1 pr-2"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Cuota Fija</p><p class="text-sm font-black theme-val-exp truncate" title="${fmt(quota, l.currency)}">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end min-w-0 flex-1"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Saldo Actual</p><p class="text-lg font-black theme-val-exp truncate w-full text-right" title="${fmt(currentBalance, l.currency)}">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div>${payPseBtn}<button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
                 if (remaining > 0) htmlPending += cardHtml; else htmlPaid += cardHtml;
             });
-            nexusSetHtml(listPending, htmlPending || `<p class="text-[10px] text-slate-400 font-bold uppercase col-span-2 text-center py-6 border border-dashed rounded-2xl">No hay deudas pendientes</p>`);
-            if (listPaidContainer && listPaid) { if (htmlPaid) { listPaidContainer.classList.remove('hidden'); nexusSetHtml(listPaid, htmlPaid); } else { listPaidContainer.classList.add('hidden'); } }
-            nexusI18nRefresh($id('tab-loans'));
+            listPending.innerHTML = htmlPending || `<p class="text-[10px] text-slate-400 font-bold uppercase col-span-2 text-center py-6 border border-dashed rounded-2xl">No hay deudas pendientes</p>`;
+            if (listPaidContainer && listPaid) { if (htmlPaid) { listPaidContainer.classList.remove('hidden'); listPaid.innerHTML = htmlPaid; } else { listPaidContainer.classList.add('hidden'); } }
             const now = new Date(); const monthlyIncomes = state.tx.filter(t => t.type === 'income' && t.currency === state.activeCurrency && new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()).reduce((sum, t) => sum + t.amount, 0);
             let baseIncome = monthlyIncomes > 0 ? convertCurrency(monthlyIncomes, state.activeCurrency, state.settings.baseCurrency) : 1000000;
             const ratio = (totalMonthlyPayment / baseIncome) * 100; const avgRate = totalDebt > 0 ? (weightedRateSum / totalDebt) : 0;
@@ -12524,7 +12511,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 return !t.isProjected && t.type !== 'isolated' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && d <= now;
             });
             
-            const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = nexusUi('Mes Actual (Unificado)');
+            const splEl = $id('stat-period-label'); if(splEl) splEl.innerText = 'Mes Actual (Unificado)';
             const inc = currentMonthTx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0); 
             const exp = currentMonthTx.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
             
@@ -12537,16 +12524,16 @@ ${JSON.stringify(dataToAnalyze)}`;
             const saveEff = inc > 0 ? ((inc - exp) / inc * 100).toFixed(1) : 0; 
             if(ssEl) { ssEl.innerText = saveEff + '%'; ssEl.className = `text-sm md:text-2xl font-black tabular-nums ${saveEff >= 20 ? 'theme-val-inc' : (saveEff >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
             
-            const sid = $id('stat-inc-desc'); if(sid) sid.innerText = nexusUi('Función: Entrada líquida. Causa: Sube por salarios o cobros.');
-            const sed = $id('stat-exp-desc'); if(sed) sed.innerText = nexusUi('Función: Salida de capital. Causa: Crece por compras y pagos.');
-            const sbd = $id('stat-burn-desc'); if(sbd) sbd.innerText = nexusUi('Función: Gasto diario. Causa: Sube por exceso de egresos.');
-            const ssd = $id('stat-save-desc'); if(ssd) ssd.innerText = nexusUi(saveEff >= 0 ? 'Función: Retención. Causa: Ingreso supera al gasto.' : 'Función: Retención. Causa: Gasto supera al ingreso.');
+            const sid = $id('stat-inc-desc'); if(sid) sid.innerText = "Función: Entrada líquida. Causa: Sube por salarios o cobros.";
+            const sed = $id('stat-exp-desc'); if(sed) sed.innerText = "Función: Salida de capital. Causa: Crece por compras y pagos.";
+            const sbd = $id('stat-burn-desc'); if(sbd) sbd.innerText = "Función: Gasto diario. Causa: Sube por exceso de egresos.";
+            const ssd = $id('stat-save-desc'); if(ssd) ssd.innerText = saveEff >= 0 ? "Función: Retención. Causa: Ingreso supera al gasto." : "Función: Retención. Causa: Gasto supera al ingreso.";
 
             const typeTx = currentMonthTx.filter(t => t.type === state.statsType); 
             const totalType = typeTx.reduce((s,t) => s + t.amount, 0); 
             const catGroup = {}; typeTx.forEach(t => catGroup[t.cat] = (catGroup[t.cat] || 0) + t.amount); 
             const sortedCats = Object.keys(catGroup).map(k => ({ cat: k, amount: catGroup[k] })).sort((a,b) => b.amount - a.amount).slice(0, 10);
-            const tbody = $id('stat-top-table'); if(tbody) { if (sortedCats.length === 0) { nexusSetHtml(tbody, `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos</td></tr>`); } else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr onclick="auditCategory('${c.cat}', '${state.statsType}')" class="border-b border-slate-50/50 last:border-0 cursor-pointer hover:bg-slate-50 transition-colors"><td class="py-3 font-bold theme-text pl-2 rounded-l-xl">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold pr-2 rounded-r-xl">${perc}%</td></tr>`; }).join(''); } }
+            const tbody = $id('stat-top-table'); if(tbody) { if (sortedCats.length === 0) { tbody.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-[10px] text-slate-400 font-bold uppercase">Sin datos</td></tr>`; } else { tbody.innerHTML = sortedCats.map(c => { const perc = totalType > 0 ? ((c.amount / totalType) * 100).toFixed(1) : 0; return `<tr onclick="auditCategory('${c.cat}', '${state.statsType}')" class="border-b border-slate-50/50 last:border-0 cursor-pointer hover:bg-slate-50 transition-colors"><td class="py-3 font-bold theme-text pl-2 rounded-l-xl">${c.cat.substring(2)}</td><td class="py-3 text-right font-mono font-bold theme-text">${fmt(c.amount)}</td><td class="py-3 text-right text-slate-400 font-bold pr-2 rounded-r-xl">${perc}%</td></tr>`; }).join(''); } }
             
             const btnExp = $id('btn-stat-exp'); const btnInc = $id('btn-stat-inc'); if(btnExp) btnExp.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'expense' ? 'theme-val-exp' : 'text-slate-400'}`; if(btnInc) btnInc.className = `px-3 py-1.5 text-[9px] font-black uppercase rounded-md theme-card shadow-sm transition-all ${state.statsType === 'income' ? 'theme-val-inc' : 'text-slate-400'}`;
             
@@ -12580,9 +12567,9 @@ ${JSON.stringify(dataToAnalyze)}`;
             const runwayDays = dailyExp > 0 ? (liquidAssets / dailyExp) : Infinity;
             const projRunwayEl = $id('proj-runway');
             if (projRunwayEl) {
-                if (!isFinite(runwayDays)) projRunwayEl.innerText = nexusUi('Infinito');
-                else if (runwayDays < 30) projRunwayEl.innerText = `${Math.floor(runwayDays)} ${nexusUi('Días')}`;
-                else projRunwayEl.innerText = `${(runwayDays / 30).toFixed(1)} ${nexusUi('Meses')}`;
+                if (!isFinite(runwayDays)) projRunwayEl.innerText = "Infinito";
+                else if (runwayDays < 30) projRunwayEl.innerText = `${Math.floor(runwayDays)} Días`;
+                else projRunwayEl.innerText = `${(runwayDays / 30).toFixed(1)} Meses`;
             }
 
             // 2. F.I.R.E. (Regla del 4% -> Gasto Anual * 25)
@@ -12590,10 +12577,10 @@ ${JSON.stringify(dataToAnalyze)}`;
             const annualSavings = projAnoInc - projAnoExp;
             const projFireEl = $id('proj-fire');
             if (projFireEl) {
-                if (annualSavings <= 0) projFireEl.innerText = nexusUi('Déficit');
+                if (annualSavings <= 0) projFireEl.innerText = "Déficit";
                 else {
                     const yearsToFire = Math.max(0, (fireTarget - liquidAssets) / annualSavings);
-                    projFireEl.innerText = `${yearsToFire.toFixed(1)} ${nexusUi('Años')}`;
+                    projFireEl.innerText = `${yearsToFire.toFixed(1)} Años`;
                 }
             }
 
@@ -12616,7 +12603,6 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const realValue = netWorthAno > 0 ? netWorthAno * 0.96 : 0;
                 projInflationEl.innerText = fmt(realValue);
             }
-            nexusI18nRefresh($id('tab-analysis'));
         }
         // FINANZAS PERSONALES UNIFICADO
         function renderFinancesUnified() {
@@ -12672,8 +12658,7 @@ ${JSON.stringify(dataToAnalyze)}`;
             });
             const mNet = mInc - mExp;
 
-            nexusSetHtml(cont, `<div role="button" tabindex="0" onclick="openKpiInsight('fin-networth')" class="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] shadow-lg flex justify-between items-center mb-6 cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"><div><p class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto <i class="fa-solid fa-circle-info opacity-60"></i></p><p class="text-[8px] md:text-[10px] opacity-50 uppercase">Activos Totales - Pasivos Totales</p></div><p class="nexus-amount-fit font-black ${netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(netWorth, bC)}</p></div><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">KPIs Finanzas Personales</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8"><div role="button" tabindex="0" onclick="openKpiInsight('fin-emergency')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Cobertura Emergencia <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${emergencyFundMonths >= 3 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${emergencyFundMonths} <span class="text-[10px]">Meses</span></h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-savings')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Tasa Ahorro Promedio <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate > 0 ? 'text-amber-500' : 'theme-val-exp')} tabular-nums">${savingsRate.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtload')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Carga Deuda Mensual <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${monthlyDebtLoad <= 30 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${monthlyDebtLoad.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtasset')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Endeudamiento <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${debtToAsset <= 40 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${debtToAsset.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden mb-6"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Balance General Simplificado</h3></div><div class="p-5 space-y-3"><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Activos Líquidos</p><p class="text-sm font-mono font-bold theme-text">${fmt(liquidAssets, bC)}</p></div><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(investmentAssets, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-blue-500">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between mt-2 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(shortTermLiabilities, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Largo Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-red-500">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(allLiabilities, bC)}</p></div></div></div><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden h-fit"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Estado de Resultados (Mes Actual)</h3></div><div class="p-5 space-y-3"><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-sm font-mono font-bold theme-text">${fmt(mInc, bC)}</p></div><div class="pt-3 pb-3 border-y border-slate-100/50 my-2"><p class="text-[9px] font-black uppercase text-slate-400 mb-2">Estructura de Gastos</p><div class="flex justify-between mb-1"><p class="text-[10px] font-bold text-slate-500">Gastos Fijos</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mFixed, bC)}</p></div><div class="flex justify-between"><p class="text-[10px] font-bold text-slate-500">Gastos Variables</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mVar, bC)}</p></div></div><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-exp">Gastos Totales</p><p class="text-sm font-mono font-bold theme-val-exp">${fmt(mExp, bC)}</p></div><div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mt-3"><p class="text-[9px] md:text-[10px] font-black uppercase text-slate-500">Utilidad Neta</p><p class="text-lg md:text-2xl font-black ${mNet >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(mNet, bC)}</p></div></div></div></div>`;
-            nexusI18nRefresh(cont);
+            cont.innerHTML = `<div role="button" tabindex="0" onclick="openKpiInsight('fin-networth')" class="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] shadow-lg flex justify-between items-center mb-6 cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all"><div><p class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest">Patrimonio Neto <i class="fa-solid fa-circle-info opacity-60"></i></p><p class="text-[8px] md:text-[10px] opacity-50 uppercase">Activos Totales - Pasivos Totales</p></div><p class="nexus-amount-fit font-black ${netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}">${fmt(netWorth, bC)}</p></div><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">KPIs Finanzas Personales</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8"><div role="button" tabindex="0" onclick="openKpiInsight('fin-emergency')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Cobertura Emergencia <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${emergencyFundMonths >= 3 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${emergencyFundMonths} <span class="text-[10px]">Meses</span></h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-savings')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Tasa Ahorro Promedio <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate > 0 ? 'text-amber-500' : 'theme-val-exp')} tabular-nums">${savingsRate.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtload')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Carga Deuda Mensual <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${monthlyDebtLoad <= 30 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${monthlyDebtLoad.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div><div role="button" tabindex="0" onclick="openKpiInsight('fin-debtasset')" class="theme-card p-5 rounded-[1.5rem] border shadow-sm cursor-pointer hover:border-blue-300 active:scale-[0.98] transition-all"><p class="text-[9px] font-black opacity-40 uppercase mb-1 theme-text">Endeudamiento <i class="fa-solid fa-circle-info text-blue-400"></i></p><h4 class="nexus-amount-fit font-black ${debtToAsset <= 40 ? 'theme-val-inc' : 'theme-val-exp'} tabular-nums">${debtToAsset.toFixed(1)}%</h4><p class="text-[7px] md:text-[9px] text-slate-400 mt-1 leading-tight">Toca para ver origen</p></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden mb-6"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Balance General Simplificado</h3></div><div class="p-5 space-y-3"><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Activos Líquidos</p><p class="text-sm font-mono font-bold theme-text">${fmt(liquidAssets, bC)}</p></div><div onclick="switchTab('accounts')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Inversiones</p><p class="text-sm font-mono font-bold theme-text">${fmt(investmentAssets, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-blue-500">Total Activos</p><p class="text-sm font-black text-blue-600">${fmt(totalAssets, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between mt-2 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Corto Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(shortTermLiabilities, bC)}</p></div><div onclick="switchTab('loans')" class="flex justify-between cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-xl transition-colors"><p class="text-xs font-bold text-slate-500">Pasivos Largo Plazo</p><p class="text-sm font-mono font-bold theme-text">${fmt(nonCurrentLiabilities, bC)}</p></div><div class="flex justify-between border-t border-slate-100 pt-2"><p class="text-[9px] font-black uppercase text-red-500">Total Pasivos</p><p class="text-sm font-black text-red-600">${fmt(allLiabilities, bC)}</p></div></div></div><div class="theme-card rounded-[2rem] border shadow-sm overflow-hidden h-fit"><div class="p-5 border-b border-slate-100/50 bg-slate-50"><h3 class="text-[10px] md:text-xs font-black uppercase text-slate-500 tracking-widest">Estado de Resultados (Mes Actual)</h3></div><div class="p-5 space-y-3"><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-inc">Ingresos Operativos</p><p class="text-sm font-mono font-bold theme-text">${fmt(mInc, bC)}</p></div><div class="pt-3 pb-3 border-y border-slate-100/50 my-2"><p class="text-[9px] font-black uppercase text-slate-400 mb-2">Estructura de Gastos</p><div class="flex justify-between mb-1"><p class="text-[10px] font-bold text-slate-500">Gastos Fijos</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mFixed, bC)}</p></div><div class="flex justify-between"><p class="text-[10px] font-bold text-slate-500">Gastos Variables</p><p class="text-[11px] font-mono font-bold theme-text">${fmt(mVar, bC)}</p></div></div><div class="flex justify-between"><p class="text-xs font-black uppercase theme-val-exp">Gastos Totales</p><p class="text-sm font-mono font-bold theme-val-exp">${fmt(mExp, bC)}</p></div><div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl mt-3"><p class="text-[9px] md:text-[10px] font-black uppercase text-slate-500">Utilidad Neta</p><p class="text-lg md:text-2xl font-black ${mNet >= 0 ? 'theme-val-inc' : 'theme-val-exp'}">${fmt(mNet, bC)}</p></div></div></div></div>`;
         }
         // PRESUPUESTOS Y METAS
         function renderBudgetTab() {
@@ -12749,8 +12734,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 catBudgetsHtml += `</div></div>`;
             }
 
-            nexusSetHtml(cont, `${html503020}${htmlZBB}${catBudgetsHtml}<div class="col-span-1 md:col-span-2 w-full mt-2"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">Proyección de Metas (Sinking Funds)</h3><div id="goals-list-container" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0">${goalsHtml}</div></div>`);
-            nexusI18nRefresh(cont);
+            cont.innerHTML = `${html503020}${htmlZBB}${catBudgetsHtml}<div class="col-span-1 md:col-span-2 w-full mt-2"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-3">Proyección de Metas (Sinking Funds)</h3><div id="goals-list-container" class="space-y-4 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-4 md:space-y-0">${goalsHtml}</div></div>`;
         }
 
         function openGoalForm() { const mod = $id('goal-modal'); if(!mod) return; nexusShowModalInstant(mod); $id('g-name').value = ''; const amtEl = $id('g-amount'); amtEl.value = ''; amtEl.dataset.raw = ''; $id('g-date').value = ''; }
@@ -13261,7 +13245,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                 const completionRate = totalTasks > 0 ? Math.round((completedTotal / totalTasks) * 100) : 0;
                 const overdueTasks = currentVaultTasks.filter(t => t.date && t.date < todayStr && !t.completed).length;
 
-                nexusSetHtml(kpiContainer, `
+                kpiContainer.innerHTML = `
                     <div class="theme-card p-3 rounded-[1.2rem] border shadow-sm text-center bg-indigo-50/30">
                         <p class="text-[8px] font-black uppercase text-indigo-400 tracking-widest mb-1">Del Día</p>
                         <h4 class="text-xl font-black text-indigo-600 tabular-nums leading-none">${tasksToday}</h4>
@@ -13274,7 +13258,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                         <p class="text-[8px] font-black uppercase ${overdueTasks > 0 ? 'text-red-500' : 'text-slate-400'} tracking-widest mb-1">Procrastinación</p>
                         <h4 class="text-xl font-black ${overdueTasks > 0 ? 'text-red-600' : 'text-slate-500'} tabular-nums leading-none">${overdueTasks}</h4>
                     </div>
-                `);
+                `;
             }
 
             // APEX FIX: Renderizado del Calendario de Tareas
@@ -13385,7 +13369,7 @@ ${JSON.stringify(dataToAnalyze)}`;
                         <button onclick="openTaskForm(null, '${dateStr}')" class="mt-2 w-full text-[9px] font-black uppercase bg-slate-50 text-slate-400 hover:text-indigo-500 py-1.5 rounded-lg active:scale-95 transition-colors shadow-sm border border-slate-100"><i class="fa-solid fa-plus"></i></button>
                     </div>`;
                 }
-                nexusSetHtml(weeklyDiary, diaryHtml);
+                weeklyDiary.innerHTML = diaryHtml;
             }
 
             let pendingHtml = '';
@@ -13471,12 +13455,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             // APEX FIX: Botón enlazado al nuevo motor atómico de borrado con interceptor de eventos
             const bulkBtnHtml = `<button id="btn-bulk-delete-tasks" onclick="event.stopPropagation(); event.preventDefault(); triggerUIDelete('bulk_task', null)" class="hidden text-[9px] font-black uppercase bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 active:scale-95 transition-transform ml-auto shadow-sm flex items-center"><i class="fa-solid fa-trash-can mr-1"></i>Eliminar Selección (<span id="bulk-delete-count">0</span>)</button>`;
 
-            nexusSetHtml(pendingList, `<div class="flex justify-between items-center mb-3 w-full">${headerAction}${bulkBtnHtml}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`));
+            pendingList.innerHTML = `<div class="flex justify-between items-center mb-3 w-full">${headerAction}${bulkBtnHtml}</div>` + (pendingHtml || `<div class="text-center p-6 border border-dashed border-slate-200 rounded-[1.5rem] bg-slate-50/50"><p class="text-[10px] font-bold text-slate-400 uppercase">${emptyMessage}</p></div>`);
             
-            nexusSetHtml(completedList, completedHtml);
+            completedList.innerHTML = completedHtml;
             if (completedHtml) completedContainer.classList.remove('hidden');
             else completedContainer.classList.add('hidden');
-            nexusI18nRefresh($id('tab-tasks'));
         }
 
         // APEX FIX: Motor de Selección Múltiple y Borrado en Masa
@@ -14177,11 +14160,11 @@ ${JSON.stringify(dataToAnalyze)}`;
             const rS = $id('rep-savings'); if(rS) { rS.innerText = savingsRate.toFixed(1) + '%'; rS.className = `text-lg font-black tabular-nums ${savingsRate >= 20 ? 'theme-val-inc' : (savingsRate >= 0 ? 'text-amber-500' : 'theme-val-exp')}`; }
             const debtRatio = totAssets > 0 ? (totLiab / totAssets * 100) : 0;
             const rH = $id('rep-health'); if(rH) { rH.innerText = debtRatio.toFixed(1) + '%'; rH.className = `text-lg font-black tabular-nums ${debtRatio <= 40 ? 'text-amber-500' : 'theme-val-exp'}`; if(debtRatio <= 20) rH.className = 'text-lg font-black tabular-nums theme-val-inc'; }
-            const rN = $id('rep-narrative'); if(rN) nexusSetHtml(rN, `Mantenemos liquidez de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo de <strong>${fmt(totLiab, bC)}</strong>. Apalancamiento del ${debtRatio.toFixed(1)}%.`);
+            const rN = $id('rep-narrative'); if(rN) rN.innerHTML = `Mantenemos liquidez de <strong>${fmt(totAssets, bC)}</strong> frente a un pasivo de <strong>${fmt(totLiab, bC)}</strong>. Apalancamiento del ${debtRatio.toFixed(1)}%.`;
             
-            const rAT = $id('rep-assets-text'); if(rAT) rAT.innerText = nexusUi('Mide liquidez e inversión. Crece al retener capital y adquirir bienes.');
-            const rLT = $id('rep-liabilities-text'); if(rLT) rLT.innerText = nexusUi('Obligaciones totales. Aumenta al usar crédito o apalancamiento.');
-            const rST = $id('rep-savings-text'); if(rST) rST.innerText = nexusUi(savingsRate >= 20 ? 'Retención óptima. Alta eficiencia entre ingreso y gasto operativo.' : (savingsRate > 0 ? 'Margen ajustado. El costo de vida consume el flujo principal.' : 'Déficit operativo. Fuga de capital por exceso de gastos.');
+            const rAT = $id('rep-assets-text'); if(rAT) rAT.innerText = `Mide liquidez e inversión. Crece al retener capital y adquirir bienes.`;
+            const rLT = $id('rep-liabilities-text'); if(rLT) rLT.innerText = `Obligaciones totales. Aumenta al usar crédito o apalancamiento.`;
+            const rST = $id('rep-savings-text'); if(rST) rST.innerText = savingsRate >= 20 ? 'Retención óptima. Alta eficiencia entre ingreso y gasto operativo.' : (savingsRate > 0 ? 'Margen ajustado. El costo de vida consume el flujo principal.' : 'Déficit operativo. Fuga de capital por exceso de gastos.');
             const rHT = $id('rep-health-text'); if(rHT) rHT.innerText = debtRatio <= 40 ? 'Apalancamiento sano. Riesgo estructural bajo y controlado.' : 'Sobregiro estructural. Causado por deuda excesiva vs patrimonio.';
 
             // NEW CODE FOR 6 MONTHS TREND
