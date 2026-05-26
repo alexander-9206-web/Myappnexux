@@ -605,6 +605,12 @@
             max-width: min(52vw, 12rem);
             flex-shrink: 1;
         }
+        #tab-accounts [id^="acc-tx-"] {
+            gap: 0.35rem;
+        }
+        #tab-accounts [id^="acc-tx-"] .acc-hist-card {
+            border-radius: 1rem;
+        }
         .fixed.inset-0.backdrop-blur-sm > div::-webkit-scrollbar,
         .fixed.inset-0.backdrop-blur-md > div::-webkit-scrollbar,
         .fixed.inset-0.flex.items-end > .theme-card::-webkit-scrollbar,
@@ -9323,40 +9329,98 @@
             if (isOpen) requestAnimationFrame(() => fitNexusAmounts(el));
         }
 
+        function nexusFormatAccountTxTitle(t) {
+            let s = String(t.note || '').replace(/^\[TC\]\s*/i, '').replace(/\s*·\s*Extracto\s*$/i, '').trim();
+            if (s.includes('· Ref:')) s = s.split('· Ref:')[0].trim();
+            if ((!s || s.length < 2) && t.cat) {
+                s = String(t.cat).replace(/^\[(Crédito|TC)\]\s*/i, '').replace(/^💳\s*/, '').trim();
+            }
+            return s || 'Movimiento';
+        }
+
+        function nexusIsScannerAccountTx(t) {
+            if (!t) return false;
+            if (t.scannerImport) return true;
+            if (String(t.id || '').startsWith('tx_scan_')) return true;
+            const note = String(t.note || '');
+            return note.includes('Extracto') || note.includes('extracto');
+        }
+
+        function nexusShouldHideScannerTxInAccountList(t, acc) {
+            if (!t || !acc || !nexusIsLiabAccount(acc)) return false;
+            if (!nexusIsScannerAccountTx(t)) return false;
+            return !!(t.isCCPurchase || t.ccPurchaseNoBalance || String(t.cat || '').includes('Seguro') || String(t.cat || '').includes('Cargo') || String(t.cat || '').includes('Interes'));
+        }
+
+        function nexusBuildScannerImportSummaryHtml(accId, acc) {
+            if (!acc || !nexusIsLiabAccount(acc)) return '';
+            const hidden = nexusGetOperationalTxList().filter(t => t.accId === accId && nexusShouldHideScannerTxInAccountList(t, acc));
+            if (!hidden.length) return '';
+            const loans = (state.loans || []).filter(l => l.isCC && l.cardId === accId);
+            const activeLoans = loans.filter(l => typeof nexusCalcLoanFrenchSchedule === 'function' && nexusCalcLoanFrenchSchedule(l).remaining > 0);
+            const purchases = activeLoans.length || loans.length;
+            const fixed = hidden.filter(t => !t.isCCPurchase).length;
+            const curr = acc.currency || state.settings.baseCurrency || 'COP';
+            return `<div class="acc-hist-card theme-card p-3 rounded-2xl shadow-sm border border-indigo-100/80 bg-indigo-50/30 mb-2 min-w-0 max-w-full overflow-hidden">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-600"><i class="fa-solid fa-file-invoice text-[10px]"></i></div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[10px] font-black uppercase text-indigo-800 truncate">Extracto importado</p>
+                        <p class="text-[8px] font-bold text-slate-500 uppercase mt-0.5 truncate">${purchases} compra(s)${fixed > 0 ? ' · ' + fixed + ' cargo(s)' : ''} · Saldo ${fmt(acc.balance, curr)}</p>
+                    </div>
+                    <button type="button" onclick="event.stopPropagation(); switchTab('loans')" class="text-[8px] font-black uppercase text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-lg shrink-0 active:scale-95">Deudas</button>
+                </div>
+            </div>`;
+        }
+
+        function nexusBuildAccountTxRowHtml(t, accId, acc) {
+            const dDate = new Date(t.date);
+            const timeStr = String(dDate.getHours()).padStart(2, '0') + ':' + String(dDate.getMinutes()).padStart(2, '0');
+            const isOutflow = t.type === 'expense' || (t.type === 'transfer' && t.accId === accId);
+            const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === accId);
+            const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text');
+            const sign = isOutflow ? '-' : '+';
+            const iClass = isOutflow ? 'fa-arrow-down text-red-500 bg-red-50' : (isInflow ? 'fa-arrow-up text-emerald-500 bg-emerald-50' : 'fa-right-left text-indigo-500 bg-indigo-50');
+            const creatorBadge = t.createdBy ? `<span class="bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md ml-1"><i class="fa-solid fa-user"></i> ${t.createdBy.split(' ')[0]}</span>` : '';
+            const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
+            const titleTxt = nexusFormatAccountTxTitle(t).replace(/</g, '&lt;');
+            const isCreditAcc = acc && nexusIsLiabAccount(acc);
+            const ccLoan = isCreditAcc && (t.isCCPurchase || (t.cat && String(t.cat).includes('[Crédito]'))) ? nexusFindLoanByPurchaseTx(t) : null;
+            const clickFn = ccLoan ? `nexusToggleCcTxAmort(event,'${t.id}','${accId}')` : `editTransaction('${t.id}')`;
+            const amortBadge = ccLoan ? '<span class="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md ml-1 text-[7px] font-black uppercase">Cuotas</span>' : '';
+            return `<div class="acc-hist-card theme-card p-3 rounded-2xl shadow-sm border border-slate-50/50 mb-2 min-w-0 max-w-full overflow-hidden">
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer" onclick="${clickFn}">
+                        <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-[10px] font-black uppercase theme-text truncate">${titleTxt}${amortBadge}</p>
+                            <p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorBadge}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0 min-w-0">
+                        <div class="acc-tx-amt-wrap nexus-amount-box"><span class="acc-tx-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span></div>
+                        <button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${accId}')" class="w-8 h-8 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[10px]"></i></button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
         function toggleAccountTx(id) {
             const el = $id('acc-tx-' + id);
             if(!el) return;
             if(el.classList.contains('hidden')) {
                 el.classList.remove('hidden'); el.classList.add('flex');
-                
-                // APEX FIX: Interceptar Transferencias como Entradas (toAccId) o Salidas (accId) y ocultar el contrato madre Afterpay
-                const txs = nexusGetOperationalTxList().filter(t => (t.accId === id || (t.type === 'transfer' && t.toAccId === id)) && t.type !== 'afterpay').sort((a,b) => new Date(b.date) - new Date(a.date));
-                
-                if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
-                
                 const acc = state.accounts.find(a => a.id === id);
-                const isCreditAcc = acc && nexusIsLiabAccount(acc);
-                el.innerHTML = txs.slice(0, 50).map(t => {
-                    const dDate = new Date(t.date);
-                    const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                    
-                    // APEX FIX: Determinar polaridad del flujo para esta cuenta específica
-                    const isOutflow = t.type === 'expense' || (t.type === 'transfer' && t.accId === id);
-                    const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === id);
-                    const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text');
-                    const sign = isOutflow ? '-' : '+';
-                    
-                    // APEX FIX: Añadir trazabilidad de autor en mini-historial P2P
-                    const creatorStr = t.createdBy ? ` • <i class="fa-solid fa-user text-purple-400 mx-0.5"></i> ${t.createdBy.split(' ')[0]}` : '';
-
-                    const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
-                    const ccLoan = isCreditAcc && (t.isCCPurchase || (t.cat && String(t.cat).includes('[Crédito]'))) ? nexusFindLoanByPurchaseTx(t) : null;
-                    const clickFn = ccLoan
-                        ? `nexusToggleCcTxAmort(event,'${t.id}','${id}')`
-                        : `editTransaction('${t.id}')`;
-                    const amortHint = ccLoan ? '<span class="text-[7px] text-indigo-500 font-black uppercase ml-1">· Amortización</span>' : '';
-                    return `<div class="rounded-xl bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-blue-200 transition-all cursor-pointer shadow-sm mb-1.5 p-2.5 min-w-0 max-w-full overflow-hidden" onclick="${clickFn}"><div class="flex justify-between items-center gap-2 min-w-0"><div class="flex flex-col min-w-0 flex-1 pr-1"><span class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}${amortHint}</span><span class="text-[8px] text-slate-400 font-bold uppercase flex items-center mt-0.5">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorStr}</span></div><div class="flex items-center gap-1.5 shrink-0 min-w-0"><div class="acc-tx-amt-wrap nexus-amount-box"><span class="acc-tx-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span></div><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${id}')" class="w-7 h-7 rounded-full bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors shadow-sm active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[9px]"></i></button></div></div></div>`;
-                }).join('');
+                const txs = nexusGetOperationalTxList()
+                    .filter(t => (t.accId === id || (t.type === 'transfer' && t.toAccId === id)) && t.type !== 'afterpay')
+                    .filter(t => !nexusShouldHideScannerTxInAccountList(t, acc))
+                    .sort((a,b) => new Date(b.date) - new Date(a.date));
+                const summaryHtml = nexusBuildScannerImportSummaryHtml(id, acc);
+                if (!summaryHtml && txs.length === 0) {
+                    el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>';
+                    return;
+                }
+                el.innerHTML = summaryHtml + txs.slice(0, 50).map(t => nexusBuildAccountTxRowHtml(t, id, acc)).join('');
                 requestAnimationFrame(() => fitNexusAmounts(el));
             } else {
                 el.classList.add('hidden'); el.classList.remove('flex');
@@ -9371,24 +9435,13 @@
             const list = $id('hist-acc-list'); if(!list || !currentHistAccId) return; const acc = state.accounts.find(a => a.id === currentHistAccId); if(!acc) return;
             // APEX FIX: Ocultar el contrato madre de Afterpay en el historial detallado de la cuenta
             let txs = nexusGetOperationalTxList().filter(t => (t.accId === currentHistAccId || (t.type === 'transfer' && t.toAccId === currentHistAccId)) && t.type !== 'afterpay');
+            txs = txs.filter(t => !nexusShouldHideScannerTxInAccountList(t, acc));
             const now = new Date();
             if(currentHistPeriod === '30d') { const past30 = new Date(now.getTime() - 30 * 86400000); txs = txs.filter(t => new Date(t.date) >= past30); } else if(currentHistPeriod === 'month') { txs = txs.filter(t => new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()); } else if(currentHistPeriod === 'year') { txs = txs.filter(t => new Date(t.date).getFullYear() === now.getFullYear()); }
             txs.sort((a,b) => new Date(b.date) - new Date(a.date));
-            if(txs.length === 0) { list.innerHTML = '<p class="text-center text-[10px] font-bold uppercase text-slate-400 mt-4">No hay transacciones en este periodo.</p>'; return; }
-            list.innerHTML = txs.map(t => {
-                const dDate = new Date(t.date); const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
-                const isOutflow = t.type === 'expense' || (t.type === 'transfer' && t.accId === currentHistAccId);
-                const isInflow = t.type === 'income' || (t.type === 'transfer' && t.toAccId === currentHistAccId);
-                const colorCls = isOutflow ? 'theme-val-exp' : (isInflow ? 'theme-val-inc' : 'theme-text'); const sign = isOutflow ? '-' : '+';
-                const iClass = isOutflow ? 'fa-arrow-down text-red-500 bg-red-50' : (isInflow ? 'fa-arrow-up text-emerald-500 bg-emerald-50' : 'fa-right-left text-indigo-500 bg-indigo-50');
-                
-                // APEX FIX: Etiqueta de trazabilidad de autor P2P en el historial detallado
-                const creatorBadge = t.createdBy ? `<span class="bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-md ml-1"><i class="fa-solid fa-user"></i> ${t.createdBy.split(' ')[0]}</span>` : '';
-
-                const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
-                const titleTxt = (t.note || (t.cat ? t.cat.substring(2) : '')).replace(/</g, '&lt;');
-                return `<div class="acc-hist-card theme-card p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-50/50 min-w-0 max-w-full overflow-hidden"><div class="flex items-center gap-2 min-w-0"><div class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer" onclick="editTransaction('${t.id}')"><div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iClass.split(' ').slice(1).join(' ')}"><i class="fa-solid ${iClass.split(' ')[0]} text-[10px]"></i></div><div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${titleTxt}</p><p class="text-[8px] font-bold text-slate-400 uppercase mt-0.5 flex items-center flex-wrap">${dDate.toLocaleDateString()} ${timeStr} ${creatorBadge}</p></div></div><div class="flex items-center gap-1.5 shrink-0 min-w-0"><div class="acc-tx-amt-wrap nexus-amount-box"><span class="acc-hist-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span></div><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${currentHistAccId}')" class="w-8 h-8 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[10px]"></i></button></div></div></div>`;
-            }).join('');
+            const summaryHtml = nexusBuildScannerImportSummaryHtml(currentHistAccId, acc);
+            if (!summaryHtml && txs.length === 0) { list.innerHTML = '<p class="text-center text-[10px] font-bold uppercase text-slate-400 mt-4">No hay transacciones en este periodo.</p>'; return; }
+            list.innerHTML = summaryHtml + txs.map(t => nexusBuildAccountTxRowHtml(t, currentHistAccId, acc)).join('');
             requestAnimationFrame(() => fitNexusAmounts(list));
         }
 
@@ -18205,7 +18258,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 date: anchorDate.toISOString(),
                 note: `[TC] ${item.name || label} · Extracto`,
                 currency: card.currency || state.settings.baseCurrency || 'COP',
-                costType: 'fixed'
+                costType: 'fixed',
+                scannerImport: true
             });
             state.tx.push(tx);
             if (typeof saveCloudTx === 'function') saveCloudTx(tx);
@@ -18232,7 +18286,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 note: `[TC] ${desc}${t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''} · ${plan.term}×${fmt(plan.A, card.currency)}`,
                 currency: card.currency || state.settings.baseCurrency || 'COP',
                 isCCPurchase: true,
-                ccPurchaseNoBalance: true
+                ccPurchaseNoBalance: true,
+                scannerImport: true
             });
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
             state.tx.push(newTx);
@@ -18285,6 +18340,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             updateDashboard();
             renderAccountsTab();
             if (typeof renderLoansList === 'function') renderLoansList();
+            if (!state.ui) state.ui = {};
+            state.ui['acc_tx_open_' + card.id] = false;
             let projMonth = 0, projFuture = 0;
             txs.forEach(t => {
                 const plan = nexusScannerCalcInstallmentPlan(t, card);
