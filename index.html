@@ -648,6 +648,17 @@
         #fab-main {
             bottom: max(2.5rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem)) !important;
             right: max(1.5rem, calc(env(safe-area-inset-right, 0px) + 1.5rem)) !important;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            will-change: opacity, transform;
+        }
+        #fab-main.nexus-fab-scrolled {
+            opacity: 0.32;
+            transform: scale(0.9);
+        }
+        #fab-main.nexus-fab-scrolled:hover,
+        #fab-main.nexus-fab-scrolled:focus-within {
+            opacity: 1;
+            transform: scale(1);
         }
         @media (min-width: 768px) {
             #fab-main { right: max(3rem, calc(env(safe-area-inset-right, 0px) + 3rem)) !important; }
@@ -1063,6 +1074,14 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Total movimientos detectados</p>
                     <p id="scanner-total-val" class="text-xl font-black tracking-tighter tabular-nums">$0.00</p>
                 </div>
+                <div id="scanner-cc-panel" class="theme-card p-4 rounded-2xl border space-y-3">
+                    <div>
+                        <label class="text-[9px] font-black uppercase text-slate-400 ml-1">Tarjeta de crédito / rotativo</label>
+                        <select id="scanner-target-card" class="form-input text-xs mt-1 w-full font-bold" onchange="nexusUpdateScannerProjection()"></select>
+                        <p class="text-[7px] font-bold text-amber-700/90 mt-1.5 leading-snug">Las compras del extracto se asignan a esta tarjeta. Se proyectan cuotas con interés y saldo pendiente.</p>
+                    </div>
+                    <div id="scanner-projection-panel" data-i18n-skip="user-data" class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 text-[8px] font-bold text-slate-700 space-y-1"></div>
+                </div>
                 <button onclick="saveScannedData()" class="w-full bg-emerald-500 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-transform">Importar a TC + cronograma auditoría</button>
             </div>
         </section>
@@ -1350,8 +1369,8 @@
                 <h2 class="text-2xl font-black uppercase theme-text">Configuración</h2>
             </div>
 
-            <!-- APEX FIX: WhatsApp-Style User Profile Header -->
-            <div class="theme-card rounded-[2.5rem] border shadow-sm relative overflow-hidden">
+            <!-- APEX FIX: WhatsApp-Style User Profile Header (solo vista; edición en #edit-user-wrapper) -->
+            <div id="settings-profile-card" class="theme-card rounded-[2.5rem] border shadow-sm relative overflow-hidden">
                 <div class="absolute top-0 left-0 right-0 h-24 bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-500 opacity-20"></div>
                 <div class="px-6 pt-10 pb-8 flex flex-col items-center relative z-10">
                     <div class="relative mb-3">
@@ -1384,8 +1403,12 @@
             </div>
 
             <div id="settings-acc-stack" class="flex flex-col gap-3 md:col-span-2 w-full">
-                <!-- APEX FIX: Panel de Edición extraído y oculto por defecto para limpiar la UI -->
-                <div id="edit-user-wrapper" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2">
+                <!-- Panel único de edición (sustituye la tarjeta de perfil al editar) -->
+                <div id="edit-user-wrapper" class="hidden theme-card p-6 rounded-[2rem] border shadow-sm space-y-4 md:col-span-2 w-full">
+                    <div class="flex justify-between items-center mb-1">
+                        <h3 class="text-[11px] font-black uppercase text-indigo-600 tracking-widest"><i class="fa-solid fa-user-pen mr-1"></i> Editar perfil</h3>
+                        <button type="button" onclick="closeUserEdit()" class="text-[9px] font-black uppercase text-slate-400 px-2 py-1 rounded-lg border border-slate-200 active:scale-95">Cerrar</button>
+                    </div>
                     <div id="edit-user-panel" class="bg-blue-50/50 p-5 rounded-2xl border border-blue-100 flex flex-col">
                         <div class="flex flex-col items-center mb-4">
                             <input type="file" id="edit-user-avatar-upload" accept="image/*" class="hidden" onchange="processAvatarUpload(event)">
@@ -7545,6 +7568,24 @@
         }
 
         /** Navegación estática: sin pila history ni gesto atrás/adelante por pestaña (UI tipo app nativa). */
+        function nexusInstallFabScrollFade() {
+            if (window.__nexusFabScrollBound) return;
+            window.__nexusFabScrollBound = true;
+            const fab = $id('fab-main');
+            if (!fab) return;
+            const onScroll = () => {
+                let y = window.scrollY || document.documentElement.scrollTop || 0;
+                const activeTab = document.querySelector('#nexus-app-main > .tab-content.active');
+                if (activeTab) y = Math.max(y, activeTab.scrollTop || 0);
+                fab.classList.toggle('nexus-fab-scrolled', y > 48);
+            };
+            window.addEventListener('scroll', onScroll, { passive: true });
+            document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+            const main = $id('nexus-app-main');
+            if (main) main.addEventListener('scroll', onScroll, { passive: true });
+            onScroll();
+        }
+
         function installNexusNativeNavigation() {
             if (window.__nexusNavInstalled) return;
             window.__nexusNavInstalled = true;
@@ -7564,7 +7605,8 @@
                 }
             });
             if (!window.__nexusSwipeLockInstalled) {
-                window.__nexusSwipeLockInstalled = true;
+                nexusInstallFabScrollFade();
+            window.__nexusSwipeLockInstalled = true;
                 let _nxSx = 0, _nxSy = 0, _nxEdge = false;
                 document.addEventListener('touchstart', function(e) {
                     if (e.touches.length !== 1) return;
@@ -16106,6 +16148,8 @@ ${JSON.stringify(dataToAnalyze)}`;
             }
             if(!p) return alert('No se encontró el perfil de este usuario.'); 
             
+            const profileCard = $id('settings-profile-card');
+            if (profileCard) profileCard.classList.add('hidden');
             const wrapper = $id('edit-user-wrapper'); if(wrapper) wrapper.classList.remove('hidden');
             $id('edit-user-panel').classList.remove('hidden'); 
             $id('edit-user-original-email').value = docId; 
@@ -16123,13 +16167,16 @@ ${JSON.stringify(dataToAnalyze)}`;
                 else avPreview.innerHTML = `<i class="fa-solid fa-camera text-blue-300"></i>`;
             }
 
-            // Scroll suave hacia el panel de edición
-            $id('edit-user-panel').scrollIntoView({behavior: 'smooth', block: 'center'});
+            const wrap = $id('edit-user-wrapper');
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            else if ($id('edit-user-panel')) $id('edit-user-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         
         function closeUserEdit() { 
             const pnl = $id('edit-user-panel'); if(pnl) pnl.classList.add('hidden'); 
             const wrapper = $id('edit-user-wrapper'); if(wrapper) wrapper.classList.add('hidden');
+            const profileCard = $id('settings-profile-card');
+            if (profileCard) profileCard.classList.remove('hidden');
         }
         
         async function saveUserEdit() {
@@ -17605,6 +17652,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 totalVal.innerText = fmt(0, bC);
                 totalVal.className = 'text-xl font-black tracking-tighter tabular-nums';
             }
+            const proj = $id('scanner-projection-panel');
+            if (proj) proj.innerHTML = '';
             const fileInput = $id('nexusFileScanner');
             if (fileInput) fileInput.value = '';
         }
@@ -17675,6 +17724,107 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 void resCont.offsetHeight;
                 resCont.classList.add('animate-slideUp');
             }
+            nexusPopulateScannerCardSelect(meta);
+            nexusUpdateScannerProjection();
+        }
+
+        function nexusGetScannerCreditCards() {
+            return (state.accounts || []).filter(a => a && !a.isShared && (a.type === 'credit' || a.type === 'rotativo' || nexusIsLiabAccount(a)));
+        }
+
+        function nexusPopulateScannerCardSelect(meta) {
+            const sel = $id('scanner-target-card');
+            if (!sel) return;
+            const cards = nexusGetScannerCreditCards();
+            if (!cards.length) {
+                sel.innerHTML = '<option value="">— Crea una TC o rotativo en Cuentas —</option>';
+                return;
+            }
+            const auto = nexusResolveScannerCreditCard(meta);
+            sel.innerHTML = cards.map(a => {
+                const bal = fmt(Math.abs(a.balance || 0), a.currency || 'COP');
+                const selMark = (auto && auto.id === a.id) ? ' selected' : '';
+                return `<option value="${a.id}"${selMark}>${a.name} · ${a.type} · ${bal}</option>`;
+            }).join('');
+            if (auto && !sel.value) sel.value = auto.id;
+            if (lastScannerReport) lastScannerReport.targetCardId = sel.value || null;
+        }
+
+        /** Amortización francesa por fila del extracto (valor compra × interés × cuotas). */
+        function nexusScannerCalcInstallmentPlan(t, card) {
+            const P = Number(t.purchaseValue) || 0;
+            if (P <= 0 || !card) return { valid: false };
+            const paid = Math.max(0, parseInt(t.paidInstallments, 10) || 0);
+            const remaining = Math.max(0, parseInt(t.remainingInstallments, 10) || 0);
+            let term = paid + remaining;
+            if (term < 1) {
+                const inst = Number(t.installmentValue) || 0;
+                term = inst > 0 ? Math.max(1, Math.round(P / inst)) : 1;
+            }
+            const r = (Number(t.interestPercent) || Number(card.rate) || 0) / 100;
+            let A = Number(t.installmentValue) || 0;
+            if (A <= 0) {
+                A = r === 0 ? P / term : P * (r * Math.pow(1 + r, term)) / (Math.pow(1 + r, term) - 1);
+            }
+            let bal = P;
+            for (let i = 0; i < paid; i++) {
+                const intP = bal * r;
+                const prin = Math.max(0, A - intP);
+                bal -= prin;
+                if (bal < 0.01) bal = 0;
+            }
+            const currentInt = bal * r;
+            const currentPrin = Math.max(0, A - currentInt);
+            let futureTotal = 0;
+            let balFut = bal;
+            const futureCount = Math.max(0, term - paid);
+            for (let i = paid; i < term; i++) {
+                const intP = balFut * r;
+                const prin = Math.max(0, A - intP);
+                futureTotal += A;
+                balFut -= prin;
+                if (balFut < 0.01) balFut = 0;
+            }
+            return {
+                valid: true, P, term, paid, remaining: futureCount, A, r,
+                balanceAfterPaid: bal,
+                currentMonthPayment: paid < term ? A : 0,
+                currentInt, currentPrin,
+                futureTotal,
+                remainingPrincipal: balFut
+            };
+        }
+
+        function nexusUpdateScannerProjection() {
+            const panel = $id('scanner-projection-panel');
+            const sel = $id('scanner-target-card');
+            if (!panel) return;
+            if (!lastScannerReport || !(lastScannerReport.transactions || []).length) {
+                panel.innerHTML = '<p class="text-slate-400">Proyección disponible tras leer un extracto.</p>';
+                return;
+            }
+            const card = sel && sel.value ? (state.accounts || []).find(a => a.id === sel.value) : null;
+            if (!card) {
+                panel.innerHTML = '<p class="text-amber-700">Selecciona una tarjeta de crédito o rotativo.</p>';
+                return;
+            }
+            lastScannerReport.targetCardId = card.id;
+            const curr = card.currency || state.settings.baseCurrency || 'COP';
+            let monthPay = 0, futurePay = 0, purchaseSum = 0, rows = 0;
+            (lastScannerReport.transactions || []).forEach(t => {
+                const plan = nexusScannerCalcInstallmentPlan(t, card);
+                if (!plan.valid) return;
+                rows++;
+                purchaseSum += plan.P;
+                monthPay += plan.currentMonthPayment;
+                futurePay += plan.futureTotal;
+            });
+            panel.innerHTML = `
+                <p class="text-[8px] font-black uppercase text-indigo-700"><i class="fa-solid fa-credit-card mr-1"></i> ${card.name} · ${rows} compra(s)</p>
+                <p><span class="text-slate-500">Valor compras:</span> <span class="font-black">${fmt(purchaseSum, curr)}</span></p>
+                <p><span class="text-slate-500">Cuotas del mes (periodo):</span> <span class="font-black text-emerald-700">${fmt(monthPay, curr)}</span></p>
+                <p><span class="text-slate-500">Pagos futuros proyectados:</span> <span class="font-black text-amber-700">${fmt(futurePay, curr)}</span></p>
+                <p class="text-[7px] text-slate-500 leading-snug">Cálculo: sistema francés con % interés del extracto (o tasa de la tarjeta). Cuotas pagadas y faltantes del OCR.</p>`;
         }
 
         async function processScannerFile(event) {
@@ -17844,16 +17994,13 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
         function nexusImportScannerCCTransaction(card, t, anchorDate) {
             if (!card || !t) return 0;
-            const paid = Math.max(0, parseInt(t.paidInstallments, 10) || 0);
-            const remaining = Math.max(0, parseInt(t.remainingInstallments, 10) || 0);
-            const term = Math.max(1, paid + remaining || 1);
-            const purchase = Number(t.purchaseValue) || 0;
-            const installment = Number(t.installmentValue) || 0;
-            const amount = purchase > 0 ? purchase : (installment > 0 ? installment * term : 0);
-            if (amount <= 0) return 0;
+            const plan = nexusScannerCalcInstallmentPlan(t, card);
+            if (!plan.valid) return 0;
+            const amount = plan.P;
             const desc = String(t.description || 'Compra extracto').trim();
             const purchaseDate = anchorDate;
             card.balance += amount;
+            const ratePct = (plan.r * 100) || Number(card.rate) || 0;
             const txId = 'tx_scan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             const newTx = buildTransactionSchema({
                 id: txId,
@@ -17862,7 +18009,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 cat: `[Crédito] ${desc}`,
                 accId: card.id,
                 date: purchaseDate.toISOString(),
-                note: `[TC] ${desc}${t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''}`,
+                note: `[TC] ${desc}${t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''} · ${plan.term}×${fmt(plan.A, card.currency)}`,
                 currency: card.currency || state.settings.baseCurrency || 'COP',
                 isCCPurchase: true
             });
@@ -17874,18 +18021,19 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 id: loanId,
                 name: `${desc} (${card.name})`,
                 total: amount,
-                balance: amount,
+                balance: plan.remainingPrincipal > 0 ? plan.remainingPrincipal : amount,
                 original_total: amount,
-                original_balance: amount,
+                original_balance: plan.remainingPrincipal > 0 ? plan.remainingPrincipal : amount,
                 original_currency: card.currency,
-                rate: card.rate || 0,
-                term,
-                paidQuotas: Math.min(paid, term),
+                rate: ratePct,
+                term: plan.term,
+                paidQuotas: Math.min(plan.paid, plan.term),
                 isBNPL: false,
                 isCC: true,
                 cardId: card.id,
                 date: purchaseDate.toISOString(),
-                currency: card.currency || state.settings.baseCurrency || 'COP'
+                currency: card.currency || state.settings.baseCurrency || 'COP',
+                priority: card.priority || 'medium'
             });
             return 1;
         }
@@ -17894,8 +18042,11 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             if (!lastScannerReport) return alert('No hay informe de extracto para importar.');
             const meta = lastScannerReport.meta || {};
             const txs = lastScannerReport.transactions || [];
-            const card = nexusResolveScannerCreditCard(meta);
-            if (!card) return alert('Crea una tarjeta de crédito o rotativo antes de importar el extracto.');
+            const sel = $id('scanner-target-card');
+            let card = (sel && sel.value) ? (state.accounts || []).find(a => a.id === sel.value) : null;
+            if (!card) card = nexusResolveScannerCreditCard(meta);
+            if (!card) return alert('Crea una tarjeta de crédito o rotativo en Cuentas antes de importar el extracto.');
+            if (sel && sel.value !== card.id) sel.value = card.id;
             const anchorDate = nexusParseScannerAnchorDate(meta);
             if (meta.totalDebt > 0 && nexusIsLiabAccount(card)) card.balance = Number(meta.totalDebt);
             if (meta.totalCreditLimit > 0) card.limit = Number(meta.totalCreditLimit);
@@ -17908,7 +18059,13 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             saveState();
             updateDashboard();
             renderAccountsTab();
-            alert(`✅ Extracto importado en «${card.name}».\n\n${imported} compra(s) en cuotas + ${fixedCount} cargo(s) fijo(s).\nFechas ancladas al periodo de pago (${anchorDate.toLocaleDateString('es-CO')}), sin indexar vencimientos antiguos.\nRevisa Auditoría (proyecciones y amortizados).`);
+            let projMonth = 0, projFuture = 0;
+            txs.forEach(t => {
+                const plan = nexusScannerCalcInstallmentPlan(t, card);
+                if (plan.valid) { projMonth += plan.currentMonthPayment; projFuture += plan.futureTotal; }
+            });
+            const curr = card.currency || state.settings.baseCurrency || 'COP';
+            alert(`✅ Extracto importado en «${card.name}».\n\n${imported} compra(s) en cuotas + ${fixedCount} cargo(s) fijo(s).\nCuotas del mes: ${fmt(projMonth, curr)}\nPagos futuros proyectados: ${fmt(projFuture, curr)}\nRevisa Auditoría para el cronograma completo.`);
             switchTab('database');
         }
         // --- RESET SUAVE: Solo registros (conserva cuentas y tareas) ---
