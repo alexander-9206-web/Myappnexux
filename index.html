@@ -1046,6 +1046,26 @@
         </div>
     </div>
 
+    <!-- Barra sincronización nube (reinstalación / pull) -->
+    <div id="nexus-cloud-sync-banner" class="hidden fixed top-0 left-0 right-0 z-[85] pointer-events-none safe-top">
+        <div class="max-w-5xl mx-auto w-full px-3 sm:px-6 pt-2">
+            <div class="theme-card rounded-2xl border border-indigo-200/80 bg-white/95 backdrop-blur-md shadow-lg px-4 py-3 pointer-events-auto">
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                        <i id="nexus-cloud-sync-icon" class="fa-solid fa-cloud-arrow-down text-indigo-600 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p id="nexus-cloud-sync-msg" class="text-[10px] font-black uppercase tracking-widest text-indigo-800 truncate">Sincronizando desde la nube…</p>
+                        <div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden mt-1.5">
+                            <div id="nexus-cloud-sync-bar" class="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all duration-300" style="width:12%"></div>
+                        </div>
+                    </div>
+                    <span id="nexus-cloud-sync-pct" class="text-[10px] font-black text-indigo-600 tabular-nums shrink-0">12%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- HEADER -->
     <header class="theme-card sticky top-0 z-40 border-b border-slate-100/50 safe-top shadow-sm">
         <div class="max-w-5xl mx-auto w-full">
@@ -6447,6 +6467,7 @@
                     nexusRestoreCloudForVault(email, profile).catch(e => console.warn('[NEXUS] cloud resume bg', e));
                     if (typeof fetchCloudState === 'function') fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState resume', e));
                 }
+                if (typeof nexusProcessWidgetPendingActions === 'function') nexusProcessWidgetPendingActions();
                 return true;
             } catch (e) {
                 console.warn('[NEXUS] nexusResumeVaultShellAfterRelaunch', e);
@@ -7510,20 +7531,57 @@
                     }
                 });
                 const today = new Date().toISOString().slice(0, 10);
-                const tasks = (state.tasks || [])
-                    .filter(t => t && !t.completed && t.date && String(t.date) >= today)
-                    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time || '').localeCompare(String(b.time || '')))
-                    .slice(0, 6)
+                const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+                const openTasks = (state.tasks || []).filter(t => t && !t.completed && t.date);
+                const tasksToday = openTasks.filter(t => String(t.date) === today).length;
+                const tasksWeek = openTasks.filter(t => String(t.date) >= today && String(t.date) <= weekAhead).length;
+                const tasks = openTasks
+                    .filter(t => String(t.date) >= today)
+                    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time || a.timeAlarm || '').localeCompare(String(b.time || b.timeAlarm || '')))
+                    .slice(0, 8)
                     .map(t => ({
                         title: String(t.title || 'Tarea').slice(0, 56),
                         date: String(t.date || ''),
-                        time: String(t.time || '')
+                        time: String(t.time || t.timeAlarm || '')
                     }));
+                const now = new Date();
+                const m = now.getMonth(), y = now.getFullYear();
+                let monthIncome = 0, monthExpense = 0;
+                (state.tx || []).forEach(tx => {
+                    if (!tx || tx.archived) return;
+                    const raw = tx.date || tx.createdAt;
+                    if (!raw) return;
+                    const d = new Date(raw);
+                    if (d.getMonth() !== m || d.getFullYear() !== y) return;
+                    const cur = tx.currency || bC;
+                    const amt = Math.abs(typeof convertCurrency === 'function' ? convertCurrency(tx.amount || 0, cur, bC) : (tx.amount || 0));
+                    if (tx.type === 'income' || (tx.amount || 0) > 0) monthIncome += amt;
+                    else monthExpense += amt;
+                });
+                const pendingLoans = (state.loans || []).filter(l => l && !l.paid && !l.settled).length;
+                const upcoming = [];
+                openTasks.slice(0, 4).forEach(t => {
+                    upcoming.push({ kind: 'task', title: String(t.title || 'Tarea').slice(0, 40), date: String(t.date), amount: 0 });
+                });
+                (state.loans || []).filter(l => l && l.nextDueDate).slice(0, 3).forEach(l => {
+                    upcoming.push({
+                        kind: 'payment',
+                        title: String(l.name || l.note || 'Pago').slice(0, 40),
+                        date: String(l.nextDueDate || '').slice(0, 10),
+                        amount: Math.abs(l.installment || l.amount || 0)
+                    });
+                });
                 const payload = {
                     userName: String((userProfile && userProfile.name) || currentUser.split('@')[0] || 'NEXUS').slice(0, 32),
                     baseCurrency: bC,
                     liquid, debt, net: liquid - debt,
+                    tasksToday, tasksWeek,
+                    monthIncome, monthExpense,
+                    monthFlow: monthIncome - monthExpense,
+                    pendingLoans,
+                    accountCount: (state.accounts || []).filter(a => a && !a.isShared).length,
                     tasks,
+                    upcoming: upcoming.slice(0, 6),
                     updatedAt: Date.now()
                 };
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.widget_snapshot) {
@@ -7532,6 +7590,47 @@
             } catch (e) { console.warn('[NEXUS] widget snapshot', e); }
         }
         window.nexusPushWidgetSnapshot = nexusPushWidgetSnapshot;
+
+        function nexusAddQuickTaskFromWidget(title, dateStr) {
+            if (!state || !sessionUnlocked) return false;
+            const t = String(title || '').trim();
+            if (!t) return false;
+            if (!state.tasks) state.tasks = [];
+            const date = dateStr || new Date().toISOString().slice(0, 10);
+            const id = 'task_wg_' + Date.now();
+            const creatorName = (userProfile && userProfile.name) ? userProfile.name : 'Widget';
+            const newTask = {
+                id, title: t.slice(0, 120), description: 'Creada desde widget', date,
+                timeAlarm: '09:00', priority: 'medium', completed: false, lastAlarmDate: null,
+                notificationPlan: null, createdAt: new Date().toISOString(), projectId: null,
+                vaultId: 'personal', createdBy: creatorName, assignedTo: ''
+            };
+            if (typeof nexusTouchEntityUpdatedAt === 'function') nexusTouchEntityUpdatedAt(newTask, 'task');
+            state.tasks.push(newTask);
+            saveState();
+            if (typeof renderTasksTab === 'function') renderTasksTab();
+            if (typeof updateDashboard === 'function') updateDashboard();
+            if (typeof nexusPushWidgetSnapshot === 'function') nexusPushWidgetSnapshot();
+            return true;
+        }
+
+        window.nexusApplyWidgetActions = function(actions) {
+            if (!Array.isArray(actions) || !actions.length) return 0;
+            let n = 0;
+            actions.forEach(a => {
+                if (!a || !a.type) return;
+                if (a.type === 'add_task' && nexusAddQuickTaskFromWidget(a.title, a.date)) n++;
+            });
+            return n;
+        };
+
+        function nexusProcessWidgetPendingActions() {
+            if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.widget_pull_pending) return;
+            try {
+                window.webkit.messageHandlers.widget_pull_pending.postMessage('pull');
+            } catch (e) { console.warn('[NEXUS] widget_pull_pending', e); }
+        }
+        window.nexusProcessWidgetPendingActions = nexusProcessWidgetPendingActions;
 
         function saveState() { 
             if (!currentUser || !sessionUnlocked || !state) return;
@@ -19197,7 +19296,52 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             };
         }
 
+        let _cloudSyncBannerHideTimer = null;
+        let _cloudSyncBannerPct = 0;
+
+        function nexusShowCloudSyncBanner(message, pct) {
+            const box = $id('nexus-cloud-sync-banner');
+            if (!box) return;
+            if (_cloudSyncBannerHideTimer) { clearTimeout(_cloudSyncBannerHideTimer); _cloudSyncBannerHideTimer = null; }
+            box.classList.remove('hidden');
+            const n = Math.max(5, Math.min(98, Math.round(pct || 12)));
+            _cloudSyncBannerPct = Math.max(_cloudSyncBannerPct, n);
+            const bar = $id('nexus-cloud-sync-bar');
+            const pctEl = $id('nexus-cloud-sync-pct');
+            const msg = $id('nexus-cloud-sync-msg');
+            const icon = $id('nexus-cloud-sync-icon');
+            if (msg) msg.textContent = message || 'Sincronizando desde la nube…';
+            if (bar) bar.style.width = _cloudSyncBannerPct + '%';
+            if (pctEl) pctEl.textContent = _cloudSyncBannerPct + '%';
+            if (icon) icon.classList.add('fa-spin');
+        }
+
+        function nexusCloudSyncBannerProgress(pct, message) {
+            nexusShowCloudSyncBanner(message, pct);
+        }
+
+        function nexusHideCloudSyncBanner(delayMs) {
+            const hide = () => {
+                const box = $id('nexus-cloud-sync-banner');
+                if (!box) return;
+                nexusCloudSyncBannerProgress(100, 'Sincronización completa');
+                _cloudSyncBannerHideTimer = setTimeout(() => {
+                    box.classList.add('hidden');
+                    _cloudSyncBannerPct = 0;
+                    const bar = $id('nexus-cloud-sync-bar');
+                    if (bar) bar.style.width = '0%';
+                    const icon = $id('nexus-cloud-sync-icon');
+                    if (icon) icon.classList.remove('fa-spin');
+                    if (typeof nexusPushWidgetSnapshot === 'function') nexusPushWidgetSnapshot();
+                }, delayMs || 600);
+            };
+            hide();
+        }
+        window.nexusShowCloudSyncBanner = nexusShowCloudSyncBanner;
+        window.nexusHideCloudSyncBanner = nexusHideCloudSyncBanner;
+
         function nexusNotifyCloudDataReady() {
+            if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(500);
             if (sessionUnlocked) {
                 if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
             } else {
@@ -22482,11 +22626,15 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 return Promise.resolve();
             }
             if (!fbUser) return Promise.resolve();
+            if (typeof nexusShowCloudSyncBanner === 'function') {
+                nexusShowCloudSyncBanner('Conectando con tu bóveda en la nube…', 10);
+            }
             return new Promise(async (resolve) => {
                 let settled = false;
                 const finish = () => {
                     if (settled) return;
                     settled = true;
+                    if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(450);
                     resolve();
                 };
                 try {
@@ -22505,10 +22653,15 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     // 1) Descarga inicial desde SERVIDOR (patrón onSnapshot + datos reales en nube)
                     let serverDocs = 0;
                     try {
+                        if (typeof nexusCloudSyncBannerProgress === 'function') {
+                            nexusCloudSyncBannerProgress(28, 'Descargando datos de la nube…');
+                        }
                         serverDocs = await nexusPullVaultFromServerOnce();
                         if (serverDocs > 0) {
                             console.log('[NEXUS] Bóveda restaurada desde servidor:', serverDocs, 'documentos');
-                            nexusNotifyCloudDataReady();
+                            if (typeof nexusCloudSyncBannerProgress === 'function') {
+                                nexusCloudSyncBannerProgress(55, 'Aplicando ' + serverDocs + ' registros…');
+                            }
                         }
                     } catch (e) {
                         console.warn('[NEXUS] pull servidor', e);
@@ -22540,6 +22693,9 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                             if (!ready) return;
                             isFirstLoad = false;
                             window.__nexusVaultListenerBootstrapped = true;
+                            if (typeof nexusCloudSyncBannerProgress === 'function') {
+                                nexusCloudSyncBannerProgress(72, 'Integrando bóveda local…');
+                            }
                             nexusApplyVaultCloudBuffer(finish);
                         } else {
                             nexusScheduleBackgroundPull('firestore-listener');
@@ -22549,13 +22705,20 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     }, (error) => {
                         console.error("[APEX SYS] Error de Snapshot Firestore", error);
                         updateCloudBadge(false);
+                        if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(400);
                         finish();
                     });
 
-                    setTimeout(finish, serverDocs > 0 ? 500 : 18000);
+                    setTimeout(() => {
+                        if (typeof nexusCloudSyncBannerProgress === 'function') {
+                            nexusCloudSyncBannerProgress(92, 'Finalizando sincronización…');
+                        }
+                        finish();
+                    }, serverDocs > 0 ? 800 : 18000);
 
                 } catch (e) {
                     console.error(e);
+                    if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(300);
                     finish();
                 }
             });
@@ -23417,6 +23580,9 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
                 if (mustPullFromCloud && window.db && typeof fetchCloudState === 'function') {
                     const pullCloud = async () => {
+                        if (typeof nexusShowCloudSyncBanner === 'function') {
+                            nexusShowCloudSyncBanner('Restaurando tu información desde la nube…', 15);
+                        }
                         try {
                             await Promise.race([
                                 fetchCloudState(),
@@ -23471,6 +23637,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 if (typeof applyAdminUIVisibility === 'function') applyAdminUIVisibility();
                 nexusRefreshCloudBadge(false);
                 if (typeof nexusPushWidgetSnapshot === 'function') nexusPushWidgetSnapshot();
+                if (typeof nexusProcessWidgetPendingActions === 'function') nexusProcessWidgetPendingActions();
             } catch (e) {
                 console.error('[NEXUS] processLoginSuccess', e);
                 _loginRoutePhase = 'error';
