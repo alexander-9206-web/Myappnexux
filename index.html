@@ -660,6 +660,16 @@
             opacity: 1;
             transform: scale(1);
         }
+        .nexus-loans-acc-head { background: transparent; border: 0; cursor: pointer; text-align: left; }
+        .nexus-loans-acc.is-open .nexus-loans-acc-head { border-bottom: 1px solid var(--nexus-card-border, #e2e8f0); }
+        .nexus-loans-acc-chev { transition: transform 0.2s ease; }
+        .nexus-loans-acc.is-open > .nexus-loans-acc-head .nexus-loans-acc-chev { transform: rotate(180deg); }
+        .nexus-loans-nested-acc { border: 1px solid var(--nexus-card-border, #e2e8f0); border-radius: 1rem; overflow: hidden; }
+        .nexus-loans-nested-head { width: 100%; padding: 0.65rem 0.75rem; display: flex; justify-content: space-between; align-items: center; background: rgba(148,163,184,0.08); border: 0; cursor: pointer; text-align: left; }
+        .nexus-loans-nested-body { padding: 0.5rem 0.65rem 0.65rem; }
+        .nexus-loans-amort-mini { font-size: 7px; width: 100%; }
+        .nexus-loans-amort-mini th, .nexus-loans-amort-mini td { padding: 0.25rem 0.35rem; }
+        .nexus-cc-amort-panel { margin-top: 0.35rem; padding: 0.5rem; border-radius: 0.75rem; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); font-size: 8px; }
         @media (min-width: 768px) {
             #fab-main { right: max(3rem, calc(env(safe-area-inset-right, 0px) + 3rem)) !important; }
         }
@@ -1955,14 +1965,31 @@
                     <div class="cal-grid text-[7px] text-center font-black text-slate-400 mb-1 gap-1"><div>LUN</div><div>MAR</div><div>MIÉ</div><div>JUE</div><div>VIE</div><div>SÁB</div><div>DOM</div></div>
                     <div id="loans-mini-calendar" class="cal-grid text-[9px] gap-1"></div>
                 </div>
-                <div id="loans-list-wrapper" class="space-y-6 pb-20 mt-4">
-                    <div>
-                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-2"><i class="fa-solid fa-clock text-amber-500 mr-1"></i> Pendientes de Pago</h3>
-                        <div id="loans-list-pending" class="space-y-4 md:grid md:grid-cols-2 md:gap-6 md:space-y-0"></div>
+                <div id="loans-list-wrapper" class="space-y-3 pb-20 mt-4">
+                    <div id="loans-acc-pending" class="nexus-loans-acc theme-card rounded-2xl border overflow-hidden">
+                        <button type="button" class="nexus-loans-acc-head w-full px-4 py-3 flex justify-between items-center" onclick="nexusToggleLoansAcc('pending')">
+                            <span class="text-[10px] font-black uppercase text-rose-600"><i class="fa-solid fa-bolt mr-1"></i> Pagos únicos</span>
+                            <span id="loans-acc-pending-chev" class="text-slate-400 text-xs"><i class="fa-solid fa-chevron-down"></i></span>
+                        </button>
+                        <div id="loans-acc-pending-body" class="nexus-loans-acc-body hidden px-3 pb-3 space-y-2"></div>
                     </div>
-                    <div id="loans-list-paid-container" class="hidden">
-                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-2 mt-6"><i class="fa-solid fa-check text-emerald-500 mr-1"></i> Saldadas / Históricas</h3>
-                        <div id="loans-list-paid" class="space-y-4 md:grid md:grid-cols-2 md:gap-6 md:space-y-0 opacity-70"></div>
+                    <div id="loans-acc-general" class="nexus-loans-acc theme-card rounded-2xl border overflow-hidden">
+                        <button type="button" class="nexus-loans-acc-head w-full px-4 py-3 flex justify-between items-center" onclick="nexusToggleLoansAcc('general')">
+                            <span class="text-[10px] font-black uppercase text-blue-600"><i class="fa-solid fa-building-columns mr-1"></i> Deudas generales</span>
+                            <span id="loans-acc-general-chev" class="text-slate-400 text-xs"><i class="fa-solid fa-chevron-down"></i></span>
+                        </button>
+                        <div id="loans-acc-general-body" class="nexus-loans-acc-body hidden px-3 pb-3 space-y-2"></div>
+                    </div>
+                    <div id="loans-acc-cc" class="nexus-loans-acc theme-card rounded-2xl border overflow-hidden">
+                        <button type="button" class="nexus-loans-acc-head w-full px-4 py-3 flex justify-between items-center" onclick="nexusToggleLoansAcc('cc')">
+                            <span class="text-[10px] font-black uppercase text-red-600"><i class="fa-solid fa-credit-card mr-1"></i> Tarjetas de crédito</span>
+                            <span id="loans-acc-cc-chev" class="text-slate-400 text-xs"><i class="fa-solid fa-chevron-down"></i></span>
+                        </button>
+                        <div id="loans-acc-cc-body" class="nexus-loans-acc-body hidden px-3 pb-3 space-y-2"></div>
+                    </div>
+                    <div id="loans-list-paid-container" class="hidden theme-card rounded-2xl border p-3 mt-2">
+                        <h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3"><i class="fa-solid fa-check text-emerald-500 mr-1"></i> Saldadas / históricas</h3>
+                        <div id="loans-list-paid" class="space-y-2 opacity-70"></div>
                     </div>
                 </div>
             </div>
@@ -7279,12 +7306,16 @@
         }
         function nexusLoanRemainingBalance(l) {
             if (!l) return 0;
+            if (typeof nexusCalcLoanFrenchSchedule === 'function') {
+                return nexusCalcLoanFrenchSchedule(l).currentBalance;
+            }
             const P = l.original_total || l.total || 0;
-            const r = (l.rate || 0) / 100;
+            const ratePct = typeof nexusNormalizeMonthlyRatePct === 'function' ? nexusNormalizeMonthlyRatePct(l.rate, null) : (l.rate || 0);
+            const r = ratePct / 100;
             const n = l.term || 1;
             const paid = l.paidQuotas || 0;
             if (paid >= n) return 0;
-            const A = (r === 0) ? P / n : P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            const A = (r === 0) ? P / n : (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
             let balance = P;
             for (let j = 0; j < paid; j++) balance -= (A - (balance * r));
             return Math.max(0, balance);
@@ -9303,6 +9334,8 @@
                 
                 if(txs.length === 0) { el.innerHTML = '<p class="text-[10px] text-center text-slate-400 font-bold uppercase py-2">Sin transacciones.</p>'; return; }
                 
+                const acc = state.accounts.find(a => a.id === id);
+                const isCreditAcc = acc && nexusIsLiabAccount(acc);
                 el.innerHTML = txs.slice(0, 50).map(t => {
                     const dDate = new Date(t.date);
                     const timeStr = String(dDate.getHours()).padStart(2,'0') + ':' + String(dDate.getMinutes()).padStart(2,'0');
@@ -9317,7 +9350,12 @@
                     const creatorStr = t.createdBy ? ` • <i class="fa-solid fa-user text-purple-400 mx-0.5"></i> ${t.createdBy.split(' ')[0]}` : '';
 
                     const amtFull = `${sign}${fmt(t.amount, t.currency)}`;
-                    return `<div class="rounded-xl bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-blue-200 transition-all cursor-pointer shadow-sm mb-1.5 p-2.5 min-w-0 max-w-full overflow-hidden" onclick="editTransaction('${t.id}')"><div class="flex justify-between items-center gap-2 min-w-0"><div class="flex flex-col min-w-0 flex-1 pr-1"><span class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}</span><span class="text-[8px] text-slate-400 font-bold uppercase flex items-center mt-0.5">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorStr}</span></div><div class="flex items-center gap-1.5 shrink-0 min-w-0"><div class="acc-tx-amt-wrap nexus-amount-box"><span class="acc-tx-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span></div><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${id}')" class="w-7 h-7 rounded-full bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors shadow-sm active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[9px]"></i></button></div></div></div>`;
+                    const ccLoan = isCreditAcc && (t.isCCPurchase || (t.cat && String(t.cat).includes('[Crédito]'))) ? nexusFindLoanByPurchaseTx(t) : null;
+                    const clickFn = ccLoan
+                        ? `nexusToggleCcTxAmort(event,'${t.id}','${id}')`
+                        : `editTransaction('${t.id}')`;
+                    const amortHint = ccLoan ? '<span class="text-[7px] text-indigo-500 font-black uppercase ml-1">· Amortización</span>' : '';
+                    return `<div class="rounded-xl bg-slate-50/50 hover:bg-white border border-slate-100 hover:border-blue-200 transition-all cursor-pointer shadow-sm mb-1.5 p-2.5 min-w-0 max-w-full overflow-hidden" onclick="${clickFn}"><div class="flex justify-between items-center gap-2 min-w-0"><div class="flex flex-col min-w-0 flex-1 pr-1"><span class="text-[10px] font-black uppercase theme-text truncate">${t.note || t.cat.substring(2)}${amortHint}</span><span class="text-[8px] text-slate-400 font-bold uppercase flex items-center mt-0.5">${dDate.toLocaleDateString('es-CO')} ${timeStr}${creatorStr}</span></div><div class="flex items-center gap-1.5 shrink-0 min-w-0"><div class="acc-tx-amt-wrap nexus-amount-box"><span class="acc-tx-amt nexus-amount-fit font-black ${colorCls}" title="${amtFull}">${amtFull}</span></div><button type="button" title="Eliminar de raíz" onclick="event.stopPropagation(); promptRootDeleteTransaction('${t.id}', '${id}')" class="w-7 h-7 rounded-full bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors shadow-sm active:scale-90 shrink-0"><i class="fa-solid fa-eraser text-[9px]"></i></button></div></div></div>`;
                 }).join('');
                 requestAnimationFrame(() => fitNexusAmounts(el));
             } else {
@@ -10113,48 +10151,223 @@
             else loanCalMonthOffset += val;
             renderLoansList();
         }
-        function renderLoansList() {
-            const listPending = $id('loans-list-pending'); const listPaidContainer = $id('loans-list-paid-container'); const listPaid = $id('loans-list-paid'); const summary = $id('loans-summary-container'); if (!listPending || !summary) return;
-            const activeLoans = getActiveLoans();
-            if (activeLoans.length === 0) { summary.classList.add('hidden'); listPending.innerHTML = `<div class="text-center p-8 border border-dashed border-amber-200 rounded-3xl bg-amber-50/30 col-span-2"><p class="text-xs font-bold text-amber-600/70 uppercase">No tienes pasivos estructurados vigentes</p></div>`; if(listPaidContainer) listPaidContainer.classList.add('hidden'); return; }
-            summary.classList.remove('hidden'); let totalDebt = 0; let totalMonthlyPayment = 0; let weightedRateSum = 0; let htmlPending = ''; let htmlPaid = '';
-            activeLoans.forEach(l => {
-                let quota = 0; if(l.rate === 0) quota = l.total / l.term; else { const r = l.rate / 100; quota = (l.total * r) / (1 - Math.pow(1 + r, -l.term)); }
-                const paid = l.paidQuotas || 0; const remaining = l.term - paid; 
-                let currentBalance = l.total; if(l.rate === 0) { currentBalance = l.total - (quota * paid); } else { const r = l.rate / 100; for(let j=0; j<paid; j++) currentBalance -= (quota - (currentBalance * r)); } if(currentBalance < 0.01) currentBalance = 0;
-                if (remaining > 0) { totalDebt += currentBalance; totalMonthlyPayment += quota; weightedRateSum += (l.rate * currentBalance); }
-                const isCC = !!l.isCC; const isPend = l.id.startsWith('pend_');
-                const isBancoDebt = l.creditorType === 'banco' && !isCC && !isPend;
-                const typeIcon = isCC ? '<i class="fa-solid fa-credit-card text-red-500 mr-1"></i> Tarjeta Crédito' : (isPend ? '<i class="fa-solid fa-bolt text-rose-500 mr-1"></i> Pendiente Único' : '<i class="fa-solid fa-building-columns text-blue-500 mr-1"></i> Préstamo'); 
-                const typeBadge = `<span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200 shadow-sm">${typeIcon}</span>`;
-                let creditorBadge = '';
-                if (isBancoDebt) {
-                    creditorBadge = '<span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-emerald-200 shadow-sm"><i class="fa-solid fa-bolt mr-1"></i>Banco · PSE</span>';
-                } else if (l.tercerosAccId) {
-                    const ta = (state.accounts || []).find(a => a.id === l.tercerosAccId);
-                    const tName = ta ? ta.name : 'Terceros';
-                    creditorBadge = `<span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-orange-200 shadow-sm"><i class="fa-solid fa-user-group mr-1"></i>${tName}</span>`;
-                } else if (!isCC && !isPend && (l.creditorType === 'terceros' || !l.creditorType)) {
-                    creditorBadge = '<span class="bg-orange-50 text-orange-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-orange-100 shadow-sm">Terceros</span>';
-                }
-                
-                let priorityBadge = '';
-                if (isPend && l.priority) {
-                    let pBg = '', pText = '', pLbl = '';
-                    if (l.priority === 'high') { pBg = 'bg-red-100'; pText = 'text-red-600 border-red-200'; pLbl = 'Alta'; }
-                    else if (l.priority === 'medium') { pBg = 'bg-amber-100'; pText = 'text-amber-600 border-amber-200'; pLbl = 'Media'; }
-                    else if (l.priority === 'low') { pBg = 'bg-emerald-100'; pText = 'text-emerald-600 border-emerald-200'; pLbl = 'Baja'; }
-                    priorityBadge = `<span class="${pBg} ${pText} px-2 py-0.5 rounded-md text-[8px] font-black uppercase border shadow-sm">Prioridad: ${pLbl}</span>`;
-                }
-                
-                const payPseBtn = isBancoDebt
-                    ? `<button type="button" onclick="openLoanPSEPayModal('${l.id}')" class="w-full bg-emerald-500 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md flex items-center justify-center gap-2"><i class="fa-solid fa-bolt"></i> Pagar vía PSE</button>`
-                    : '';
-                const cardHtml = `<div class="theme-card p-6 rounded-[2rem] border shadow-sm flex flex-col gap-4 h-full"><div class="flex justify-between items-start flex-1"><div><h4 class="text-sm font-black uppercase theme-text">${l.name}</h4><div class="flex flex-wrap gap-2 mt-2">${typeBadge}${creditorBadge}${priorityBadge}<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-slate-200">Pagadas: ${paid}/${l.term}</span><span class="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md text-[8px] font-black uppercase border border-amber-200">Tasa: ${l.rate}%</span></div></div><div class="flex items-start gap-3 shrink-0 ml-2"><button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500"><i class="fa-solid fa-pen text-sm"></i></button><button type="button" onclick="deleteLoan(event, '${l.id}')" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash text-sm"></i></button></div></div><div class="flex justify-between items-end border-t border-slate-100/50 pt-4 gap-2"><div class="min-w-0 flex-1 pr-2"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Cuota Fija</p><p class="text-sm font-black theme-val-exp truncate" title="${fmt(quota, l.currency)}">${fmt(quota, l.currency)}</p></div><div class="text-right flex flex-col items-end min-w-0 flex-1"><p class="text-[8px] font-black uppercase text-slate-400 mb-1 truncate">Saldo Actual</p><p class="text-lg font-black theme-val-exp truncate w-full text-right" title="${fmt(currentBalance, l.currency)}">${fmt(currentBalance, l.currency)}</p>${remaining > 0 ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[9px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-xl mt-2 uppercase shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-check mr-1"></i>Abonar Cuota</button>` : `<span class="text-[9px] font-black bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-xl mt-2 uppercase border border-emerald-200">SALDADA</span>`}</div></div>${payPseBtn}<button type="button" onclick="showLoanDetail('${l.id}')" class="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-[10px] mt-2 active:scale-95 transition-transform shadow-md">Ver Amortización</button></div>`;
-                if (remaining > 0) htmlPending += cardHtml; else htmlPaid += cardHtml;
+
+        if (!window.__nexusLoansAccOpen) window.__nexusLoansAccOpen = { pending: true, general: true, cc: true };
+        if (!window.__nexusLoansCardOpen) window.__nexusLoansCardOpen = {};
+        if (!window.__nexusLoansPurchaseOpen) window.__nexusLoansPurchaseOpen = {};
+
+        /** % del extracto: si parece EA anual (>4), dividir entre 12 para tasa mensual. */
+        function nexusNormalizeMonthlyRatePct(pctRaw, card) {
+            let pct = Number(pctRaw);
+            if (!Number.isFinite(pct) || pct < 0) pct = Number(card && card.rate) || 0;
+            if (pct > 4) pct = pct / 12;
+            return pct;
+        }
+
+        function nexusCalcLoanFrenchSchedule(loan) {
+            const P = Number(loan.original_total ?? loan.total) || 0;
+            const term = Math.max(1, parseInt(loan.term, 10) || 1);
+            const paid = Math.max(0, parseInt(loan.paidQuotas, 10) || 0);
+            const ratePct = nexusNormalizeMonthlyRatePct(loan.rate, null);
+            const r = ratePct / 100;
+            let A = Number(loan.scannerQuota) || 0;
+            if (A <= 0) {
+                A = r === 0 ? P / term : (P * r * Math.pow(1 + r, term)) / (Math.pow(1 + r, term) - 1);
+            }
+            let balance = P;
+            const rows = [];
+            let cursor = new Date(loan.date || Date.now());
+            for (let i = 1; i <= term; i++) {
+                cursor = new Date(cursor);
+                cursor.setMonth(cursor.getMonth() + 1);
+                const interest = balance * r;
+                const principal = Math.min(balance, Math.max(0, A - interest));
+                const payment = principal + interest;
+                balance -= principal;
+                if (balance < 0.01) balance = 0;
+                rows.push({ i, date: cursor.toISOString(), principal, interest, payment, balance, paid: i <= paid });
+            }
+            const currentBalance = paid >= term ? 0 : (paid > 0 && rows[paid - 1] ? rows[paid - 1].balance : P);
+            const monthlyQuota = paid < term ? A : 0;
+            return { P, term, paid, remaining: Math.max(0, term - paid), A, ratePct, rows, currentBalance, monthlyQuota };
+        }
+
+        function nexusGetLoanActiveBalance(loan) {
+            const s = nexusCalcLoanFrenchSchedule(loan);
+            if (typeof loan.balance === 'number' && loan.balance >= 0 && loan.isCC) {
+                return loan.balance;
+            }
+            return s.currentBalance;
+        }
+
+        function nexusRecalcCreditCardBalanceFromLoans(cardId) {
+            const card = (state.accounts || []).find(a => a.id === cardId);
+            if (!card) return;
+            let sum = 0;
+            (state.loans || []).filter(l => l.isCC && l.cardId === cardId).forEach(l => {
+                const s = nexusCalcLoanFrenchSchedule(l);
+                if (s.remaining > 0) sum += s.currentBalance;
             });
-            listPending.innerHTML = htmlPending || `<p class="text-[10px] text-slate-400 font-bold uppercase col-span-2 text-center py-6 border border-dashed rounded-2xl">No hay deudas pendientes</p>`;
-            if (listPaidContainer && listPaid) { if (htmlPaid) { listPaidContainer.classList.remove('hidden'); listPaid.innerHTML = htmlPaid; } else { listPaidContainer.classList.add('hidden'); } }
+            card.balance = sum;
+        }
+
+        function nexusFindLoanByPurchaseTx(tx) {
+            if (!tx) return null;
+            const byId = (state.loans || []).find(l => l.isCC && (l.purchaseTxId === tx.id || l.scannerTxId === tx.id));
+            if (byId) return byId;
+            const hint = String(tx.note || tx.cat || '').replace(/^\[TC\]\s*/i, '').split('·')[0].trim().toLowerCase();
+            if (!hint) return null;
+            return (state.loans || []).find(l => l.isCC && l.cardId === tx.accId && String(l.name || '').toLowerCase().includes(hint.slice(0, 24)));
+        }
+
+        function nexusBuildLoanAmortMiniHtml(loan) {
+            const s = nexusCalcLoanFrenchSchedule(loan);
+            const curr = loan.currency || state.settings.baseCurrency || 'COP';
+            let tbody = '';
+            s.rows.forEach(row => {
+                const cls = row.paid ? 'opacity-50 line-through' : '';
+                tbody += `<tr class="${cls}"><td>${row.i}</td><td class="text-right">${fmt(row.principal, curr)}</td><td class="text-right text-red-400">+${fmt(row.interest, curr)}</td><td class="text-right font-black">${fmt(row.payment, curr)}</td><td class="text-right text-amber-600">${fmt(row.balance, curr)}</td></tr>`;
+            });
+            return `<table class="nexus-loans-amort-mini w-full mt-2"><thead><tr class="text-slate-400 uppercase"><th>#</th><th class="text-right">Capital</th><th class="text-right">Int.</th><th class="text-right">Cuota</th><th class="text-right">Saldo</th></tr></thead><tbody>${tbody}</tbody></table><p class="text-[7px] text-slate-500 mt-1">Cuota fija ${fmt(s.A, curr)} · Tasa ${s.ratePct.toFixed(2)}% mes · Pagadas ${s.paid}/${s.term}</p>`;
+        }
+
+        function nexusToggleLoansAcc(key) {
+            window.__nexusLoansAccOpen[key] = !window.__nexusLoansAccOpen[key];
+            renderLoansList();
+        }
+
+        function nexusToggleLoansCard(cardId) {
+            window.__nexusLoansCardOpen[cardId] = !window.__nexusLoansCardOpen[cardId];
+            renderLoansList();
+        }
+
+        function nexusToggleLoansPurchase(loanId) {
+            window.__nexusLoansPurchaseOpen[loanId] = !window.__nexusLoansPurchaseOpen[loanId];
+            renderLoansList();
+        }
+
+        function nexusToggleCcTxAmort(ev, txId, accId) {
+            if (ev) ev.stopPropagation();
+            const panelId = 'cc-amort-' + txId;
+            const existing = $id(panelId);
+            if (existing) {
+                existing.remove();
+                return;
+            }
+            const tx = (state.tx || []).find(t => t.id === txId);
+            const loan = nexusFindLoanByPurchaseTx(tx);
+            if (!loan) return editTransaction(txId);
+            $qAll('[id^="cc-amort-"]').forEach(el => el.remove());
+            const host = ev && ev.currentTarget ? ev.currentTarget.closest('.rounded-xl') : null;
+            if (!host) return showLoanDetail(loan.id);
+            const div = document.createElement('div');
+            div.id = panelId;
+            div.className = 'nexus-cc-amort-panel';
+            div.innerHTML = `<p class="font-black uppercase text-indigo-700 mb-1"><i class="fa-solid fa-table-list mr-1"></i> ${loan.name}</p>${nexusBuildLoanAmortMiniHtml(loan)}<button type="button" class="mt-2 text-[8px] font-black uppercase text-blue-600" onclick="showLoanDetail('${loan.id}')">Ver detalle completo</button>`;
+            host.appendChild(div);
+            requestAnimationFrame(() => fitNexusAmounts(div));
+        }
+
+        function nexusRenderLoanCompactCard(l) {
+            const s = nexusCalcLoanFrenchSchedule(l);
+            const curr = l.currency || state.settings.baseCurrency || 'COP';
+            const bal = nexusGetLoanActiveBalance(l);
+            const payBtn = s.remaining > 0
+                ? `<button type="button" onclick="payLoanQuota('${l.id}')" class="text-[8px] font-black bg-amber-500 text-white px-2 py-1 rounded-lg uppercase"><i class="fa-solid fa-check mr-0.5"></i>Abonar</button>`
+                : `<span class="text-[8px] font-black text-emerald-600 uppercase">Saldada</span>`;
+            return `<div class="theme-card p-3 rounded-xl border text-left">
+                <div class="flex justify-between items-start gap-2">
+                    <div class="min-w-0 flex-1"><p class="text-[10px] font-black uppercase theme-text truncate">${l.name}</p>
+                    <p class="text-[8px] text-slate-500 mt-0.5">Cuota ${fmt(s.A, curr)} · ${s.paid}/${s.term} · Saldo ${fmt(bal, curr)}</p></div>
+                    <div class="flex gap-1 shrink-0">${payBtn}
+                    <button type="button" onclick="editLoan('${l.id}')" class="text-slate-300 hover:text-blue-500 p-1"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                    <button type="button" onclick="deleteLoan(event,'${l.id}')" class="text-slate-300 hover:text-red-500 p-1"><i class="fa-solid fa-trash text-[10px]"></i></button></div>
+                </div>
+                <button type="button" class="text-[8px] font-black uppercase text-indigo-600 mt-2" onclick="nexusToggleLoansPurchase('${l.id}')">${window.__nexusLoansPurchaseOpen[l.id] ? 'Ocultar' : 'Ver'} amortización</button>
+                ${window.__nexusLoansPurchaseOpen[l.id] ? nexusBuildLoanAmortMiniHtml(l) : ''}
+            </div>`;
+        }
+
+        function renderLoansList() {
+            const bodyPending = $id('loans-acc-pending-body');
+            const bodyGeneral = $id('loans-acc-general-body');
+            const bodyCc = $id('loans-acc-cc-body');
+            const listPaidContainer = $id('loans-list-paid-container');
+            const listPaid = $id('loans-list-paid');
+            const summary = $id('loans-summary-container');
+            if (!bodyPending || !bodyGeneral || !bodyCc || !summary) return;
+            const activeLoans = getActiveLoans();
+            const emptyMsg = `<p class="text-[10px] text-slate-400 font-bold uppercase text-center py-4 border border-dashed rounded-xl">Sin registros</p>`;
+            if (activeLoans.length === 0) {
+                summary.classList.add('hidden');
+                bodyPending.innerHTML = emptyMsg;
+                bodyGeneral.innerHTML = emptyMsg;
+                bodyCc.innerHTML = emptyMsg;
+                if (listPaidContainer) listPaidContainer.classList.add('hidden');
+                ['pending', 'general', 'cc'].forEach(k => {
+                    const acc = $id('loans-acc-' + k);
+                    if (acc) acc.classList.remove('is-open');
+                    const b = $id('loans-acc-' + k + '-body');
+                    if (b) b.classList.add('hidden');
+                });
+                return;
+            }
+            summary.classList.remove('hidden');
+            let totalDebt = 0, totalMonthlyPayment = 0, weightedRateSum = 0, htmlPaid = '';
+            const pendLoans = [], genLoans = [], ccLoans = [];
+            activeLoans.forEach(l => {
+                const s = nexusCalcLoanFrenchSchedule(l);
+                const currentBalance = nexusGetLoanActiveBalance(l);
+                if (s.remaining > 0) {
+                    totalDebt += currentBalance;
+                    totalMonthlyPayment += s.monthlyQuota;
+                    weightedRateSum += (s.ratePct * currentBalance);
+                }
+                if (l.isCC) ccLoans.push(l);
+                else if (l.id.startsWith('pend_')) pendLoans.push(l);
+                else genLoans.push(l);
+                if (s.remaining <= 0) htmlPaid += nexusRenderLoanCompactCard(l);
+            });
+            const setAcc = (key, html) => {
+                const acc = $id('loans-acc-' + key);
+                const body = $id('loans-acc-' + key + '-body');
+                const open = !!window.__nexusLoansAccOpen[key];
+                if (acc) acc.classList.toggle('is-open', open);
+                if (body) {
+                    body.classList.toggle('hidden', !open);
+                    body.innerHTML = html || emptyMsg;
+                }
+            };
+            setAcc('pending', pendLoans.filter(l => nexusCalcLoanFrenchSchedule(l).remaining > 0).map(nexusRenderLoanCompactCard).join(''));
+            setAcc('general', genLoans.filter(l => nexusCalcLoanFrenchSchedule(l).remaining > 0).map(nexusRenderLoanCompactCard).join(''));
+            const ccByCard = {};
+            ccLoans.forEach(l => {
+                const cid = l.cardId || '_sin_tarjeta';
+                if (!ccByCard[cid]) ccByCard[cid] = [];
+                ccByCard[cid].push(l);
+            });
+            let htmlCc = '';
+            Object.keys(ccByCard).forEach(cardId => {
+                const card = cardId === '_sin_tarjeta' ? null : (state.accounts || []).find(a => a.id === cardId);
+                const cardName = card ? card.name : 'Sin tarjeta';
+                const loansOnCard = ccByCard[cardId].filter(l => nexusCalcLoanFrenchSchedule(l).remaining > 0);
+                if (!loansOnCard.length) return;
+                const cardBal = loansOnCard.reduce((s, l) => s + nexusGetLoanActiveBalance(l), 0);
+                const curr = (card && card.currency) || state.settings.baseCurrency || 'COP';
+                const openCard = !!window.__nexusLoansCardOpen[cardId];
+                htmlCc += `<div class="nexus-loans-nested-acc mb-2">
+                    <button type="button" class="nexus-loans-nested-head" onclick="nexusToggleLoansCard('${cardId}')">
+                        <span class="text-[9px] font-black uppercase text-red-700"><i class="fa-solid fa-credit-card mr-1"></i>${cardName}</span>
+                        <span class="text-[8px] font-black text-slate-500">${loansOnCard.length} compra(s) · ${fmt(cardBal, curr)} <i class="fa-solid fa-chevron-down ml-1 nexus-loans-acc-chev" style="${openCard ? 'transform:rotate(180deg)' : ''}"></i></span>
+                    </button>
+                    <div class="nexus-loans-nested-body ${openCard ? '' : 'hidden'}">${loansOnCard.map(nexusRenderLoanCompactCard).join('')}</div>
+                </div>`;
+            });
+            setAcc('cc', htmlCc);
+            if (listPaidContainer && listPaid) {
+                if (htmlPaid) { listPaidContainer.classList.remove('hidden'); listPaid.innerHTML = htmlPaid; }
+                else { listPaidContainer.classList.add('hidden'); }
+            }
             const now = new Date(); const monthlyIncomes = state.tx.filter(t => t.type === 'income' && t.currency === state.activeCurrency && new Date(t.date).getMonth() === now.getMonth() && new Date(t.date).getFullYear() === now.getFullYear()).reduce((sum, t) => sum + t.amount, 0);
             let baseIncome = monthlyIncomes > 0 ? convertCurrency(monthlyIncomes, state.activeCurrency, state.settings.baseCurrency) : 1000000;
             const ratio = (totalMonthlyPayment / baseIncome) * 100; const avgRate = totalDebt > 0 ? (weightedRateSum / totalDebt) : 0;
@@ -10166,11 +10379,12 @@
             const activeLoansGlobal = state.loans || [];
             const debtByCurrency = {};
             activeLoansGlobal.forEach(l => {
-                const paid = l.paidQuotas || 0;
-                let currentBalance = l.original_total || l.total;
-                if(l.rate === 0) { currentBalance -= ((l.original_total || l.total) / l.term) * paid; } else { const r = l.rate / 100; const quota = ((l.original_total || l.total) * r) / (1 - Math.pow(1 + r, -l.term)); for(let j=0; j<paid; j++) currentBalance -= (quota - (currentBalance * r)); }
-                if(currentBalance < 0.01) currentBalance = 0;
-                if (l.term - paid > 0) { const c = l.original_currency || l.currency; debtByCurrency[c] = (debtByCurrency[c] || 0) + currentBalance; }
+                const s = nexusCalcLoanFrenchSchedule(l);
+                const currentBalance = nexusGetLoanActiveBalance(l);
+                if (s.remaining > 0) {
+                    const c = l.original_currency || l.currency;
+                    debtByCurrency[c] = (debtByCurrency[c] || 0) + currentBalance;
+                }
             });
             const currIndContainer = $id('loans-currency-indicators');
             if (currIndContainer) {
@@ -10212,14 +10426,16 @@
                 const detTitle = $id('det-loan-title');
                 if (detTitle) detTitle.innerText = loan.name;
             }
-            let quota = 0; const r = loan.rate / 100; if(loan.rate === 0) quota = loan.total / loan.term; else quota = (loan.total * r) / (1 - Math.pow(1 + r, -loan.term));
-            const totalInterest = (quota * loan.term) - loan.total; const detPara = $id('det-loan-paragraph'); if(detPara) detPara.innerHTML = `Financiación matemática de <span class="font-black">${fmt(loan.total, loan.currency)}</span> a ${loan.term} meses. Costo (intereses): <span class="font-black text-red-600">${fmt(totalInterest, loan.currency)}</span>.`;
-            let balance = loan.total; let tbody = ''; let currentDate = new Date(loan.date); const paid = loan.paidQuotas || 0;
-            for (let i = 1; i <= loan.term; i++) {
-                currentDate.setMonth(currentDate.getMonth() + 1); const interest = balance * r; const principal = quota - interest; balance -= principal; if (balance < 0.01) balance = 0;
-                const isPaidRow = i <= paid ? 'bg-emerald-50/30 opacity-60' : 'hover:bg-amber-50/50 transition-colors';
-                tbody += `<tr class="${isPaidRow} border-b border-slate-50"><td class="px-4 py-3"><div class="font-bold text-xs text-slate-700">Cuota ${i} ${i<=paid?'<i class="fa-solid fa-check text-emerald-500 ml-1"></i>':''}</div><div class="font-mono text-[9px] text-slate-400">${currentDate.toISOString().split('T')[0]}</div></td><td class="px-4 py-3 text-right font-medium text-xs text-slate-600">${fmt(principal, loan.currency)}</td><td class="px-4 py-3 text-right font-medium text-xs text-red-400">+${fmt(interest, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-slate-800 bg-slate-50/50">${fmt(quota, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-amber-600">${fmt(balance, loan.currency)}</td></tr>`;
-            } const detTab = $id('det-loan-table'); if(detTab) detTab.innerHTML = tbody;
+            const sched = nexusCalcLoanFrenchSchedule(loan);
+            const totalInterest = sched.rows.reduce((s, row) => s + row.interest, 0);
+            const detPara = $id('det-loan-paragraph');
+            if (detPara) detPara.innerHTML = `Financiación de <span class="font-black">${fmt(sched.P, loan.currency)}</span> a ${sched.term} meses (francés, ${sched.ratePct.toFixed(2)}% mes). Intereses totales: <span class="font-black text-red-600">${fmt(totalInterest, loan.currency)}</span>. Cuota: <span class="font-black">${fmt(sched.A, loan.currency)}</span>.`;
+            let tbody = '';
+            sched.rows.forEach(row => {
+                const isPaidRow = row.paid ? 'bg-emerald-50/30 opacity-60' : 'hover:bg-amber-50/50 transition-colors';
+                tbody += `<tr class="${isPaidRow} border-b border-slate-50"><td class="px-4 py-3"><div class="font-bold text-xs text-slate-700">Cuota ${row.i} ${row.paid ? '<i class="fa-solid fa-check text-emerald-500 ml-1"></i>' : ''}</div><div class="font-mono text-[9px] text-slate-400">${row.date.split('T')[0]}</div></td><td class="px-4 py-3 text-right font-medium text-xs text-slate-600">${fmt(row.principal, loan.currency)}</td><td class="px-4 py-3 text-right font-medium text-xs text-red-400">+${fmt(row.interest, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-slate-800 bg-slate-50/50">${fmt(row.payment, loan.currency)}</td><td class="px-4 py-3 text-right font-black text-xs text-amber-600">${fmt(row.balance, loan.currency)}</td></tr>`;
+            });
+            const detTab = $id('det-loan-table'); if (detTab) detTab.innerHTML = tbody;
             const pseBlock = $id('det-loan-pse-actions');
             if (pseBlock) {
                 const isBancoDetail = loan.creditorType === 'banco' && !loan.id.startsWith('pend_') && !loan.isCC;
@@ -10241,7 +10457,9 @@
         
         function deleteLoan(e, id) { 
             if(e && typeof e.stopPropagation === 'function') e.stopPropagation();
-            state.loans = state.loans.filter(l => l.id !== id); 
+            const removed = (state.loans || []).find(l => l.id === id);
+            state.loans = state.loans.filter(l => l.id !== id);
+            if (removed && removed.isCC && removed.cardId) nexusRecalcCreditCardBalanceFromLoans(removed.cardId);
             saveState(); 
             renderLoansList(); 
             updateDashboard(); 
@@ -10547,9 +10765,11 @@
             const acc = state.accounts.find(a => a.type === 'liquid' && a.currency === l.currency) || getActiveAccounts().find(a => a.type === 'liquid');
             if(!acc) return alert("Necesitas cuenta líquida con saldo para debitar la cuota.");
             if((l.paidQuotas || 0) >= l.term) return alert("Deuda saldada.");
-            const r = l.rate / 100; const quotaAmt = (l.rate === 0) ? (l.total / l.term) : (l.total * r) / (1 - Math.pow(1 + r, -l.term));
+            const sched = nexusCalcLoanFrenchSchedule(l);
+            const quotaAmt = sched.A;
             l.paidQuotas = (l.paidQuotas || 0) + 1;
             l.balance = nexusLoanRemainingBalance(l);
+            if (l.isCC && l.cardId) nexusRecalcCreditCardBalanceFromLoans(l.cardId);
             acc.balance -= quotaAmt;
             const newTx = buildTransactionSchema({ type: 'expense', amount: quotaAmt, cat: l.isCC ? '💳 Abono TC' : '💳 Pago Deuda', accId: acc.id, date: new Date().toISOString(), note: `[Abono] ${l.name} (${l.paidQuotas}/${l.term})`, currency: l.currency, costType: 'fixed' });
             
@@ -10568,13 +10788,13 @@
                 triggerUIConfirm(`⚠️ Excede cupo disponible. ¿Sobregiro?`, 'cc_purchase_overdraft'); 
                 return; 
             } 
-            card.balance += amount; 
-            // APEX FIX: Se añade flag isCCPurchase y trazabilidad de autor (createdBy)
-            const newTx = { id: 'tx_' + Date.now(), type: 'expense', amount: amount, cat: `[Crédito] ${desc}`, accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true };
+            const txId = 'tx_' + Date.now();
+            const newTx = { id: txId, type: 'expense', amount: amount, cat: `[Crédito] ${desc}`, accId: cardId, date: new Date(date).toISOString(), note: `[TC] ${desc}`, currency: card.currency, isCCPurchase: true, ccPurchaseNoBalance: true };
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
             
             state.tx.push(newTx); saveCloudTx(newTx);
-            state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, date: new Date(date).toISOString(), currency: card.currency }); 
+            state.loans.push({ id: 'CC_' + Date.now(), name: `${desc} (${card.name})`, total: amount, balance: amount, original_total: amount, rate: card.rate || 0, term: term, paidQuotas: 0, isBNPL: false, isCC: true, cardId: cardId, purchaseTxId: txId, date: new Date(date).toISOString(), currency: card.currency });
+            nexusRecalcCreditCardBalanceFromLoans(cardId);
             saveState(); closeCCPurchaseModal(); renderAccountsTab(); updateDashboard(); 
         }
         
@@ -17750,7 +17970,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             if (lastScannerReport) lastScannerReport.targetCardId = sel.value || null;
         }
 
-        /** Amortización francesa por fila del extracto (valor compra × interés × cuotas). */
+        /** Amortización francesa: tasa anual del extracto ÷12; cuota fija; saldo solo vigente+proyectado. */
         function nexusScannerCalcInstallmentPlan(t, card) {
             const P = Number(t.purchaseValue) || 0;
             if (P <= 0 || !card) return { valid: false };
@@ -17761,10 +17981,11 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 const inst = Number(t.installmentValue) || 0;
                 term = inst > 0 ? Math.max(1, Math.round(P / inst)) : 1;
             }
-            const r = (Number(t.interestPercent) || Number(card.rate) || 0) / 100;
+            const ratePct = nexusNormalizeMonthlyRatePct(t.interestPercent, card);
+            const r = ratePct / 100;
             let A = Number(t.installmentValue) || 0;
             if (A <= 0) {
-                A = r === 0 ? P / term : P * (r * Math.pow(1 + r, term)) / (Math.pow(1 + r, term) - 1);
+                A = r === 0 ? P / term : (P * r * Math.pow(1 + r, term)) / (Math.pow(1 + r, term) - 1);
             }
             let bal = P;
             for (let i = 0; i < paid; i++) {
@@ -17786,7 +18007,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 if (balFut < 0.01) balFut = 0;
             }
             return {
-                valid: true, P, term, paid, remaining: futureCount, A, r,
+                valid: true, P, term, paid, remaining: futureCount, A, r, ratePct,
                 balanceAfterPaid: bal,
                 currentMonthPayment: paid < term ? A : 0,
                 currentInt, currentPrin,
@@ -17824,7 +18045,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 <p><span class="text-slate-500">Valor compras:</span> <span class="font-black">${fmt(purchaseSum, curr)}</span></p>
                 <p><span class="text-slate-500">Cuotas del mes (periodo):</span> <span class="font-black text-emerald-700">${fmt(monthPay, curr)}</span></p>
                 <p><span class="text-slate-500">Pagos futuros proyectados:</span> <span class="font-black text-amber-700">${fmt(futurePay, curr)}</span></p>
-                <p class="text-[7px] text-slate-500 leading-snug">Cálculo: sistema francés con % interés del extracto (o tasa de la tarjeta). Cuotas pagadas y faltantes del OCR.</p>`;
+                <p class="text-[7px] text-slate-500 leading-snug">Tasa EA del extracto ÷12 si aplica. Cuota francesa; saldo de tarjeta = vigente + proyectado (cuotas pagas no suman al cupo).</p>`;
         }
 
         async function processScannerFile(event) {
@@ -17999,8 +18220,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             const amount = plan.P;
             const desc = String(t.description || 'Compra extracto').trim();
             const purchaseDate = anchorDate;
-            card.balance += amount;
-            const ratePct = (plan.r * 100) || Number(card.rate) || 0;
+            const ratePct = plan.ratePct || nexusNormalizeMonthlyRatePct(t.interestPercent, card);
             const txId = 'tx_scan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             const newTx = buildTransactionSchema({
                 id: txId,
@@ -18011,26 +18231,30 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 date: purchaseDate.toISOString(),
                 note: `[TC] ${desc}${t.receiptOrApproval ? ' · Ref:' + t.receiptOrApproval : ''} · ${plan.term}×${fmt(plan.A, card.currency)}`,
                 currency: card.currency || state.settings.baseCurrency || 'COP',
-                isCCPurchase: true
+                isCCPurchase: true,
+                ccPurchaseNoBalance: true
             });
             if (userProfile && userProfile.name) newTx.createdBy = userProfile.name;
             state.tx.push(newTx);
             if (typeof saveCloudTx === 'function') saveCloudTx(newTx);
             const loanId = 'CC_scan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            const remainingBal = plan.balanceAfterPaid > 0 ? plan.balanceAfterPaid : (plan.remaining > 0 ? plan.P : 0);
             state.loans.push({
                 id: loanId,
                 name: `${desc} (${card.name})`,
                 total: amount,
-                balance: plan.remainingPrincipal > 0 ? plan.remainingPrincipal : amount,
+                balance: remainingBal,
                 original_total: amount,
-                original_balance: plan.remainingPrincipal > 0 ? plan.remainingPrincipal : amount,
+                original_balance: remainingBal,
                 original_currency: card.currency,
                 rate: ratePct,
+                scannerQuota: plan.A,
                 term: plan.term,
                 paidQuotas: Math.min(plan.paid, plan.term),
                 isBNPL: false,
                 isCC: true,
                 cardId: card.id,
+                purchaseTxId: txId,
                 date: purchaseDate.toISOString(),
                 currency: card.currency || state.settings.baseCurrency || 'COP',
                 priority: card.priority || 'medium'
@@ -18048,7 +18272,6 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             if (!card) return alert('Crea una tarjeta de crédito o rotativo en Cuentas antes de importar el extracto.');
             if (sel && sel.value !== card.id) sel.value = card.id;
             const anchorDate = nexusParseScannerAnchorDate(meta);
-            if (meta.totalDebt > 0 && nexusIsLiabAccount(card)) card.balance = Number(meta.totalDebt);
             if (meta.totalCreditLimit > 0) card.limit = Number(meta.totalCreditLimit);
             let imported = 0;
             let fixedCount = 0;
@@ -18056,9 +18279,12 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             (meta.otherCharges || []).forEach(i => { fixedCount += nexusImportScannerFixedCharge(card, i, anchorDate, 'Cargo fijo TC'); });
             txs.forEach(t => { imported += nexusImportScannerCCTransaction(card, t, anchorDate); });
             if (!imported && !fixedCount) return alert('No se detectaron compras ni cargos con monto válido.');
+            nexusRecalcCreditCardBalanceFromLoans(card.id);
+            if (meta.totalDebt > 0 && nexusIsLiabAccount(card)) card.balance = Number(meta.totalDebt);
             saveState();
             updateDashboard();
             renderAccountsTab();
+            if (typeof renderLoansList === 'function') renderLoansList();
             let projMonth = 0, projFuture = 0;
             txs.forEach(t => {
                 const plan = nexusScannerCalcInstallmentPlan(t, card);
