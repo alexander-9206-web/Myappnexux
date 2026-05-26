@@ -170,6 +170,66 @@
         html[data-theme="oled"] #view-home #accounts-container .acc-vault-card:hover {
             background: #1a1a28 !important;
         }
+        /* OLED: sustituir fondos claros hardcodeados (Tailwind) en app y modales */
+        html[data-theme="oled"] #nexus-app-main [class*="bg-white"]:not([class*="bg-white/"]),
+        html[data-theme="oled"] #nexus-app-main [class*="bg-slate-50"],
+        html[data-theme="oled"] #nexus-app-main [class*="bg-gray-50"],
+        html[data-theme="oled"] #nexus-app-main .bg-emerald-50,
+        html[data-theme="oled"] #nexus-app-main .bg-amber-50,
+        html[data-theme="oled"] #nexus-app-main .bg-indigo-50,
+        html[data-theme="oled"] #nexus-app-main .bg-purple-50,
+        html[data-theme="oled"] #nexus-app-main .bg-rose-50,
+        html[data-theme="oled"] #nexus-app-main .bg-teal-50,
+        html[data-theme="oled"] #nexus-app-main .bg-red-50,
+        html[data-theme="oled"] #nexus-app-main .bg-blue-50,
+        html[data-theme="oled"] #nexus-app-main .bg-cyan-50,
+        html[data-theme="oled"] #nexus-app-main .bg-orange-50,
+        html[data-theme="oled"] #nexus-app-main .bg-green-50,
+        html[data-theme="oled"] #nexus-app-main .bg-yellow-50,
+        html[data-theme="oled"] #nexus-app-main .bg-pink-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] [class*="bg-white"]:not([class*="bg-white/"]),
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] [class*="bg-slate-50"],
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-emerald-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-amber-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-indigo-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-purple-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-rose-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-teal-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-red-50,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-blue-50 {
+            background-color: var(--oled-list-bg) !important;
+            border-color: var(--oled-list-border) !important;
+        }
+        html[data-theme="oled"] #nexus-app-main .bg-white\/80,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .bg-white\/80 {
+            background-color: color-mix(in srgb, var(--oled-list-bg) 88%, transparent) !important;
+        }
+        html[data-theme="oled"] #nexus-app-main .text-slate-700,
+        html[data-theme="oled"] #nexus-app-main .text-slate-600,
+        html[data-theme="oled"] #nexus-app-main .text-slate-500,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .text-slate-700,
+        html[data-theme="oled"] .fixed.inset-0[id$="-modal"] .text-slate-600 {
+            color: #e2e8f0 !important;
+        }
+        html[data-theme="oled"] #nexus-app-main .bg-red-50,
+        html[data-theme="oled"] #nexus-app-main .bg-amber-100,
+        html[data-theme="oled"] #nexus-app-main .bg-emerald-100,
+        html[data-theme="oled"] #nexus-app-main .bg-blue-100,
+        html[data-theme="oled"] #nexus-app-main .bg-purple-100 {
+            background-color: color-mix(in srgb, var(--oled-list-bg) 70%, currentColor 8%) !important;
+        }
+        html[data-theme="oled"] #tab-calendar .cal-cell:not(.is-empty) {
+            background-color: var(--oled-list-bg) !important;
+            color: #e2e8f0 !important;
+            border: 1px solid var(--oled-list-border) !important;
+        }
+        html[data-theme="oled"] #tab-calendar .cal-cell.is-today {
+            border-color: #f43f5e !important;
+            color: #fda4af !important;
+        }
+        html[data-theme="oled"] #tab-calendar .cal-cell.has-event:not(.is-today) {
+            background-color: #1a1a28 !important;
+        }
         html[data-theme="oled"] .filter-chip {
             background: var(--oled-list-bg);
             border-color: var(--oled-list-border);
@@ -4887,6 +4947,7 @@
                 if (_loginRoutePhase === 'app' || window.__nexusAppShellReady) {
                     setLoginRoutingProgress(100, 'Listo');
                     stopLoginRoutingProgress();
+                    hideLoginRoutingLoading();
                     return;
                 }
                 pct = Math.min(94, pct + (pct < 50 ? 4 : 2));
@@ -4944,9 +5005,15 @@
             localStorage.setItem('nexus_google_vault_' + email, '1');
             currentUser = email;
 
-            const localProfile = loadLocalProfile(email);
+            let localProfile = loadLocalProfile(email);
             const sysReady = localStorage.getItem('nexus_system_initialized') === '1' || countLocalProfiles() > 0;
-            if (localProfile && sysReady) {
+            const hasVaultData = sysReady || !!localStorage.getItem('nexus_db_' + email) || !!localStorage.getItem('nexus_profile_' + email);
+            if (!localProfile && hasVaultData) {
+                try {
+                    localProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email) || 'null');
+                } catch (e) { localProfile = null; }
+            }
+            if (localProfile && hasVaultData) {
                 _loginRoutePhase = 'routing';
                 setLoginRoutingProgress(55, 'Abriendo tu bóveda…');
                 let profile = { ...localProfile, email, isGoogle: true, lastSeen: Date.now() };
@@ -4955,10 +5022,13 @@
                 userProfile = profile;
                 loginSelectedEmail = email;
                 localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(profile, email)));
+                localStorage.setItem('nexus_system_initialized', '1');
                 if (profileHasPin(profile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 initCloud({ skipAnonymous: true }).catch(e => console.warn('[NEXUS] initCloud fast google', e));
                 await processLoginSuccess(email, { googleLinked: true, fastEntry: true, skipCloudPull: true });
                 nexusClearGoogleRedirectFlags();
+                if (_loginRoutePhase !== 'app' && window.__nexusAppShellReady) _loginRoutePhase = 'app';
+                hideLoginRoutingLoading();
                 return _loginRoutePhase === 'app' || !!window.__nexusAppShellReady;
             }
 
@@ -5008,6 +5078,10 @@
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
                 window.__nexusPendingGoogleUser = null;
+                if (_loginRoutePhase === 'app' || window.__nexusAppShellReady || (sessionUnlocked && currentUser)) {
+                    stopLoginRoutingProgress();
+                    hideLoginRoutingLoading();
+                }
             }
         }
 
@@ -5410,8 +5484,8 @@
             }
             userProfile = profile;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, userEmail)));
-            beginLoginRoutingUI('Abriendo tu bóveda…');
-            await processLoginSuccess(userEmail, { googleLinked: true, fastEntry: true });
+            if (!window.__nexusAppShellReady) beginLoginRoutingUI('Abriendo tu bóveda…');
+            await processLoginSuccess(userEmail, { googleLinked: true, fastEntry: true, skipCloudPull: true });
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -5694,13 +5768,30 @@
                     tx.oncomplete = () => resolve();
                 });
             },
-            getState: async function(userId) {
-                const db = await this.init();
-                return new Promise((resolve) => {
-                    const tx = db.transaction('states', 'readonly');
-                    const req = tx.objectStore('states').get(userId);
-                    req.onsuccess = () => resolve(req.result ? req.result.data : null);
-                });
+            getState: async function(userId, opts) {
+                const timeoutMs = (opts && opts.timeoutMs) ? opts.timeoutMs : 12000;
+                const read = async () => {
+                    const db = await this.init();
+                    return new Promise((resolve, reject) => {
+                        const tx = db.transaction('states', 'readonly');
+                        tx.onerror = () => reject(tx.error);
+                        const req = tx.objectStore('states').get(userId);
+                        req.onsuccess = () => resolve(req.result ? req.result.data : null);
+                        req.onerror = () => reject(req.error);
+                    });
+                };
+                try {
+                    return await Promise.race([
+                        read(),
+                        new Promise((resolve) => setTimeout(() => {
+                            console.warn('[NEXUS] IndexedDB getState timeout', userId);
+                            resolve(null);
+                        }, timeoutMs))
+                    ]);
+                } catch (e) {
+                    console.warn('[NEXUS] IndexedDB getState', e);
+                    return null;
+                }
             },
             deleteState: async function(userId) {
                 const db = await this.init();
@@ -6294,7 +6385,7 @@
             }
             
             // APEX FIX: Migración Transparente a IndexedDB
-            let savedState = await NexusIDB.getState(currentUser);
+            let savedState = await NexusIDB.getState(currentUser, { timeoutMs: options.fastBoot ? 6000 : 12000 });
             
             if (!savedState) {
                 const lsSaved = localStorage.getItem(`nexus_db_${currentUser}`);
@@ -6379,7 +6470,7 @@
             }
             initNexus();
             if (state.settings && state.settings.uiLanguage && typeof nexusSetLanguage === 'function') {
-                nexusSetLanguage(state.settings.uiLanguage, { force: true, withProgress: true });
+                nexusSetLanguage(state.settings.uiLanguage, { force: true, withProgress: !options.fastBoot });
             } else if (typeof nexusApplyI18nToAllTabs === 'function') {
                 nexusApplyI18nToAllTabs();
             }
@@ -22479,15 +22570,24 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             const wantsCloud = !!(options.restoreCloud || options.googleLinked || nexusVaultHadCloudLink(vaultEmail, userProfile));
             const alreadyCloud = nexusFirebaseMatchesVault(fbUser, vaultEmail);
             const quickOpen = !!(options.fastEntry || options.googleLinked || alreadyCloud || founderInstant);
+            const instantShell = founderInstant || (quickOpen && (options.googleLinked || options.fastEntry));
 
-            if (founderInstant) {
-                sessionStorage.setItem('nexus_admin_bypass', '1');
-                sessionStorage.setItem('nexus_pin_banner_ok', '1');
+            if (instantShell) {
+                if (founderInstant) {
+                    sessionStorage.setItem('nexus_admin_bypass', '1');
+                    sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                } else if (options.googleLinked && userProfile && profileHasPin(userProfile)) {
+                    sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                }
                 nexusReleaseAppShell();
                 shellReleased = true;
                 _loginRoutePhase = 'app';
-                resetGoogleLoginButton();
+                sessionUnlocked = true;
+                nexusHideSessionLock();
+                stopLoginRoutingProgress();
+                setLoginRoutingProgress(100, 'Abriendo bóveda…');
                 hideLoginRoutingLoading();
+                resetGoogleLoginButton();
             } else {
                 showLoginRoutingLoading(quickOpen ? 'Abriendo bóveda…' : (wantsCloud ? 'Conectando con la nube…' : 'Abriendo tu bóveda…'));
                 setLoginRoutingProgress(18, 'Preparando…');
@@ -22521,17 +22621,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     bind = await nexusBindFirebaseToVaultEmail(vaultEmail, userProfile);
                 }
 
-                if (quickOpen && !founderInstant) {
-                    nexusReleaseAppShell();
-                    shellReleased = true;
-                    _loginRoutePhase = 'app';
-                    sessionUnlocked = true;
-                    nexusHideSessionLock();
-                    stopLoginRoutingProgress();
-                    setLoginRoutingProgress(100, 'Abriendo bóveda…');
-                    hideLoginRoutingLoading();
-                    resetGoogleLoginButton();
-                } else if (bind.cloud || quickOpen) {
+                if (!shellReleased && (bind.cloud || quickOpen)) {
                     nexusReleaseAppShell();
                     shellReleased = true;
                     _loginRoutePhase = 'app';
@@ -22539,14 +22629,29 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     setLoginRoutingProgress(68, bind.cloud ? 'Cargando datos…' : 'Cargando…');
                 }
 
-                await bootApp({
-                    fastBoot: true,
-                    deferCloudProfileMerge: true,
-                    founderInstant,
-                    keepSessionUnlocked: !!(quickOpen || founderInstant)
-                });
+                try {
+                    await Promise.race([
+                        bootApp({
+                            fastBoot: true,
+                            deferCloudProfileMerge: true,
+                            founderInstant,
+                            keepSessionUnlocked: !!(quickOpen || founderInstant)
+                        }),
+                        new Promise((resolve) => setTimeout(resolve, instantShell ? 14000 : 28000))
+                    ]);
+                } catch (bootErr) {
+                    console.warn('[NEXUS] bootApp login', bootErr);
+                    if (instantShell && !state) {
+                        state = { tx: [], loans: [], accounts: [], activeTab: 'home', activeCurrency: 'GLOBAL', settings: { baseCurrency: 'COP' }, context: 'day' };
+                    }
+                }
+                if (instantShell && typeof switchTab === 'function') {
+                    const tab = sessionStorage.getItem('nexus_last_active_tab') || localStorage.getItem('nexus_last_active_tab') || 'home';
+                    if (state) state.activeTab = tab;
+                    switchTab(tab);
+                }
 
-                const hadCloudHint = wantsCloud || await nexusDetectCloudLinkFromProfile(vaultEmail);
+                const hadCloudHint = wantsCloud || (options.googleLinked ? false : await nexusDetectCloudLinkFromProfile(vaultEmail));
                 const mustPullFromCloud = !skipCloudPull && (nexusIsVaultLocallyEmpty() || hadCloudHint);
                 if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
                     nexusPrepareCloudBootstrapOnLogin();
