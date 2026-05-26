@@ -4842,23 +4842,25 @@
         let _nexusWebAuthRouteScheduled = false;
         async function nexusRouteWebGoogleUserIfPending(user, source) {
             if (!isNexusWebBrowser() || !nexusAcceptsGoogleFirebaseUser(user)) return false;
-            if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup') return true;
-            if (_loginRoutePhase === 'routing' || window.__nexusGoogleLoginInFlight) return false;
+            if (nexusLoginRoutingIsDone() || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup') return true;
+            if (_googleWebLoginCompleting) return _googleWebLoginCompleting;
             if (!nexusWebGoogleRedirectPending() && !window.__nexusGoogleLoginInFlight) return false;
             if (_nexusWebAuthRouteScheduled) return false;
             _nexusWebAuthRouteScheduled = true;
             window.__nexusGoogleLoginInFlight = true;
             try {
                 console.log('[NEXUS] web Google auto-route', source, user.email);
-                beginLoginRoutingUI('Abriendo tu bóveda…');
-                return await nexusCompleteGoogleWebLogin(user);
+                if (!nexusLoginRoutingIsDone()) beginLoginRoutingUI('Abriendo tu bóveda…');
+                const ok = await nexusCompleteGoogleWebLogin(user);
+                if (ok) nexusFinishLoginRoutingInstant();
+                return ok;
             } catch (e) {
                 console.warn('[NEXUS] web Google auto-route', e);
                 return false;
             } finally {
                 _nexusWebAuthRouteScheduled = false;
                 window.__nexusGoogleLoginInFlight = false;
-                window.__nexusPendingGoogleUser = null;
+                if (nexusLoginRoutingIsDone()) window.__nexusPendingGoogleUser = null;
             }
         }
 
@@ -4987,6 +4989,8 @@
         }
 
         let _loginRoutingProgressTimer = null;
+        let _loginRoutingTargetPct = 0;
+        let _googleWebLoginCompleting = null;
 
         function stopLoginRoutingProgress() {
             if (_loginRoutingProgressTimer) {
@@ -4995,33 +4999,49 @@
             }
         }
 
-        function nexusStartLoginRoutingProgress(message) {
-            stopLoginRoutingProgress();
-            let pct = 8;
-            setLoginRoutingProgress(pct, message || 'Conectando…');
-            _loginRoutingProgressTimer = setInterval(() => {
-                if (_loginRoutePhase === 'app' || window.__nexusAppShellReady) {
-                    setLoginRoutingProgress(100, 'Listo');
-                    stopLoginRoutingProgress();
-                    hideLoginRoutingLoading();
-                    return;
-                }
-                pct = Math.min(94, pct + (pct < 50 ? 4 : 2));
-                setLoginRoutingProgress(pct, message || 'Conectando…');
-            }, 350);
+        function nexusLoginRoutingIsDone() {
+            return _loginRoutePhase === 'app' || !!window.__nexusAppShellReady;
         }
 
-        function setLoginRoutingProgress(pct, message) {
+        function nexusFinishLoginRoutingInstant(message) {
+            stopLoginRoutingProgress();
+            setLoginRoutingProgress(100, message || 'Listo', true);
+            hideLoginRoutingLoading();
+        }
+
+        function nexusStartLoginRoutingProgress(message) {
+            stopLoginRoutingProgress();
+            if (nexusLoginRoutingIsDone()) {
+                nexusFinishLoginRoutingInstant();
+                return;
+            }
+            let pct = 10;
+            setLoginRoutingProgress(pct, message || 'Conectando…');
+            _loginRoutingProgressTimer = setInterval(() => {
+                if (nexusLoginRoutingIsDone()) {
+                    nexusFinishLoginRoutingInstant();
+                    return;
+                }
+                if (pct >= 85) return;
+                pct += 1;
+                setLoginRoutingProgress(pct, message || 'Conectando…');
+            }, 600);
+        }
+
+        function setLoginRoutingProgress(pct, message, force) {
             const bar = $id('login-routing-progress-bar');
             const pctEl = $id('login-routing-progress-pct');
             const txt = $id('login-routing-loading-text');
             const n = Math.max(0, Math.min(100, Math.round(pct)));
+            if (!force && n < _loginRoutingTargetPct && n < 100) return;
+            _loginRoutingTargetPct = n;
             if (bar) bar.style.width = n + '%';
             if (pctEl) pctEl.textContent = n + '%';
             if (txt && message) txt.textContent = message;
         }
 
         function showLoginRoutingLoading(message) {
+            if (nexusLoginRoutingIsDone()) return;
             const box = $id('login-routing-loading');
             const txt = $id('login-routing-loading-text');
             const ls = $id('login-screen');
@@ -5034,69 +5054,116 @@
             });
             if (box) box.classList.remove('hidden');
             if (txt) txt.textContent = message || 'Conectando…';
-            setLoginRoutingProgress(0);
+            _loginRoutingTargetPct = 0;
+            setLoginRoutingProgress(0, message, true);
         }
 
         function hideLoginRoutingLoading() {
             stopLoginRoutingProgress();
             const box = $id('login-routing-loading');
             if (box) box.classList.add('hidden');
-            setLoginRoutingProgress(0);
+            _loginRoutingTargetPct = 0;
+            setLoginRoutingProgress(0, '', true);
             showLoginRoutingStatus('');
         }
 
         function beginLoginRoutingUI(message) {
+            if (nexusLoginRoutingIsDone()) {
+                nexusFinishLoginRoutingInstant();
+                return;
+            }
             hideFirstTimeSetup();
-            showLoginRoutingLoading(message || 'Conectando con Firebase…');
-            nexusStartLoginRoutingProgress(message || 'Conectando con Firebase…');
+            const box = $id('login-routing-loading');
+            const alreadyVisible = box && !box.classList.contains('hidden');
+            if (!alreadyVisible) {
+                showLoginRoutingLoading(message || 'Conectando con Firebase…');
+                nexusStartLoginRoutingProgress(message || 'Conectando con Firebase…');
+            } else if (message) {
+                setLoginRoutingProgress(_loginRoutingTargetPct || 12, message);
+            }
         }
 
-        /** Entrada web tras Google: perfil local → dashboard al instante; si no, ruta Firebase completa. */
+        /** Entrada web tras Google: liberar UI al instante si hay bóveda local; si no, ruta Firebase completa. */
         async function nexusCompleteGoogleWebLogin(user) {
             if (!nexusAcceptsGoogleFirebaseUser(user)) return false;
-            const email = (user.email || '').trim().toLowerCase();
-            fbUser = user;
-            window.__nexusPendingGoogleUser = user;
-            localStorage.setItem('nexus_firebase_email', email);
-            localStorage.setItem('nexus_google_vault_' + email, '1');
-            currentUser = email;
+            if (nexusLoginRoutingIsDone()) return true;
+            if (_googleWebLoginCompleting) return _googleWebLoginCompleting;
 
-            let localProfile = loadLocalProfile(email);
-            const sysReady = localStorage.getItem('nexus_system_initialized') === '1' || countLocalProfiles() > 0;
-            const hasVaultData = sysReady || !!localStorage.getItem('nexus_db_' + email) || !!localStorage.getItem('nexus_profile_' + email);
-            if (!localProfile && hasVaultData) {
-                try {
-                    localProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email) || 'null');
-                } catch (e) { localProfile = null; }
-            }
-            if (localProfile && hasVaultData) {
-                _loginRoutePhase = 'routing';
-                setLoginRoutingProgress(55, 'Abriendo tu bóveda…');
-                let profile = { ...localProfile, email, isGoogle: true, lastSeen: Date.now() };
-                profile.linkedUid = profile.linkedUid || user.uid;
-                if (user.photoURL && !profile.avatar) profile.avatar = user.photoURL;
-                userProfile = profile;
-                loginSelectedEmail = email;
-                localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(profile, email)));
-                localStorage.setItem('nexus_system_initialized', '1');
-                if (profileHasPin(profile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
-                initCloud({ skipAnonymous: true }).catch(e => console.warn('[NEXUS] initCloud fast google', e));
-                await processLoginSuccess(email, { googleLinked: true, fastEntry: true, skipCloudPull: true });
+            _googleWebLoginCompleting = (async () => {
+                const email = (user.email || '').trim().toLowerCase();
+                fbUser = user;
+                window.__nexusPendingGoogleUser = user;
+                localStorage.setItem('nexus_firebase_email', email);
+                localStorage.setItem('nexus_google_vault_' + email, '1');
+                currentUser = email;
+
+                let localProfile = loadLocalProfile(email);
+                const sysReady = localStorage.getItem('nexus_system_initialized') === '1' || countLocalProfiles() > 0;
+                const hasVaultData = sysReady
+                    || !!localStorage.getItem('nexus_db_' + email)
+                    || !!localStorage.getItem('nexus_profile_' + email)
+                    || !!localStorage.getItem('nexus_google_vault_' + email);
+                if (!localProfile && hasVaultData) {
+                    try {
+                        localProfile = JSON.parse(localStorage.getItem('nexus_profile_' + email) || 'null');
+                    } catch (e) { localProfile = null; }
+                }
+
+                const canFastOpen = !!(localProfile && hasVaultData) || (hasVaultData && sysReady);
+                if (canFastOpen) {
+                    stopLoginRoutingProgress();
+                    let profile = localProfile ? { ...localProfile } : {
+                        email,
+                        name: (user.displayName || email.split('@')[0] || 'Usuario').trim(),
+                        isGoogle: true
+                    };
+                    profile = { ...profile, email, isGoogle: true, lastSeen: Date.now() };
+                    profile.linkedUid = profile.linkedUid || user.uid;
+                    if (user.photoURL && !profile.avatar) profile.avatar = user.photoURL;
+                    userProfile = profile;
+                    loginSelectedEmail = email;
+                    localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(profile, email)));
+                    localStorage.setItem('nexus_system_initialized', '1');
+                    if (profileHasPin(profile)) sessionStorage.setItem('nexus_pin_banner_ok', '1');
+
+                    nexusReleaseAppShell();
+                    _loginRoutePhase = 'app';
+                    sessionUnlocked = true;
+                    nexusHideSessionLock();
+                    nexusFinishLoginRoutingInstant('Abriendo tu bóveda…');
+                    resetGoogleLoginButton();
+                    nexusClearGoogleRedirectFlags();
+                    initCloud({ skipAnonymous: true }).catch(e => console.warn('[NEXUS] initCloud fast google', e));
+
+                    try {
+                        await processLoginSuccess(email, { googleLinked: true, fastEntry: true, skipCloudPull: true });
+                    } catch (e) {
+                        console.warn('[NEXUS] processLoginSuccess tras Google fast', e);
+                    }
+                    return nexusLoginRoutingIsDone();
+                }
+
+                setLoginRoutingProgress(40, 'Validando acceso…');
+                await routeAfterFirebaseAuth(user, user.displayName || 'Usuario Google', user.photoURL);
                 nexusClearGoogleRedirectFlags();
-                if (_loginRoutePhase !== 'app' && window.__nexusAppShellReady) _loginRoutePhase = 'app';
-                hideLoginRoutingLoading();
-                return _loginRoutePhase === 'app' || !!window.__nexusAppShellReady;
-            }
+                if (nexusLoginRoutingIsDone()) nexusFinishLoginRoutingInstant();
+                return _loginRoutePhase === 'app' || _loginRoutePhase === 'first-setup' || _loginRoutePhase === 'pin';
+            })();
 
-            setLoginRoutingProgress(35, 'Validando acceso…');
-            await routeAfterFirebaseAuth(user, user.displayName || 'Usuario Google', user.photoURL);
-            nexusClearGoogleRedirectFlags();
-            return _loginRoutePhase === 'app' || _loginRoutePhase === 'first-setup' || _loginRoutePhase === 'pin';
+            try {
+                return await _googleWebLoginCompleting;
+            } finally {
+                _googleWebLoginCompleting = null;
+            }
         }
 
         /** Espera activa tras redirect/popup hasta que Firebase confirme Google (no volver al menú). */
         async function nexusWaitForWebGoogleAuthCompletion(maxMs) {
             if (!isNexusWebBrowser() || !nexusWebGoogleRedirectPending()) return false;
+            if (nexusLoginRoutingIsDone()) {
+                nexusFinishLoginRoutingInstant();
+                return true;
+            }
             const deadline = Date.now() + (maxMs || 50000);
             beginLoginRoutingUI('Completando acceso con Google…');
             window.__nexusGoogleLoginInFlight = true;
@@ -5107,36 +5174,40 @@
                 let redirectTried = false;
 
                 while (Date.now() < deadline) {
-                    if (_loginRoutePhase === 'app' || window.__nexusAppShellReady || (sessionUnlocked && currentUser)) return true;
+                    if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser)) {
+                        nexusFinishLoginRoutingInstant();
+                        return true;
+                    }
 
                     if (!redirectTried) {
                         redirectTried = true;
                         const fromRedirect = await nexusResolveUserAfterGoogleRedirect(auth);
                         if (fromRedirect) {
                             const ok = await nexusCompleteGoogleWebLogin(fromRedirect);
-                            if (ok) return true;
+                            if (ok) {
+                                nexusFinishLoginRoutingInstant();
+                                return true;
+                            }
                         }
                     }
 
                     if (nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
                         const ok = await nexusCompleteGoogleWebLogin(auth.currentUser);
-                        if (ok) return true;
+                        if (ok) {
+                            nexusFinishLoginRoutingInstant();
+                            return true;
+                        }
                     }
 
-                    setLoginRoutingProgress(
-                        Math.min(90, 12 + Math.floor((1 - (deadline - Date.now()) / (maxMs || 50000)) * 78)),
-                        'Completando acceso con Google…'
-                    );
-                    await sleepMs(320);
+                    await sleepMs(280);
                 }
                 console.warn('[NEXUS] timeout esperando Google web');
                 return false;
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
                 window.__nexusPendingGoogleUser = null;
-                if (_loginRoutePhase === 'app' || window.__nexusAppShellReady || (sessionUnlocked && currentUser)) {
-                    stopLoginRoutingProgress();
-                    hideLoginRoutingLoading();
+                if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser)) {
+                    nexusFinishLoginRoutingInstant();
                 }
             }
         }
@@ -23019,14 +23090,14 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 } else if (options.googleLinked && userProfile && profileHasPin(userProfile)) {
                     sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 }
-                nexusReleaseAppShell();
-                shellReleased = true;
-                _loginRoutePhase = 'app';
-                sessionUnlocked = true;
-                nexusHideSessionLock();
-                stopLoginRoutingProgress();
-                setLoginRoutingProgress(100, 'Abriendo bóveda…');
-                hideLoginRoutingLoading();
+                if (!shellReleased) {
+                    nexusReleaseAppShell();
+                    shellReleased = true;
+                    _loginRoutePhase = 'app';
+                    sessionUnlocked = true;
+                    nexusHideSessionLock();
+                }
+                nexusFinishLoginRoutingInstant('Abriendo bóveda…');
                 resetGoogleLoginButton();
             } else {
                 showLoginRoutingLoading(quickOpen ? 'Abriendo bóveda…' : (wantsCloud ? 'Conectando con la nube…' : 'Abriendo tu bóveda…'));
@@ -23142,7 +23213,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 } else if (founderInstant && typeof nexusScheduleBackgroundPush === 'function') {
                     nexusScheduleBackgroundPush('founder-instant');
                 }
-                if (!founderInstant) setLoginRoutingProgress(100, 'Listo');
+                if (!founderInstant && !shellReleased) setLoginRoutingProgress(100, 'Listo', true);
                 try {
                     if (options.googleLinked || bind.cloud) {
                         userProfile.isGoogle = true;
@@ -23176,7 +23247,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     console.warn('[NEXUS] post-login parcial', e);
                 }
             } finally {
-                hideLoginRoutingLoading();
+                if (shellReleased || nexusLoginRoutingIsDone()) nexusFinishLoginRoutingInstant();
+                else hideLoginRoutingLoading();
                 if (_loginRoutePhase === 'app') resetGoogleLoginButton();
             }
         }
