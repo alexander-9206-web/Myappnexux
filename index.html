@@ -10559,6 +10559,9 @@
                 id: newId,
                 name: displayName,
                 currency, balance, type, 
+                openingBalance: id
+                    ? ((state.accounts.find(a => a.id === id)?.openingBalance ?? balance))
+                    : balance,
                 isShared, 
                 remoteId: rId,
                 owner: isShared ? ownerEmail : undefined,
@@ -11830,6 +11833,59 @@
             } else {
                 touch(state.accounts.find(a => a.id === tx.accId));
             }
+        }
+
+        /**
+         * Reconstruye balances desde ledger cuando todas las cuentas tienen `openingBalance`.
+         * Evita deriva matemática entre dispositivos tras pull completo de nube.
+         */
+        function nexusRebuildAccountBalancesFromLedger() {
+            if (!state || !Array.isArray(state.accounts) || !Array.isArray(state.tx)) return false;
+            const accounts = state.accounts;
+            if (!accounts.length) return false;
+            const hasOpenings = accounts.every(a => a && Number.isFinite(Number(a.openingBalance)));
+            if (!hasOpenings) return false;
+
+            const rebuilt = new Map();
+            accounts.forEach(a => rebuilt.set(a.id, Number(a.openingBalance) || 0));
+
+            (state.tx || []).forEach(tx => {
+                if (!tx) return;
+                const amount = Number(tx.amount) || 0;
+                if (!amount) return;
+                if (tx.type === 'afterpay') return;
+                if (tx.type === 'transfer') {
+                    const fromAcc = accounts.find(a => a.id === tx.accId);
+                    const toAcc = accounts.find(a => a.id === tx.toAccId);
+                    if (fromAcc && rebuilt.has(fromAcc.id)) {
+                        const next = Number(rebuilt.get(fromAcc.id) || 0) + (nexusIsLiabAccount(fromAcc) ? amount : -amount);
+                        rebuilt.set(fromAcc.id, next);
+                    }
+                    if (toAcc && rebuilt.has(toAcc.id)) {
+                        const next = Number(rebuilt.get(toAcc.id) || 0) + (nexusIsLiabAccount(toAcc) ? -amount : amount);
+                        rebuilt.set(toAcc.id, next);
+                    }
+                    return;
+                }
+                if (tx.accId) {
+                    const acc = accounts.find(a => a.id === tx.accId);
+                    if (!acc || !rebuilt.has(acc.id)) return;
+                    let next = Number(rebuilt.get(acc.id) || 0);
+                    if (tx.type === 'income') next += nexusIsLiabAccount(acc) ? -amount : amount;
+                    if (tx.type === 'expense') next += nexusIsLiabAccount(acc) ? amount : -amount;
+                    rebuilt.set(acc.id, next);
+                }
+            });
+
+            let changed = false;
+            state.accounts = accounts.map(a => {
+                if (!a || !rebuilt.has(a.id)) return a;
+                const nextBal = Number(rebuilt.get(a.id) || 0);
+                const prevBal = Number(a.balance || 0);
+                if (Math.abs(nextBal - prevBal) > 0.000001) changed = true;
+                return { ...a, balance: nextBal };
+            });
+            return changed;
         }
 
         function nexusCanRestoreArchivedTx(tx) {
@@ -19205,11 +19261,25 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             return !(hasMoney || hasWork || hasVaults);
         }
 
+        /** Hay movimientos pero sin cuentas propias: pull de core incompleto o bloqueado. */
+        function nexusIsCoreStructureMissing() {
+            if (!state) return false;
+            const hasTx = (state.tx || []).length > 0;
+            const hasOwnAccounts = (state.accounts || []).some(a => a && a.id && !a.isShared);
+            return hasTx && !hasOwnAccounts;
+        }
+
         /** Instalación nueva / caché vacía: priorizar descarga completa desde Firebase (una sola vez). */
         function nexusNeedsCloudBootstrap() {
             nexusEnsureSyncMeta();
-            if (state._nexusSync.bootstrapCompleted) return false;
-            if (state._nexusSync.awaitingCloudBootstrap && !nexusIsVaultLocallyEmpty()) return false;
+            if (state._nexusSync.bootstrapCompleted) {
+                if (nexusIsCoreStructureMissing()) {
+                    state._nexusSync.bootstrapCompleted = false;
+                    state._nexusSync.awaitingCloudBootstrap = true;
+                    return true;
+                }
+                return false;
+            }
             if (state._nexusSync.awaitingCloudBootstrap) return true;
             return nexusIsVaultLocallyEmpty();
         }
@@ -19224,6 +19294,85 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
         }
 
         async function nexusVaultCollectionRef(email) {
+            const { collection } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+            const preferred = normalizeMemberEmail(email || currentUser);
+            const resolved = await nexusResolveCloudVaultId(preferred);
+            const vaultId = normalizeMemberEmail(resolved || preferred || currentUser);
+            return collection(window.db, 'artifacts', window.appId, 'users', vaultId, 'nexus_data');
+        }
+
+        /**
+         * Resuelve la bóveda canónica en cloud para este dispositivo/usuario.
+         * Evita "split-brain" cuando el histórico quedó en otro email (case/cambio/cuenta vinculada).
+         */
+        async function nexusResolveCloudVaultId(preferredEmail) {
+            const preferred = normalizeMemberEmail(preferredEmail || currentUser || userProfile?.email || '');
+            if (!window.db || !window.appId) return preferred;
+            if (window.__nexusResolvedVaultId && normalizeMemberEmail(window.__nexusResolvedVaultId)) {
+                return normalizeMemberEmail(window.__nexusResolvedVaultId);
+            }
+            const candidates = [];
+            const pushCandidate = (v) => {
+                const e = normalizeMemberEmail(v);
+                if (!e) return;
+                if (!candidates.includes(e)) candidates.push(e);
+            };
+            pushCandidate(preferred);
+            pushCandidate(currentUser);
+            pushCandidate(userProfile && userProfile.email);
+            pushCandidate(localStorage.getItem('nexus_firebase_email') || '');
+            pushCandidate(localStorage.getItem('nexus_cloud_vault_email') || '');
+            pushCandidate(fbUser && fbUser.email);
+
+            try {
+                const { collection, query, where, limit, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                if (fbUser && fbUser.uid) {
+                    const q = query(
+                        collection(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users'),
+                        where('linkedUid', '==', fbUser.uid),
+                        limit(8)
+                    );
+                    const snap = await getDocs(q);
+                    snap.forEach(d => pushCandidate(d.id));
+                }
+            } catch (e) {
+                console.warn('[NEXUS] resolve vault by linkedUid', e);
+            }
+
+            try {
+                const { getDocsFromServer } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                let best = preferred || candidates[0] || '';
+                let bestScore = -1;
+                for (const c of candidates) {
+                    try {
+                        const snap = await getDocsFromServer(await nexusVaultCollectionRefDirect(c));
+                        const hasCore = !!(snap && snap.docs && snap.docs.some(d => d && d.id === 'core'));
+                        const score = (hasCore ? 1000 : 0) + (snap ? (snap.size || 0) : 0);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = c;
+                        }
+                    } catch (e) {
+                        // continuar: candidato no accesible o inexistente.
+                    }
+                }
+                if (best) {
+                    window.__nexusResolvedVaultId = best;
+                    localStorage.setItem('nexus_cloud_vault_email', best);
+                    if (best !== preferred) {
+                        console.warn('[NEXUS] Usando bóveda canónica', best, '(preferida local:', preferred, ')');
+                    }
+                    return best;
+                }
+            } catch (e) {
+                console.warn('[NEXUS] resolve best vault by server docs', e);
+            }
+
+            return preferred;
+        }
+
+        // Referencia directa (sin resolver) para evitar recursión durante la heurística.
+        async function nexusVaultCollectionRefDirect(email) {
             const { collection } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
             const vaultId = normalizeMemberEmail(email || currentUser);
             return collection(window.db, 'artifacts', window.appId, 'users', vaultId, 'nexus_data');
@@ -19497,6 +19646,12 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     state.tx = nexusRebuildTxFromYearMaps(localTxByYear, incomingTxByYear);
                 }
                 if (typeof nexusPurgeDeletedTxFromState === 'function') nexusPurgeDeletedTxFromState();
+                if (typeof nexusRebuildAccountBalancesFromLedger === 'function') {
+                    const rebuilt = nexusRebuildAccountBalancesFromLedger();
+                    if (rebuilt) {
+                        console.log('[NEXUS] Balances reconstruidos desde ledger tras pull cloud.');
+                    }
+                }
             }
 
             nexusEnsureSyncMeta();
@@ -19535,7 +19690,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 if (typeof ensureAuthIdentityLinked === 'function') {
                     await ensureAuthIdentityLinked();
                 }
-                const vaultEmail = normalizeMemberEmail(currentUser);
+                const vaultEmail = await nexusResolveCloudVaultId(currentUser);
                 let colRef = await nexusVaultCollectionRef(vaultEmail);
                 let snapshot = await getDocsFromServer(colRef);
                 const googleEmail = normalizeMemberEmail(fbUser.email || '');
@@ -22757,6 +22912,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 try {
                     if (typeof nexusStampSharedEntitiesForSync === 'function') nexusStampSharedEntitiesForSync();
                     const { doc, writeBatch, arrayUnion, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const vaultOwnerId = await nexusResolveCloudVaultId(currentUser);
                     const batch = writeBatch(window.db);
                     let writesCount = 0; // APEX OPTIMIZATION: Contador de escrituras efectivas
                     
@@ -22776,8 +22932,15 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
                     const currentSizeBytes = new Blob([JSON.stringify(state)]).size;
                     const vaultNodes = ['core', ...Object.keys(txByYear).map(y => 'tx_' + y)];
-                    const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', currentUser);
-                    batch.set(userRef, { vaultSize: currentSizeBytes, lastSyncSize: Date.now(), vaultNodes: vaultNodes, email: currentUser, name: (userProfile && userProfile.name) ? userProfile.name : currentUser }, { merge: true });
+                    const userRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'nexus_users', vaultOwnerId);
+                    batch.set(userRef, {
+                        vaultSize: currentSizeBytes,
+                        lastSyncSize: Date.now(),
+                        vaultNodes: vaultNodes,
+                        email: vaultOwnerId,
+                        name: (userProfile && userProfile.name) ? userProfile.name : vaultOwnerId,
+                        linkedUid: (fbUser && fbUser.uid) ? fbUser.uid : (userProfile && userProfile.linkedUid ? userProfile.linkedUid : null)
+                    }, { merge: true });
                     writesCount++;
                     
                     nexusEnsureSyncMeta();
@@ -22785,7 +22948,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     const pushAt = Date.now();
                     cleanCore._nexusSync = { revision: pushRev, updatedAt: pushAt, source: 'client' };
                     cleanCore.updatedAt = pushAt;
-                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'core');
+                    const coreRef = doc(window.db, 'artifacts', window.appId, 'users', vaultOwnerId, 'nexus_data', 'core');
                     let remoteCore = {};
                     try {
                         const coreSnap = await getDoc(coreRef);
@@ -22804,7 +22967,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     }
 
                     for (const year in txByYear) {
-                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', currentUser, 'nexus_data', 'tx_' + year);
+                        const txRef = doc(window.db, 'artifacts', window.appId, 'users', vaultOwnerId, 'nexus_data', 'tx_' + year);
                         let remoteTxData = {};
                         try {
                             const txSnap = await getDoc(txRef);
