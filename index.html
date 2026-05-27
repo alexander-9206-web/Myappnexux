@@ -4800,12 +4800,20 @@
             const terms = $id('login-terms-section');
             if (terms) terms.classList.add('hidden');
             window.__nexusTermsContinueFn = null;
-            if (!fbUser || !nexusAcceptsGoogleFirebaseUser(fbUser)) {
+            // Robustez: iOS nativo y navegadores pueden tener el usuario en auth.currentUser aunque fbUser no esté actualizado aún.
+            let u = (fbUser && nexusAcceptsGoogleFirebaseUser(fbUser)) ? fbUser : null;
+            if (!u) {
+                try {
+                    const { auth } = await nexusAuthGetAuth();
+                    if (nexusAcceptsGoogleFirebaseUser(auth?.currentUser)) u = auth.currentUser;
+                } catch (e) { /* noop */ }
+            }
+            if (!u) {
                 alert('Sesión Google no disponible. Pulsa «Continuar con Google» de nuevo.');
                 nexusAuthShowLoginPanel();
                 return;
             }
-            await nexusAuthEnterApp(fbUser);
+            await nexusAuthEnterApp(u);
         }
         window.nexusAcceptTermsAndContinue = nexusAcceptTermsAndContinue;
 
@@ -4996,9 +5004,8 @@
                 if (typeof nexusHideSessionLock === 'function') nexusHideSessionLock();
             }
             if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
-            if (typeof nexusScheduleFirstInstallCloudSync === 'function') {
-                nexusScheduleFirstInstallCloudSync('app-shell');
-            }
+            // Nota: el bootstrap de 1ª instalación se dispara en `processLoginSuccess` (post-login),
+            // no al entrar a Home ni al liberar el shell (evita que la barra quede ligada al botón Home).
         }
 
         /** Solo 1ª instalación del contenedor: aún no se completó la restauración inicial desde Firebase. */
@@ -8558,9 +8565,6 @@
 
         function switchTab(id) {
             id = id || 'home';
-            if (id === 'home' && typeof nexusScheduleFirstInstallCloudSync === 'function') {
-                nexusScheduleFirstInstallCloudSync('dashboard-home');
-            }
             const prevTab = state.activeTab;
             try {
                 sessionStorage.setItem('nexus_last_active_tab', id);
