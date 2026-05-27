@@ -3856,6 +3856,12 @@
                 else if(action === 'mock_google_login') executeMockGoogleLogin();
                 else if(action === 'reconcile_zero') executeReconcileZero(payload);
                 else if(action === 'update_app') {
+                    // iOS (contenedor): actualizar reescribiendo HTML completo desde AppWeb.
+                    if (typeof isNexusNativeContainer === 'function' && isNexusNativeContainer() && typeof nexusNativeHardUpdateFromAppWeb === 'function') {
+                        nexusNativeHardUpdateFromAppWeb(false);
+                        return;
+                    }
+                    // Web/PWA: mantener el comportamiento actual (limpieza + recarga local).
                     if (typeof forceNativeCacheWipe === 'function') forceNativeCacheWipe();
                     if (!state.settings) state.settings = {};
                     state.settings.themePreset = 'default';
@@ -7379,14 +7385,59 @@
             return { owner, repo, branch, githubURL };
         }
 
+        // ============================================================================
+        // iOS OTA: Hard-update desde la AppWeb (reescribe el HTML del contenedor).
+        // ============================================================================
+        const NEXUS_APPWEB_URL = 'https://myappnexux.vercel.app/';
+
+        async function nexusNativeHardUpdateFromAppWeb(silent) {
+            const isSilent = !!silent;
+            try {
+                if (typeof isNexusNativeContainer === 'function' && !isNexusNativeContainer()) {
+                    // En navegador normal, solo navegar al origen AppWeb.
+                    window.location.href = NEXUS_APPWEB_URL + '?v=' + Date.now();
+                    return;
+                }
+                if (!isSilent) {
+                    try { nexusShowCloudSyncBanner('Actualizando la app…', 10); } catch (e) {}
+                }
+                const url = NEXUS_APPWEB_URL + (NEXUS_APPWEB_URL.includes('?') ? '&' : '?') + 'v=' + Date.now();
+                const res = await fetch(url, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'omit',
+                    redirect: 'follow'
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const html = await res.text();
+                const looksLikeHtml = /<html[\s>]/i.test(html) && /<\/html>/i.test(html);
+                if (!looksLikeHtml) throw new Error('Respuesta inválida (no parece HTML)');
+
+                // Marca update (para UI de mantenimiento).
+                try { localStorage.setItem(NEXUS_WEB_UPDATE_KEY, String(Date.now())); } catch (e) {}
+
+                // Reescribe todo el documento del contenedor.
+                document.open();
+                document.write(html);
+                document.close();
+            } catch (e) {
+                console.warn('[NEXUS] nexusNativeHardUpdateFromAppWeb', e);
+                if (!isSilent) alert('No se pudo actualizar desde la AppWeb. Reintenta con conexión estable.\n\n' + (e?.message || e));
+            } finally {
+                if (!silent) {
+                    try { nexusHideCloudSyncBanner(200); } catch (e) {}
+                }
+            }
+        }
+        window.nexusNativeHardUpdateFromAppWeb = nexusNativeHardUpdateFromAppWeb;
+
         function forceNativeCacheWipe() {
-            if (!(window.webkit && window.webkit.messageHandlers.appInterface)) return;
-            const cfg = nexusGetGitHubUpdateConfig();
-            window.webkit.messageHandlers.appInterface.postMessage({
-                action: 'syncGitHubRepo',
-                silent: false,
-                ...cfg
-            });
+            // Compat: antes actualizaba desde GitHub vía puente nativo.
+            // Nuevo comportamiento: actualizar siempre desde AppWeb y reescribir HTML del contenedor.
+            if (typeof nexusNativeHardUpdateFromAppWeb === 'function') {
+                nexusNativeHardUpdateFromAppWeb(false);
+                return;
+            }
         }
 
         /** iOS: comprueba GitHub en segundo plano y baja la última versión si hay cambios. */
