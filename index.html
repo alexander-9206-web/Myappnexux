@@ -912,6 +912,7 @@
                 </div>
                 <h1 class="text-2xl font-black uppercase tracking-tighter">Nexus <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">Identity</span></h1>
                 <p class="text-[10px] uppercase tracking-widest opacity-50 font-bold">Bóveda Local Encriptada</p>
+                <p id="nexus-app-version-login" class="text-[9px] font-black uppercase tracking-widest text-indigo-400/90">V 1.0.1 beta</p>
             </div>
             
             <div id="login-routing-loading" class="hidden text-center py-6 space-y-3 relative z-10 w-full">
@@ -1865,7 +1866,9 @@
                         <button onclick="forceAppUpdate()" type="button" class="w-full bg-orange-500 text-white p-3.5 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-palette mr-1"></i> Reset UI</button>
                         <button onclick="forceWebUpdate()" type="button" class="w-full bg-blue-500 text-white p-3.5 rounded-xl font-black uppercase text-[9px] shadow-sm active:scale-95 transition-transform"><i class="fa-solid fa-cloud-arrow-down mr-1"></i> Actualizaciones</button>
                     </div>
+                    <p id="nexus-app-version-settings" class="text-[10px] font-black uppercase tracking-widest text-center text-slate-500">V 1.0.1 beta</p>
                     <p id="web-update-status" class="nexus-settings-maint-status"></p>
+                    <p id="nexus-app-version-sync" class="text-[8px] text-center text-slate-400 font-bold hidden"></p>
                     <div class="nexus-settings-maint-reset-box theme-card border border-amber-200 bg-amber-50/50 shadow-sm">
                         <h3 class="text-[11px] font-black uppercase text-amber-700 tracking-widest mb-2"><i class="fa-solid fa-eraser mr-2"></i> Reset total</h3>
                         <p class="text-[9px] text-amber-900/80 font-bold mb-3 leading-relaxed">Borra todos los registros (movimientos, tareas, metas, proyectos, presupuestos). Conserva tus <b>cuentas</b> y <b>deudas</b> en estructura vacía (saldos y cuotas en cero) para volver a cargar información. Mantiene PIN, sesión y perfil.</p>
@@ -3982,6 +3985,48 @@
 
 
         // APEX FIX: Diccionarios Base en blanco para permitir únicamente categorías manuales
+        /**
+         * Versión de la app (incrementar patch en cada modificación).
+         * Formato visible: V 1.0.1 beta
+         */
+        const NEXUS_APP_VERSION = Object.freeze({
+            major: 1,
+            minor: 0,
+            patch: 1,
+            channel: 'beta',
+            codename: 'NEXUS.V1',
+            build: '2026.05.27.1',
+            notes: 'Versión en UI, bootstrap nube 1ª instalación, OTA GitHub'
+        });
+
+        function nexusFormatVersionLabel(v) {
+            const ver = v || NEXUS_APP_VERSION;
+            const p = (ver.patch && ver.patch > 0) ? '.' + ver.patch : '';
+            return 'V ' + ver.major + '.' + ver.minor + p + ' ' + (ver.channel || 'beta');
+        }
+
+        function nexusGetAppVersionLabel() {
+            return nexusFormatVersionLabel(NEXUS_APP_VERSION);
+        }
+
+        function nexusApplyVersionUI() {
+            const label = nexusGetAppVersionLabel();
+            const build = NEXUS_APP_VERSION.build || '';
+            const loginEl = $id('nexus-app-version-login');
+            const settingsEl = $id('nexus-app-version-settings');
+            const syncMetaEl = $id('nexus-app-version-sync');
+            if (loginEl) loginEl.textContent = label + (build ? ' · build ' + build : '');
+            if (settingsEl) settingsEl.textContent = label + (build ? ' · build ' + build : '');
+            if (syncMetaEl) syncMetaEl.textContent = label;
+            try { document.documentElement.setAttribute('data-nexus-app-version', label); } catch (e) {}
+            window.NEXUS_APP_VERSION = NEXUS_APP_VERSION;
+            window.nexusGetAppVersionLabel = nexusGetAppVersionLabel;
+            if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
+        }
+        window.NEXUS_APP_VERSION = NEXUS_APP_VERSION;
+        window.nexusGetAppVersionLabel = nexusGetAppVersionLabel;
+        window.nexusApplyVersionUI = nexusApplyVersionUI;
+
         const DEFAULT_CATEGORIES = { global: [] };
         const DEFAULT_THEME = { bg: '#f8fafc', card: '#ffffff', text: '#0f172a', inc: '#10b981', exp: '#ef4444' };
         const CURRENCIES = ['COP', 'USD', 'EUR', 'AUD', 'JPY', 'GBP', 'MXN', 'BRL', 'CAD', 'CHF'];
@@ -7629,12 +7674,14 @@
         function refreshWebUpdateStatus() {
             const el = $id('web-update-status');
             if (!el) return;
+            const ver = typeof nexusGetAppVersionLabel === 'function' ? nexusGetAppVersionLabel() : 'V 1.0 beta';
             const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
             const next = last ? last + NEXUS_WEB_UPDATE_INTERVAL_MS : Date.now();
             const due = !last || Date.now() >= next;
-            el.textContent = last
-                ? (due ? `Actualización automática pendiente · última: ${formatWebUpdateDate(last)}` : `Próxima auto-actualización: ${formatWebUpdateDate(next)}`)
+            const syncLine = last
+                ? (due ? `Actualización pendiente · última: ${formatWebUpdateDate(last)}` : `Próxima auto-actualización: ${formatWebUpdateDate(next)}`)
                 : 'Auto-actualización cada 3 días al abrir la app';
+            el.textContent = ver + ' · ' + syncLine;
         }
 
         function markWebUpdateDone() {
@@ -23312,6 +23359,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 }
             } catch (e) {}
             if (typeof nexusBootstrapNativeGitHubUpdate === 'function') nexusBootstrapNativeGitHubUpdate();
+            if (typeof nexusApplyVersionUI === 'function') nexusApplyVersionUI();
             showColdStartLogin();
             setTimeout(() => { if (typeof nexusApplyFunctionTitles === 'function') nexusApplyFunctionTitles(); }, 400);
         };
