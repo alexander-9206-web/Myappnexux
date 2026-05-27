@@ -910,7 +910,7 @@
                     </div>
                 </div>
 
-                <button type="button" id="nexus-google-login-btn" data-nexus-auth-channel="web-popup" class="w-full bg-white text-black hover:bg-slate-100 p-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+                <button type="button" id="nexus-google-login-btn" data-nexus-auth-channel="web-popup" onclick="return (window.nexusAuthSignInGoogle ? window.nexusAuthSignInGoogle() : false);" class="w-full bg-white text-black hover:bg-slate-100 p-4 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
                     <svg class="w-5 h-5 shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4"/><path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853"/><path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03296C-0.371021 20.0112 -0.371021 28.0009 3.03296 34.7825L11.0051 28.6006Z" fill="#FBBC04"/><path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6869 13.0973L40.5387 6.24553C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4056 0.00161733 7.10718 5.11644 3.03296 13.2296L11.0051 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335"/></svg>
                     Continuar con Google
                 </button>
@@ -5036,52 +5036,67 @@
 
         function nexusScheduleFirstInstallCloudSync(source) {
             if (!nexusIsFirstAppInstallPending()) return;
-            if (!currentUser || !window.db) return;
+            if (!currentUser) return;
             if (window.__nexusFirstInstallCloudRunning) return;
             const stamp = String(source || '') + ':' + Date.now();
             if (window.__nexusFirstInstallCloudQueued === stamp) return;
             window.__nexusFirstInstallCloudQueued = stamp;
-            const run = () => {
+            const run = async () => {
+                if (!window.db) {
+                    try { await initCloud({ skipAnonymous: true }); } catch (e) { console.warn('[NEXUS] initCloud first-install', e); }
+                }
                 if (typeof nexusRunFirstInstallCloudBootstrap !== 'function') return;
-                nexusRunFirstInstallCloudBootstrap().catch(e => console.warn('[NEXUS] first-install cloud', e));
+                await nexusRunFirstInstallCloudBootstrap().catch(e => console.warn('[NEXUS] first-install cloud', e));
             };
-            requestAnimationFrame(() => setTimeout(run, 60));
+            requestAnimationFrame(() => setTimeout(run, 0));
         }
         window.nexusScheduleFirstInstallCloudSync = nexusScheduleFirstInstallCloudSync;
 
-        /** 1ª instalación: dashboard al instante + descarga nube agresiva (sin bloquear login). */
+        /** 1ª instalación: descarga inmediata desde Firebase (con progreso real y cierre garantizado). */
         async function nexusRunFirstInstallCloudBootstrap() {
             if (!nexusIsFirstAppInstallPending()) return;
             if (window.__nexusFirstInstallCloudRunning) return;
-            if (!currentUser || !window.db) return;
+            if (!currentUser) return;
             window.__nexusFirstInstallCloudRunning = true;
+            _cloudSyncBannerPct = 0;
+            const progress = (pct, msg) => {
+                if (typeof nexusCloudSyncBannerProgress === 'function') nexusCloudSyncBannerProgress(pct, msg);
+                else if (typeof nexusShowCloudSyncBanner === 'function') nexusShowCloudSyncBanner(msg, pct);
+            };
             try {
                 if (typeof nexusPrepareCloudBootstrapOnLogin === 'function') nexusPrepareCloudBootstrapOnLogin();
-                if (typeof nexusShowCloudSyncBanner === 'function') {
-                    nexusShowCloudSyncBanner('Descargando tu información desde la nube…', 12);
-                }
+                progress(8, 'Preparando sincronización…');
                 await initCloud({ skipAnonymous: true });
+                if (!window.db) throw new Error('Firebase no disponible');
+                progress(22, 'Conectando con tu cuenta Google…');
                 const session = await nexusEnsureCloudSessionForPull(currentUser);
                 if (!session.ok) {
                     window.__nexusNeedsGoogleForCloud = !!session.needsGoogle;
+                    progress(100, session.needsGoogle ? 'Vincula Google para restaurar datos' : 'Sin conexión a la nube');
                     return;
                 }
+                progress(38, 'Descargando tu información desde la nube…');
                 if (typeof fetchCloudState === 'function') {
                     await Promise.race([
                         fetchCloudState(),
-                        new Promise(r => setTimeout(r, 120000))
+                        new Promise(r => setTimeout(r, 22000))
                     ]);
                 }
+                progress(88, 'Aplicando datos…');
                 if (state && !nexusIsVaultLocallyEmpty()) {
                     nexusMarkFirstInstallCloudComplete();
                     if (typeof updateDashboard === 'function') updateDashboard();
                     if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                } else {
+                    try { localStorage.setItem('nexus_first_install_cloud_done', '1'); } catch (e) {}
+                    if (state && typeof nexusMarkCloudBootstrapComplete === 'function') nexusMarkCloudBootstrapComplete();
                 }
             } catch (e) {
                 console.warn('[NEXUS] nexusRunFirstInstallCloudBootstrap', e);
+                progress(100, 'Sincronización incompleta — reintenta más tarde');
             } finally {
                 window.__nexusFirstInstallCloudRunning = false;
-                if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(400);
+                if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(350);
             }
         }
         window.nexusRunFirstInstallCloudBootstrap = nexusRunFirstInstallCloudBootstrap;
@@ -5209,8 +5224,17 @@
                 || _loginRoutePhase === 'routing' || window.__nexusGoogleLoginInFlight || nexusLoginRoutingIsDone());
         }
 
+        function nexusUserInAppShell() {
+            return !!(
+                window.__nexusAppShellReady
+                && currentUser
+                && !document.documentElement.classList.contains('nexus-auth-pending')
+            );
+        }
+
         function nexusAuthShowLoginPanel() {
             _loginRoutePhase = null;
+            window.__nexusAppShellReady = false;
             nexusRequireAuthScreen();
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
@@ -5232,13 +5256,30 @@
                     nexusAuthHandleState(user).catch(e => console.warn('[NEXUS] onAuthStateChanged', e));
                 });
                 nexusSyncGoogleLoginButton();
+                const oauthReturn = nexusIsOAuthReturnUrl() || nexusWebGoogleRedirectPending();
                 try {
                     const result = await authMod.getRedirectResult(auth);
-                    if (result?.user) await nexusAuthHandleState(result.user);
+                    if (result?.user) {
+                        nexusClearGoogleRedirectFlags();
+                        await nexusAuthHandleState(result.user);
+                    }
                 } catch (e) {
                     if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e);
                 }
-                if (!nexusLoginRoutingIsDone() && !nexusIsManualLogoutBlocked() && !nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
+                if (oauthReturn && !nexusLoginRoutingIsDone()) {
+                    if (nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
+                        await nexusAuthHandleState(auth.currentUser);
+                    } else {
+                        try {
+                            const waited = await nexusWaitForFirebaseGoogleUser(auth, '', null, 12000);
+                            if (waited) await nexusAuthHandleState(waited);
+                        } catch (waitErr) {
+                            console.warn('[NEXUS] OAuth return wait', waitErr);
+                        }
+                    }
+                }
+                if (!nexusLoginRoutingIsDone() && !nexusIsManualLogoutBlocked() && !nexusAcceptsGoogleFirebaseUser(auth.currentUser)
+                    && !oauthReturn && !window.__nexusGoogleLoginInFlight) {
                     nexusAuthShowLoginPanel();
                 }
             } catch (e) {
@@ -5261,7 +5302,8 @@
             }
             window.__nexusManualLogoutSignOutDone = false;
             if (!nexusAcceptsGoogleFirebaseUser(user)) {
-                if (nexusLoginRoutingIsDone() && currentUser) return;
+                if (nexusUserInAppShell() && currentUser) return;
+                if (window.__nexusGoogleLoginInFlight || nexusWebGoogleRedirectPending() || nexusIsOAuthReturnUrl()) return;
                 if (!nexusLoginRoutingIsDone()) nexusAuthShowLoginPanel();
                 return;
             }
@@ -5307,12 +5349,17 @@
                 if (code === 'auth/popup-closed-by-user') return;
                 if (['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(code)) {
                     try {
+                        window.__nexusUserTriggeredGoogleLogin = true;
+                        window.__nexusGoogleLoginInFlight = true;
+                        nexusMarkGoogleRedirectStarted();
                         const { authMod, auth } = await nexusAuthGetAuth();
                         const provider = new authMod.GoogleAuthProvider();
+                        provider.setCustomParameters({ prompt: 'select_account' });
                         await authMod.signInWithRedirect(auth, provider);
                         return;
                     } catch (e2) {
                         console.warn('[NEXUS] redirect fallback', e2);
+                        window.__nexusGoogleLoginInFlight = false;
                     }
                 }
                 const txt = typeof nexusFormatAuthError === 'function' ? nexusFormatAuthError(e) : (e.message || code);
@@ -5321,23 +5368,40 @@
         }
 
         async function nexusAuthEnterApp(user) {
-            if (_nexusAuthEnteringApp || nexusLoginRoutingIsDone()) return;
+            if (_nexusAuthEnteringApp) return;
+            const email = normalizeMemberEmail(user.email);
+            if (nexusUserInAppShell() && nexusFirebaseMatchesVault(fbUser || user, email)) return;
             _nexusAuthEnteringApp = true;
             _loginRoutePhase = 'app';
-            const email = normalizeMemberEmail(user.email);
             try {
                 showLoginRoutingLoading('Abriendo tu bóveda…', false);
                 fbUser = user;
                 currentUser = email;
-                let profile = loadLocalProfile(email) || {
-                    email,
-                    name: user.displayName || email.split('@')[0],
-                    isGoogle: true,
-                    lastSeen: Date.now(),
-                    linkedUid: user.uid,
-                    avatar: user.photoURL || null
-                };
+                window.__nexusGoogleLoginInFlight = false;
+                nexusClearGoogleRedirectFlags();
+                let profile = null;
+                try {
+                    profile = await getProfileForVault(email);
+                } catch (profErr) {
+                    console.warn('[NEXUS] getProfileForVault', profErr);
+                }
+                if (!profile) {
+                    profile = loadLocalProfile(email) || {
+                        email,
+                        name: user.displayName || email.split('@')[0],
+                        isGoogle: true,
+                        lastSeen: Date.now(),
+                        linkedUid: user.uid,
+                        avatar: user.photoURL || null
+                    };
+                }
                 profile = { ...profile, email, isGoogle: true, linkedUid: user.uid, lastSeen: Date.now() };
+                if (profileHasPin(profile)) {
+                    sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                    delete profile.needsPinSetup;
+                } else {
+                    sessionStorage.removeItem('nexus_pin_banner_ok');
+                }
                 userProfile = profile;
                 loginSelectedEmail = email;
                 localStorage.setItem('nexus_profile_' + email, JSON.stringify(sanitizeProfileForStorage(profile, email)));
@@ -5419,6 +5483,7 @@
 
         window.triggerNativeGoogleLogin = triggerNativeGoogleLogin;
         window.nexusGoogleAuthViaWebPopup = nexusGoogleAuthViaWebPopup;
+        window.nexusAuthSignInGoogle = nexusAuthSignInGoogle;
         window.nexusAuthInit = nexusAuthInit;
         window.showColdStartLogin = showColdStartLogin;
         window.nexusSyncGoogleLoginButton = nexusSyncGoogleLoginButton;
@@ -7363,6 +7428,11 @@
         }
 
         function checkScheduledWebUpdate() {
+            if (document.documentElement.classList.contains('nexus-auth-pending')) return false;
+            if (!sessionUnlocked || !currentUser) return false;
+            if (window.__nexusGoogleLoginInFlight || nexusWebGoogleRedirectPending()) return false;
+            if (typeof nexusIsFirstAppInstallPending === 'function' && nexusIsFirstAppInstallPending()) return false;
+            if (window.__nexusFirstInstallCloudRunning) return false;
             const last = parseInt(localStorage.getItem(NEXUS_WEB_UPDATE_KEY) || '0', 10) || 0;
             if (!last || (Date.now() - last) >= NEXUS_WEB_UPDATE_INTERVAL_MS) {
                 sessionStorage.setItem('nexus_web_auto_update', '1');
@@ -8084,7 +8154,7 @@
                 showFounderSetupBannerIfNeeded();
                 return;
             }
-            if (sessionStorage.getItem('nexus_pin_banner_ok') === '1' && !userProfile.needsPinSetup) return;
+            if (sessionStorage.getItem('nexus_pin_banner_ok') === '1') return;
             const homeTab = $id('tab-home');
             if (!homeTab || $id('nexus-pin-banner')) return;
             const box = document.createElement('div');
@@ -19292,13 +19362,15 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
         let _cloudSyncBannerHideTimer = null;
         let _cloudSyncBannerPct = 0;
 
-        function nexusShowCloudSyncBanner(message, pct) {
+        function nexusShowCloudSyncBanner(message, pct, opts) {
+            const o = (opts && typeof opts === 'object') ? opts : {};
             const box = $id('nexus-cloud-sync-banner');
             if (!box) return;
             if (_cloudSyncBannerHideTimer) { clearTimeout(_cloudSyncBannerHideTimer); _cloudSyncBannerHideTimer = null; }
             box.classList.remove('hidden');
-            const n = Math.max(5, Math.min(98, Math.round(pct || 12)));
-            _cloudSyncBannerPct = Math.max(_cloudSyncBannerPct, n);
+            if (o.reset) _cloudSyncBannerPct = 0;
+            const n = Math.max(5, Math.min(98, Math.round(pct != null ? pct : 12)));
+            _cloudSyncBannerPct = o.forcePct ? n : Math.max(_cloudSyncBannerPct, n);
             const bar = $id('nexus-cloud-sync-bar');
             const pctEl = $id('nexus-cloud-sync-pct');
             const msg = $id('nexus-cloud-sync-msg');
@@ -23492,11 +23564,22 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
             try {
                 if (!userProfile || !userProfile.email) {
-                    userProfile = loadLocalProfile(vaultEmail);
+                    try {
+                        userProfile = await getProfileForVault(vaultEmail);
+                    } catch (profErr) {
+                        console.warn('[NEXUS] getProfileForVault login', profErr);
+                    }
+                    if (!userProfile) userProfile = loadLocalProfile(vaultEmail);
                     if (!userProfile) {
-                        userProfile = await getProfileForVault(vaultEmail) || { email: vaultEmail, name: vaultEmail.split('@')[0] };
+                        userProfile = { email: vaultEmail, name: vaultEmail.split('@')[0] };
                     }
                     userProfile.email = vaultEmail;
+                }
+                if (profileHasPin(userProfile)) {
+                    sessionStorage.setItem('nexus_pin_banner_ok', '1');
+                    delete userProfile.needsPinSetup;
+                } else if (!options.googleLinked) {
+                    sessionStorage.removeItem('nexus_pin_banner_ok');
                 }
 
                 let bind = { cloud: alreadyCloud, needsGoogle: !alreadyCloud };
@@ -23566,8 +23649,13 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     resetGoogleLoginButton();
                 }
 
-                if (firstInstall && shellReleased && typeof nexusScheduleFirstInstallCloudSync === 'function') {
-                    nexusScheduleFirstInstallCloudSync('post-login');
+                if (firstInstall && shellReleased) {
+                    setLoginRoutingProgress(55, 'Descargando datos de la nube…');
+                    if (typeof nexusRunFirstInstallCloudBootstrap === 'function') {
+                        await nexusRunFirstInstallCloudBootstrap();
+                    } else if (typeof nexusScheduleFirstInstallCloudSync === 'function') {
+                        nexusScheduleFirstInstallCloudSync('post-login');
+                    }
                 } else if (mustPullFromCloud && window.db) {
                     const pullCloud = async () => {
                         if (showRestoreBanner && typeof nexusShowCloudSyncBanner === 'function') {
