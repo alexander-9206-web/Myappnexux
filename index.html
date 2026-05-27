@@ -3992,11 +3992,11 @@
         const NEXUS_APP_VERSION = Object.freeze({
             major: 1,
             minor: 0,
-            patch: 1,
+            patch: 2,
             channel: 'beta',
             codename: 'NEXUS.V1',
-            build: '2026.05.27.1',
-            notes: 'Versión en UI, bootstrap nube 1ª instalación, OTA GitHub'
+            build: '2026.05.27.2',
+            notes: 'Fix login navegador: desbloqueo dashboard tras Google'
         });
 
         function nexusFormatVersionLabel(v) {
@@ -4992,13 +4992,28 @@
             hideLoginRoutingLoading();
         }
 
-        function nexusReleaseAppShell() {
+        /** Bóveda local por correo (no usar nexus_system_initialized global: rompe multi-cuenta en el mismo navegador). */
+        function nexusEmailHasLocalVault(email) {
+            const e = normalizeMemberEmail(email);
+            if (!e) return false;
+            return !!loadLocalProfile(e)
+                || !!localStorage.getItem('nexus_db_' + e)
+                || !!localStorage.getItem('nexus_profile_' + e);
+        }
+
+        function nexusReleaseAppShell(opts) {
+            const o = (opts && typeof opts === 'object') ? opts : {};
             document.documentElement.classList.remove('nexus-auth-pending');
             const ls = $id('login-screen');
             if (ls) ls.classList.add('hidden');
             const lock = $id('session-lock-screen');
-            if (lock) lock.classList.add('hidden');
+            if (lock && o.keepSessionLockVisible !== true) lock.classList.add('hidden');
             window.__nexusAppShellReady = true;
+            _loginRoutePhase = 'app';
+            if (o.unlockSession !== false) {
+                sessionUnlocked = true;
+                if (typeof nexusHideSessionLock === 'function') nexusHideSessionLock();
+            }
             if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
             if (typeof nexusScheduleFirstInstallCloudSync === 'function') {
                 nexusScheduleFirstInstallCloudSync('app-shell');
@@ -5193,9 +5208,7 @@
             localStorage.setItem('nexus_firebase_email', email);
             localStorage.setItem('nexus_google_vault_' + email, '1');
 
-            const hasVault = !!loadLocalProfile(email)
-                || !!localStorage.getItem('nexus_db_' + email)
-                || localStorage.getItem('nexus_system_initialized') === '1';
+            const hasVault = nexusEmailHasLocalVault(email);
 
             if (hasVault && nexusHasAcceptedTerms(email)) {
                 let profile = loadLocalProfile(email) || {
@@ -5340,11 +5353,7 @@
             const email = normalizeMemberEmail(u.email);
             if (!email) return false;
 
-            const hasVault =
-                !!loadLocalProfile(email)
-                || !!localStorage.getItem('nexus_db_' + email)
-                || localStorage.getItem('nexus_system_initialized') === '1';
-            if (!hasVault) return false;
+            if (!nexusEmailHasLocalVault(email)) return false;
 
             // Entrar directo a la app con el usuario actual.
             return nexusEnterAppAfterGoogleAuth(u, u.displayName || 'Usuario Google', u.photoURL || null);
@@ -5429,7 +5438,7 @@
                     }
                 } finally {
                     clearTimeout(bootWatchdog);
-                    if (!nexusLoginRoutingIsDone() && !oauthReturn) {
+                    if (!nexusLoginRoutingIsDone() && !oauthReturn && !nexusLoginSessionActive()) {
                         hideLoginRoutingLoading();
                         showInitialLoginChoice();
                     }
@@ -6486,17 +6495,19 @@
             } finally {
                 if (redirectStarted) return;
                 window.__nexusGoogleLoginInFlight = false;
-                window.__nexusUserTriggeredGoogleLogin = false;
                 if (_loginRoutePhase === 'error') {
+                    window.__nexusUserTriggeredGoogleLogin = false;
                     window.__nexusPendingGoogleUser = null;
                     window.__nexusGoogleNativePending = null;
                     resetGoogleLoginButton();
                     hideLoginRoutingLoading();
                     showInitialLoginChoice();
-                } else if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
+                } else if (nexusLoginRoutingIsDone() || _loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
+                    window.__nexusUserTriggeredGoogleLogin = false;
                     window.__nexusPendingGoogleUser = null;
                     resetGoogleLoginButton();
                 } else if (!redirectStarted) {
+                    window.__nexusUserTriggeredGoogleLogin = false;
                     window.__nexusPendingGoogleUser = null;
                     resetGoogleLoginButton();
                 }
@@ -23656,6 +23667,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
         function showInitialLoginChoice() {
             if (_loginRoutePhase === 'terms' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'routing' || _loginRoutePhase === 'first-setup') return;
+            if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser)) return;
             if (window.__nexusGoogleLoginInFlight && nexusWebGoogleRedirectPending()) return;
             hideLoginRoutingLoading();
             resetGoogleLoginButton();
@@ -23783,11 +23795,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     sessionStorage.setItem('nexus_pin_banner_ok', '1');
                 }
                 if (!shellReleased) {
-                    nexusReleaseAppShell();
+                    nexusReleaseAppShell({ unlockSession: true });
                     shellReleased = true;
-                    _loginRoutePhase = 'app';
-                    sessionUnlocked = true;
-                    nexusHideSessionLock();
                 }
                 nexusFinishLoginRoutingInstant('Abriendo bóveda…');
                 resetGoogleLoginButton();
@@ -23825,9 +23834,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 }
 
                 if (!shellReleased && (bind.cloud || quickOpen)) {
-                    nexusReleaseAppShell();
+                    nexusReleaseAppShell({ unlockSession: true });
                     shellReleased = true;
-                    _loginRoutePhase = 'app';
                     resetGoogleLoginButton();
                     setLoginRoutingProgress(68, bind.cloud ? 'Cargando datos…' : 'Cargando…');
                 }
@@ -23868,15 +23876,9 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 }
 
                 if (!shellReleased) {
-                    nexusReleaseAppShell();
+                    nexusReleaseAppShell({ unlockSession: true });
                     shellReleased = true;
-                    _loginRoutePhase = 'app';
                     resetGoogleLoginButton();
-                }
-
-                if (founderInstant) {
-                    sessionUnlocked = true;
-                    nexusHideSessionLock();
                 }
 
                 if (firstInstall && shellReleased && typeof nexusScheduleFirstInstallCloudSync === 'function') {
@@ -23959,6 +23961,9 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     console.warn('[NEXUS] post-login parcial', e);
                 }
             } finally {
+                if (currentUser && shellReleased) {
+                    nexusReleaseAppShell({ unlockSession: true });
+                }
                 if (shellReleased || nexusLoginRoutingIsDone()) nexusFinishLoginRoutingInstant();
                 else hideLoginRoutingLoading();
                 if (_loginRoutePhase === 'app') resetGoogleLoginButton();
