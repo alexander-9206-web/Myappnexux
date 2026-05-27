@@ -4955,7 +4955,82 @@
             if (lock) lock.classList.add('hidden');
             window.__nexusAppShellReady = true;
             if (typeof nexusApplyI18nBackground === 'function') nexusApplyI18nBackground();
+            if (typeof nexusScheduleFirstInstallCloudSync === 'function') {
+                nexusScheduleFirstInstallCloudSync('app-shell');
+            }
         }
+
+        /** Solo 1ª instalación del contenedor: aún no se completó la restauración inicial desde Firebase. */
+        function nexusIsFirstAppInstallPending(email) {
+            if (localStorage.getItem('nexus_first_install_cloud_done') === '1') return false;
+            const e = normalizeMemberEmail(email || currentUser);
+            if (e && nexusHasLocalVaultCache(e) && state && !nexusIsVaultLocallyEmpty()) {
+                localStorage.setItem('nexus_first_install_cloud_done', '1');
+                return false;
+            }
+            return true;
+        }
+
+        function nexusMarkFirstInstallCloudComplete() {
+            try { localStorage.setItem('nexus_first_install_cloud_done', '1'); } catch (e) {}
+            if (state && typeof nexusMarkCloudBootstrapComplete === 'function') {
+                nexusEnsureSyncMeta();
+                state._nexusSync.awaitingCloudBootstrap = false;
+                state._nexusSync.bootstrapCompleted = true;
+            }
+        }
+
+        function nexusScheduleFirstInstallCloudSync(source) {
+            if (!nexusIsFirstAppInstallPending()) return;
+            if (!currentUser || !window.db) return;
+            if (window.__nexusFirstInstallCloudRunning) return;
+            const stamp = String(source || '') + ':' + Date.now();
+            if (window.__nexusFirstInstallCloudQueued === stamp) return;
+            window.__nexusFirstInstallCloudQueued = stamp;
+            const run = () => {
+                if (typeof nexusRunFirstInstallCloudBootstrap !== 'function') return;
+                nexusRunFirstInstallCloudBootstrap().catch(e => console.warn('[NEXUS] first-install cloud', e));
+            };
+            requestAnimationFrame(() => setTimeout(run, 60));
+        }
+        window.nexusScheduleFirstInstallCloudSync = nexusScheduleFirstInstallCloudSync;
+
+        /** 1ª instalación: dashboard al instante + descarga nube agresiva (sin bloquear login). */
+        async function nexusRunFirstInstallCloudBootstrap() {
+            if (!nexusIsFirstAppInstallPending()) return;
+            if (window.__nexusFirstInstallCloudRunning) return;
+            if (!currentUser || !window.db) return;
+            window.__nexusFirstInstallCloudRunning = true;
+            try {
+                if (typeof nexusPrepareCloudBootstrapOnLogin === 'function') nexusPrepareCloudBootstrapOnLogin();
+                if (typeof nexusShowCloudSyncBanner === 'function') {
+                    nexusShowCloudSyncBanner('Descargando tu información desde la nube…', 12);
+                }
+                await initCloud({ skipAnonymous: true });
+                const session = await nexusEnsureCloudSessionForPull(currentUser);
+                if (!session.ok) {
+                    window.__nexusNeedsGoogleForCloud = !!session.needsGoogle;
+                    return;
+                }
+                if (typeof fetchCloudState === 'function') {
+                    await Promise.race([
+                        fetchCloudState(),
+                        new Promise(r => setTimeout(r, 120000))
+                    ]);
+                }
+                if (state && !nexusIsVaultLocallyEmpty()) {
+                    nexusMarkFirstInstallCloudComplete();
+                    if (typeof updateDashboard === 'function') updateDashboard();
+                    if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
+                }
+            } catch (e) {
+                console.warn('[NEXUS] nexusRunFirstInstallCloudBootstrap', e);
+            } finally {
+                window.__nexusFirstInstallCloudRunning = false;
+                if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(400);
+            }
+        }
+        window.nexusRunFirstInstallCloudBootstrap = nexusRunFirstInstallCloudBootstrap;
 
         function nexusIsOAuthReturnUrl() {
             const href = location.href || '';
@@ -5092,7 +5167,12 @@
                     return true;
                 }
                 hideLoginRoutingLoading();
-                await processLoginSuccess(email, { googleLinked: true, fastEntry: true, skipCloudPull: true });
+                const firstInstall = typeof nexusIsFirstAppInstallPending === 'function' && nexusIsFirstAppInstallPending(email);
+                await processLoginSuccess(email, {
+                    googleLinked: true,
+                    fastEntry: true,
+                    skipCloudPull: !firstInstall
+                });
                 return nexusLoginRoutingIsDone();
             }
 
@@ -5659,7 +5739,8 @@
                         .then(() => ensureFirestoreGoogleSession(email, fbAuthUser.uid, fbAuthUser))
                         .catch(e => { console.warn('[NEXUS] ensureFirestore (no bloquea UI)', e); return null; });
 
-                const routeMinMs = localStorage.getItem('nexus_system_initialized') === '1' ? 120 : 280;
+                const firstInstallRoute = typeof nexusIsFirstAppInstallPending === 'function' && nexusIsFirstAppInstallPending(email);
+                const routeMinMs = firstInstallRoute ? 0 : (localStorage.getItem('nexus_system_initialized') === '1' ? 120 : 280);
                 const routeKind = await runLoginRoutingWithProgress('Validando acceso con Google…', async () => {
                     const [initialized] = await Promise.all([
                         isSystemInitialized(),
@@ -5897,7 +5978,12 @@
             userProfile = profile;
             localStorage.setItem('nexus_profile_' + userEmail, JSON.stringify(sanitizeProfileForStorage(userProfile, userEmail)));
             if (!window.__nexusAppShellReady) showLoginRoutingLoading('Abriendo tu bóveda…', false);
-            await processLoginSuccess(userEmail, { googleLinked: true, fastEntry: true, skipCloudPull: true });
+            const firstInstall = typeof nexusIsFirstAppInstallPending === 'function' && nexusIsFirstAppInstallPending(userEmail);
+            await processLoginSuccess(userEmail, {
+                googleLinked: true,
+                fastEntry: true,
+                skipCloudPull: !firstInstall
+            });
         }
 
         async function writeBootstrapToCloud(email, uid) {
@@ -7580,13 +7666,61 @@
             triggerUIConfirm('¿Instalar actualizaciones ahora?\n\nRecarga la app limpiando caché PWA. También se programa auto-actualización cada 3 días.', 'update_web_app');
         }
         
+        function nexusGetGitHubUpdateConfig() {
+            const owner = (localStorage.getItem('nexus_github_owner') || 'alexromo').trim();
+            const repo = (localStorage.getItem('nexus_github_repo') || 'NEXUS.V1.PRO').trim();
+            const branch = (localStorage.getItem('nexus_github_branch') || 'main').trim();
+            const githubURL = (localStorage.getItem('nexus_github_repo_url') || ('https://github.com/' + owner + '/' + repo)).trim();
+            return { owner, repo, branch, githubURL };
+        }
+
         function forceNativeCacheWipe() {
-            if (window.webkit && window.webkit.messageHandlers.appInterface) {
-                window.webkit.messageHandlers.appInterface.postMessage({
-                    action: "clearCache"
-                });
+            if (!(window.webkit && window.webkit.messageHandlers.appInterface)) return;
+            const cfg = nexusGetGitHubUpdateConfig();
+            window.webkit.messageHandlers.appInterface.postMessage({
+                action: 'syncGitHubRepo',
+                silent: false,
+                ...cfg
+            });
+        }
+
+        /** iOS: comprueba GitHub en segundo plano y baja la última versión si hay cambios. */
+        function nexusBootstrapNativeGitHubUpdate() {
+            if (typeof isNexusBundledApp === 'function' && !isNexusBundledApp()) return;
+            const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.appInterface;
+            if (!bridge) return;
+            const cfg = nexusGetGitHubUpdateConfig();
+            bridge.postMessage({ action: 'saveGitHubConfig', ...cfg });
+            bridge.postMessage({ action: 'backgroundGitHubUpdate', silent: true, force: false, ...cfg });
+        }
+
+        window.onNativeWebUpdateResult = function (payload) {
+            const ok = !!payload?.ok;
+            const silent = !!payload?.silent;
+            const msg = String(payload?.message || (ok ? 'Repositorio sincronizado en el dispositivo.' : 'No se pudo actualizar.'));
+            if (ok) {
+                localStorage.setItem('nexus_last_web_update', String(payload?.updatedAt || Date.now()));
+                if (typeof refreshWebUpdateStatus === 'function') refreshWebUpdateStatus();
+            }
+            if (!silent) alert(msg);
+            else if (ok) console.log('[NEXUS] OTA background:', msg);
+        };
+
+        /** Configura el origen GitHub para el botón Actualizar del contenedor iOS. */
+        function nexusSetGitHubUpdateSource(owner, repo, branch) {
+            if (owner) localStorage.setItem('nexus_github_owner', String(owner).trim());
+            if (repo) localStorage.setItem('nexus_github_repo', String(repo).trim());
+            if (branch) localStorage.setItem('nexus_github_branch', String(branch).trim());
+            if (owner && repo) {
+                localStorage.setItem('nexus_github_repo_url', 'https://github.com/' + owner + '/' + repo);
+            }
+            if (typeof isNexusBundledApp === 'function' && isNexusBundledApp() && window.webkit?.messageHandlers?.appInterface) {
+                const cfg = nexusGetGitHubUpdateConfig();
+                window.webkit.messageHandlers.appInterface.postMessage({ action: 'saveGitHubConfig', ...cfg });
             }
         }
+        window.nexusSetGitHubUpdateSource = nexusSetGitHubUpdateSource;
+        window.nexusBootstrapNativeGitHubUpdate = nexusBootstrapNativeGitHubUpdate;
         
         /** Snapshot para Widget iOS (App Group) vía puente nativo. */
         function nexusPushWidgetSnapshot() {
@@ -8726,6 +8860,9 @@
 
         function switchTab(id) {
             id = id || 'home';
+            if (id === 'home' && typeof nexusScheduleFirstInstallCloudSync === 'function') {
+                nexusScheduleFirstInstallCloudSync('dashboard-home');
+            }
             const prevTab = state.activeTab;
             try {
                 sessionStorage.setItem('nexus_last_active_tab', id);
@@ -19293,6 +19430,12 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             state._nexusSync.bootstrapCompleted = true;
             if (nexusIsVaultLocallyEmpty()) {
                 state._nexusSync.dirty = false;
+            } else {
+                try {
+                    if (localStorage.getItem('nexus_first_install_cloud_done') !== '1') {
+                        localStorage.setItem('nexus_first_install_cloud_done', '1');
+                    }
+                } catch (e) {}
             }
         }
 
@@ -22759,6 +22902,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                         serverDocs = await nexusPullVaultFromServerOnce();
                         if (serverDocs > 0) {
                             console.log('[NEXUS] Bóveda restaurada desde servidor:', serverDocs, 'documentos');
+                            if (typeof nexusMarkFirstInstallCloudComplete === 'function') nexusMarkFirstInstallCloudComplete();
                             if (typeof nexusCloudSyncBannerProgress === 'function') {
                                 nexusCloudSyncBannerProgress(55, 'Aplicando ' + serverDocs + ' registros…');
                             }
@@ -23162,6 +23306,12 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             });
 
             // Arranque en frío: SIEMPRE autenticación primero (Google → fundador o PIN)
+            try {
+                if (!localStorage.getItem('nexus_app_install_marked')) {
+                    localStorage.setItem('nexus_app_install_marked', String(Date.now()));
+                }
+            } catch (e) {}
+            if (typeof nexusBootstrapNativeGitHubUpdate === 'function') nexusBootstrapNativeGitHubUpdate();
             showColdStartLogin();
             setTimeout(() => { if (typeof nexusApplyFunctionTitles === 'function') nexusApplyFunctionTitles(); }, 400);
         };
@@ -23567,14 +23717,15 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             const options = opts || {};
             const vaultEmail = String(email).trim().toLowerCase();
             const founderInstant = !!options.founderInstant;
-            const skipCloudPull = !!options.skipCloudPull || founderInstant;
+            const firstInstall = typeof nexusIsFirstAppInstallPending === 'function' && nexusIsFirstAppInstallPending(vaultEmail);
+            const skipCloudPull = (!!options.skipCloudPull || founderInstant) && !firstInstall;
             currentUser = vaultEmail;
             sessionUnlocked = founderInstant;
             let shellReleased = false;
             const wantsCloud = !!(options.restoreCloud || options.googleLinked || nexusVaultHadCloudLink(vaultEmail, userProfile));
             const alreadyCloud = nexusFirebaseMatchesVault(fbUser, vaultEmail);
-            const quickOpen = !!(options.fastEntry || options.googleLinked || alreadyCloud || founderInstant);
-            const instantShell = founderInstant || (quickOpen && (options.googleLinked || options.fastEntry));
+            const quickOpen = !!(options.fastEntry || options.googleLinked || alreadyCloud || founderInstant || firstInstall);
+            const instantShell = founderInstant || firstInstall || (quickOpen && (options.googleLinked || options.fastEntry));
 
             if (instantShell) {
                 if (founderInstant) {
@@ -23655,13 +23806,16 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     switchTab(tab);
                 }
 
-                const mustPullFromCloud = !skipCloudPull
+                const mustPullFromCloud = !firstInstall
+                    && !skipCloudPull
                     && nexusNeedsCloudBootstrap()
                     && nexusIsVaultLocallyEmpty();
                 const showRestoreBanner = mustPullFromCloud
                     && typeof nexusShouldShowCloudSyncBanner === 'function'
                     && nexusShouldShowCloudSyncBanner(vaultEmail);
-                if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
+                if (firstInstall && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
+                    nexusPrepareCloudBootstrapOnLogin();
+                } else if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
                     nexusPrepareCloudBootstrapOnLogin();
                 }
 
@@ -23677,7 +23831,9 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     nexusHideSessionLock();
                 }
 
-                if (mustPullFromCloud && window.db) {
+                if (firstInstall && shellReleased && typeof nexusScheduleFirstInstallCloudSync === 'function') {
+                    nexusScheduleFirstInstallCloudSync('post-login');
+                } else if (mustPullFromCloud && window.db) {
                     const pullCloud = async () => {
                         if (showRestoreBanner && typeof nexusShowCloudSyncBanner === 'function') {
                             nexusShowCloudSyncBanner('Restaurando tu información desde la nube…', 15);
