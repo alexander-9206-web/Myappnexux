@@ -982,6 +982,12 @@
                         <button onclick="retryLoginBiometrics()" type="button" title="Usar FaceID / TouchID" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 rounded-2xl font-black text-xl shadow-sm active:scale-95 transition-all border border-indigo-400"><i class="fa-solid fa-fingerprint"></i></button>
                     </div>
                 </div>
+                <div id="login-pin-google-wrap" class="hidden space-y-2">
+                    <p class="text-[9px] font-bold text-amber-300/90 text-center leading-snug">Esta bóveda usa la nube. Vincula Google antes del PIN.</p>
+                    <button type="button" id="login-pin-google-btn" onclick="nexusLinkGoogleFromPinStep()" class="w-full bg-white text-slate-900 p-3.5 rounded-2xl font-black uppercase tracking-widest text-[9px] shadow-sm active:scale-95 flex items-center justify-center gap-2 border border-white/20">
+                        Continuar con Google
+                    </button>
+                </div>
                 <button onclick="handleLoginExisting()" type="button" class="w-full bg-indigo-500 text-white p-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-indigo-500/20 active:scale-95 transition-transform flex items-center justify-center gap-2">Acceder <i class="fa-solid fa-unlock"></i></button>
             </div>
 
@@ -5793,6 +5799,66 @@
             }
         }
 
+        function nexusUpdatePinGooglePrompt(vaultEmail, profile) {
+            const wrap = $id('login-pin-google-wrap');
+            if (!wrap) return;
+            const needs = typeof nexusVaultNeedsGoogleAuth === 'function'
+                && nexusVaultNeedsGoogleAuth(vaultEmail, profile);
+            wrap.classList.toggle('hidden', !needs);
+        }
+
+        function nexusVaultNeedsGoogleAuth(email, profile) {
+            const e = normalizeMemberEmail(email);
+            if (!e || !nexusVaultHadCloudLink(e, profile)) return false;
+            return !nexusFirebaseMatchesVault(fbUser, e);
+        }
+
+        async function nexusEnsureGoogleAuthForVaultLogin(vaultEmail, profile, opts) {
+            const options = opts || {};
+            const e = normalizeMemberEmail(vaultEmail);
+            if (!e || !nexusVaultNeedsGoogleAuth(e, profile)) return true;
+
+            await initCloud({ skipAnonymous: true, deferAuthCleanup: true });
+
+            if (nexusFirebaseMatchesVault(fbUser, e)) return true;
+
+            if (isNexusNativeContainer() && !options.skipNativeSilent) {
+                const silent = await nexusNativeSilentGoogleRestore(e);
+                if (silent && nexusFirebaseMatchesVault(fbUser, e)) return true;
+            }
+
+            if (!options.skipAutoPrompt) {
+                window.__nexusUserTriggeredGoogleLogin = true;
+                sessionStorage.setItem('nexus_google_user_triggered', '1');
+                if (isNexusNativeContainer()) {
+                    await nexusGoogleAuthViaNativeRepository();
+                } else {
+                    beginLoginRoutingUI('Abriendo autenticación Google…');
+                    await nexusGoogleAuthViaWebPopup();
+                }
+                if (nexusFirebaseMatchesVault(fbUser, e)) return true;
+            }
+            return nexusFirebaseMatchesVault(fbUser, e);
+        }
+
+        async function nexusLinkGoogleFromPinStep() {
+            const vaultEmail = loginSelectedEmail ? String(loginSelectedEmail).trim().toLowerCase() : '';
+            if (!vaultEmail) return;
+            const profile = loadLocalProfile(vaultEmail) || userProfile || {};
+            beginLoginRoutingUI('Conectando con Google…');
+            window.__nexusUserTriggeredGoogleLogin = true;
+            const ok = await nexusEnsureGoogleAuthForVaultLogin(vaultEmail, profile, { skipNativeSilent: false, skipAutoPrompt: false });
+            hideLoginRoutingLoading();
+            if (ok) {
+                nexusUpdatePinGooglePrompt(vaultEmail, profile);
+                showLoginPinStep(vaultEmail, profile.name || vaultEmail.split('@')[0], profile);
+                return;
+            }
+            alert('No se pudo vincular Google. Reintenta o usa «Continuar con Google» en la pantalla inicial.');
+            nexusUpdatePinGooglePrompt(vaultEmail, profile);
+        }
+        window.nexusLinkGoogleFromPinStep = nexusLinkGoogleFromPinStep;
+
         function showLoginPinStep(userEmail, userName, profile) {
             const vaultEmail = String(userEmail || '').trim().toLowerCase();
             loginSelectedEmail = vaultEmail;
@@ -5807,6 +5873,7 @@
             if (hdr) hdr.classList.remove('hidden');
             const pinSection = $id('login-pin-section');
             if (pinSection) pinSection.classList.remove('hidden');
+            nexusUpdatePinGooglePrompt(vaultEmail, userProfile);
             const activeEmail = $id('login-active-email');
             if (activeEmail) activeEmail.innerText = userName + ' (' + userEmail + ')';
             const pinInput = $id('login-existing-pin');
@@ -5815,7 +5882,7 @@
                 pinInput.onkeypress = (e) => { if (e.key === 'Enter') handleLoginExisting(); };
             }
             showLoginRoutingStatus('');
-            if (profile.useBiometrics === true) {
+            if (profile && profile.useBiometrics === true) {
                 setTimeout(() => {
                     triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
                 }, 200);
@@ -6742,9 +6809,11 @@
                 nexusResetInactivityTimer();
                 if (typeof refreshActiveTabView === 'function') refreshActiveTabView();
                 nexusFlushPendingCloudUi();
-                if (window.db && (nexusNeedsCloudBootstrap() || nexusIsVaultLocallyEmpty()) && typeof fetchCloudState === 'function') {
+                if (window.db && nexusNeedsCloudBootstrap() && nexusIsVaultLocallyEmpty() && typeof fetchCloudState === 'function') {
                     if (typeof nexusPrepareCloudBootstrapOnLogin === 'function') nexusPrepareCloudBootstrapOnLogin();
                     fetchCloudState().catch(e => console.warn('[NEXUS] fetchCloudState post-unlock', e));
+                } else if (fbUser && window.db && typeof nexusScheduleBackgroundPull === 'function') {
+                    nexusScheduleBackgroundPull('post-unlock');
                 } else if (fbUser && syncPending && typeof nexusScheduleBackgroundPush === 'function') {
                     nexusScheduleBackgroundPush('post-unlock');
                 }
@@ -19318,6 +19387,30 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             }
         }
 
+        /** Barra superior de restauración: solo 1ª instalación sin caché local (no en cada apertura). */
+        function nexusHasLocalVaultCache(email) {
+            const e = normalizeMemberEmail(email || currentUser);
+            if (!e) return false;
+            if (localStorage.getItem('nexus_db_' + e)) return true;
+            if (localStorage.getItem('nexus_system_initialized') === '1' && loadLocalProfile(e)) return true;
+            if (state && !nexusIsVaultLocallyEmpty()) return true;
+            return false;
+        }
+
+        function nexusShouldShowCloudSyncBanner(email) {
+            const e = normalizeMemberEmail(email || currentUser);
+            if (!e || !window.db) return false;
+            if (nexusHasLocalVaultCache(e)) return false;
+            if (state && !nexusIsVaultLocallyEmpty()) return false;
+            if (!nexusNeedsCloudBootstrap()) return false;
+            return true;
+        }
+
+        function nexusMarkCloudSyncBannerDone(email) {
+            nexusMarkCloudBootstrapComplete();
+            if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(300);
+        }
+
         async function nexusVaultCollectionRef(email) {
             const { collection } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
             const vaultId = normalizeMemberEmail(email || currentUser);
@@ -19436,7 +19529,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
         window.nexusHideCloudSyncBanner = nexusHideCloudSyncBanner;
 
         function nexusNotifyCloudDataReady() {
-            if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(500);
+            if (typeof nexusMarkCloudSyncBannerDone === 'function') nexusMarkCloudSyncBannerDone(currentUser);
+            else if (typeof nexusHideCloudSyncBanner === 'function') nexusHideCloudSyncBanner(500);
             if (sessionUnlocked) {
                 if (typeof scheduleCloudUiRefresh === 'function') scheduleCloudUiRefresh();
             } else {
@@ -22722,7 +22816,8 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 return Promise.resolve();
             }
             if (!fbUser) return Promise.resolve();
-            if (typeof nexusShowCloudSyncBanner === 'function') {
+            const showBanner = typeof nexusShouldShowCloudSyncBanner === 'function' && nexusShouldShowCloudSyncBanner(currentUser);
+            if (showBanner && typeof nexusShowCloudSyncBanner === 'function') {
                 nexusShowCloudSyncBanner('Conectando con tu bóveda en la nube…', 10);
             }
             return new Promise(async (resolve) => {
@@ -22805,12 +22900,16 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                         finish();
                     });
 
+                    const finishDelay = serverDocs > 0 ? 800 : (showBanner ? 10000 : 2500);
                     setTimeout(() => {
-                        if (typeof nexusCloudSyncBannerProgress === 'function') {
+                        if (showBanner && typeof nexusCloudSyncBannerProgress === 'function') {
                             nexusCloudSyncBannerProgress(92, 'Finalizando sincronización…');
                         }
+                        if (showBanner && serverDocs > 0 && typeof nexusMarkCloudSyncBannerDone === 'function') {
+                            nexusMarkCloudSyncBannerDone(currentUser);
+                        }
                         finish();
-                    }, serverDocs > 0 ? 800 : 18000);
+                    }, finishDelay);
 
                 } catch (e) {
                     console.error(e);
@@ -23504,27 +23603,18 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             userProfile = profile;
             if (!userProfile.email) userProfile.email = vaultEmail;
 
-            initCloud({ skipAnonymous: true }).catch(() => {});
-
-            _loginRoutePhase = 'pin';
-            $id('login-initial-choice').classList.add('hidden');
-            $id('login-user-selection').classList.add('hidden');
-            $id('login-new-section').classList.add('hidden');
-            $id('login-pin-section').classList.remove('hidden');
-            $id('login-active-email').innerText = (name || profile.name || vaultEmail) + ' (' + vaultEmail + ')';
-
-            const pinInput = $id('login-existing-pin');
-            pinInput.value = '';
-
-            setTimeout(() => {
-                if (profile && profile.useBiometrics === true) {
-                    triggerBiometricAuth(() => handleLoginExisting(true), 'Autenticación automática de Nexus');
-                } else if (pinInput) {
-                    pinInput.focus();
+            if (nexusVaultNeedsGoogleAuth(vaultEmail, profile)) {
+                showLoginRoutingLoading('Vinculando cuenta Google…');
+                const googleOk = await nexusEnsureGoogleAuthForVaultLogin(vaultEmail, profile, { skipAutoPrompt: false });
+                hideLoginRoutingLoading();
+                if (!googleOk && !nexusWebGoogleLoginIntentActive()) {
+                    showLoginPinStep(vaultEmail, name || profile.name, profile);
+                    return;
                 }
-            }, 100);
+                if (nexusWebGoogleLoginIntentActive()) return;
+            }
 
-            if (pinInput) pinInput.onkeypress = (e) => { if (e.key === 'Enter') handleLoginExisting(); };
+            showLoginPinStep(vaultEmail, name || profile.name, profile);
         }
 
         function retryLoginBiometrics() {
@@ -23656,8 +23746,12 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     switchTab(tab);
                 }
 
-                const hadCloudHint = wantsCloud || (options.googleLinked ? false : await nexusDetectCloudLinkFromProfile(vaultEmail));
-                const mustPullFromCloud = !skipCloudPull && (nexusIsVaultLocallyEmpty() || hadCloudHint);
+                const mustPullFromCloud = !skipCloudPull
+                    && nexusNeedsCloudBootstrap()
+                    && nexusIsVaultLocallyEmpty();
+                const showRestoreBanner = mustPullFromCloud
+                    && typeof nexusShouldShowCloudSyncBanner === 'function'
+                    && nexusShouldShowCloudSyncBanner(vaultEmail);
                 if (mustPullFromCloud && typeof nexusPrepareCloudBootstrapOnLogin === 'function') {
                     nexusPrepareCloudBootstrapOnLogin();
                 }
@@ -23674,25 +23768,27 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     nexusHideSessionLock();
                 }
 
-                if (mustPullFromCloud && window.db && typeof fetchCloudState === 'function') {
+                if (mustPullFromCloud && window.db) {
                     const pullCloud = async () => {
-                        if (typeof nexusShowCloudSyncBanner === 'function') {
+                        if (showRestoreBanner && typeof nexusShowCloudSyncBanner === 'function') {
                             nexusShowCloudSyncBanner('Restaurando tu información desde la nube…', 15);
                         }
                         try {
-                            await Promise.race([
-                                fetchCloudState(),
-                                new Promise(r => setTimeout(r, 28000))
-                            ]);
+                            if (typeof fetchCloudState === 'function') {
+                                await Promise.race([
+                                    fetchCloudState(),
+                                    new Promise(r => setTimeout(r, showRestoreBanner ? 28000 : 8000))
+                                ]);
+                            }
                             if (nexusIsVaultLocallyEmpty() && window.__nexusNeedsGoogleForCloud) {
-                                alert('Tienes datos en la nube pero falta vincular Google.\n\n1. Cierra sesión\n2. Entra con «Continuar con Google» usando el mismo correo de tu bóveda\n3. Vuelve a abrir con PIN si quieres');
-                            } else if (nexusIsVaultLocallyEmpty() && hadCloudHint) {
-                                console.warn('[NEXUS] Bóveda sigue vacía tras pull — revisa en Firebase Console: artifacts/' + window.appId + '/users/' + vaultEmail + '/nexus_data');
+                                console.warn('[NEXUS] Bóveda vacía: vincula Google para restaurar desde la nube.');
                             }
                         } catch (e) { console.warn('[NEXUS] fetchCloudState login', e); }
                     };
                     if (quickOpen && options.googleLinked) pullCloud();
                     else await pullCloud();
+                } else if (window.db && fbUser && typeof nexusScheduleBackgroundPull === 'function') {
+                    nexusScheduleBackgroundPull('post-login-silent');
                 }
 
                 if (quickOpen && !founderInstant) {
@@ -23705,10 +23801,14 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                 }
                 if (!founderInstant && bind.cloud && typeof nexusScheduleBackgroundPush === 'function' && !nexusNeedsCloudBootstrap() && !nexusIsVaultLocallyEmpty()) {
                     nexusScheduleBackgroundPush('post-login');
-                } else if (!founderInstant && (bind.needsGoogle || window.__nexusNeedsGoogleForCloud) && hadCloudHint) {
+                } else if (!founderInstant && (bind.needsGoogle || window.__nexusNeedsGoogleForCloud) && nexusVaultHadCloudLink(vaultEmail, userProfile)) {
                     console.warn('[NEXUS] Sin sesión Firebase para', vaultEmail, '— usa Continuar con Google una vez.');
                 } else if (founderInstant && typeof nexusScheduleBackgroundPush === 'function') {
                     nexusScheduleBackgroundPush('founder-instant');
+                }
+                if (!showRestoreBanner && typeof nexusHideCloudSyncBanner === 'function') {
+                    const box = $id('nexus-cloud-sync-banner');
+                    if (box && !box.classList.contains('hidden')) nexusHideCloudSyncBanner(200);
                 }
                 if (!founderInstant && !shellReleased) setLoginRoutingProgress(100, 'Listo', true);
                 try {
@@ -23760,6 +23860,14 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             
             let profile = loadLocalProfile(vaultEmail) || await getProfileForVault(vaultEmail);
             if (!profile) return alert('No se encontró el perfil de este usuario.');
+
+            if (nexusVaultNeedsGoogleAuth(vaultEmail, profile)) {
+                const linked = await nexusEnsureGoogleAuthForVaultLogin(vaultEmail, profile, { skipAutoPrompt: false });
+                if (!linked && !nexusFirebaseMatchesVault(fbUser, vaultEmail)) {
+                    nexusUpdatePinGooglePrompt(vaultEmail, profile);
+                    return alert('Primero vincula tu cuenta con el botón «Continuar con Google».');
+                }
+            }
 
             profile = await ensureProfilePinHash(profile);
             if (!profile.email) profile.email = vaultEmail;
