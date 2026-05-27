@@ -5171,10 +5171,15 @@
             } catch (e) {
                 console.warn('[NEXUS] auth redirect timeout', e);
                 hideLoginRoutingLoading();
-                nexusSanitizeStaleRedirectFlags();
-                if (!nexusLoginRoutingIsDone() && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'terms' && _loginRoutePhase !== 'first-setup') {
-                    showInitialLoginChoice();
+                // Si ya estamos en una fase válida (app/terms/pin/first-setup), no volvemos al inicio.
+                if (nexusLoginRoutingIsDone()
+                    || _loginRoutePhase === 'pin'
+                    || _loginRoutePhase === 'terms'
+                    || _loginRoutePhase === 'first-setup') {
+                    return true;
                 }
+                nexusSanitizeStaleRedirectFlags();
+                showInitialLoginChoice();
                 return false;
             }
         }
@@ -5193,8 +5198,31 @@
             return nexusAuthFinishWebRedirect();
         }
 
+        /** Reanuda sesión estándar de Firebase en navegador: entra directo si hay bóveda local.
+         *  Solo se salta si hubo logout manual explícito (nexusMarkManualLogout). */
         async function nexusBootStandardFirebaseSession() {
-            return false;
+            if (!isNexusWebBrowser()) return false;
+            if (nexusIsManualLogoutBlocked()) return false;
+
+            await initCloud({ skipAnonymous: true, deferAuthCleanup: true });
+            if (!window.__nexusFirebaseApp) return false;
+
+            const { getAuth } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = getAuth(window.__nexusFirebaseApp);
+            const u = auth.currentUser;
+            if (!nexusAcceptsGoogleFirebaseUser(u)) return false;
+
+            const email = normalizeMemberEmail(u.email);
+            if (!email) return false;
+
+            const hasVault =
+                !!loadLocalProfile(email)
+                || !!localStorage.getItem('nexus_db_' + email)
+                || localStorage.getItem('nexus_system_initialized') === '1';
+            if (!hasVault) return false;
+
+            // Entrar directo a la app con el usuario actual.
+            return nexusEnterAppAfterGoogleAuth(u, u.displayName || 'Usuario Google', u.photoURL || null);
         }
 
         function nexusLoginSessionActive() {
