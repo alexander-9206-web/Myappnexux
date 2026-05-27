@@ -5094,24 +5094,59 @@
             }
         }
 
-        function nexusInstallWebAuthReturnListener() {
-            if (window.__nexusWebAuthListenerInstalled || !isNexusWebBrowser()) return;
-            window.__nexusWebAuthListenerInstalled = true;
+        /** Firebase Auth estándar: onAuthStateChanged + getRedirectResult (solo navegador web). */
+        function nexusInstallStandardFirebaseAuthListener() {
+            if (window.__nexusStandardAuthListenerInstalled) return;
+            window.__nexusStandardAuthListenerInstalled = true;
+            if (!isNexusWebBrowser()) return;
             initCloud({ skipAnonymous: true }).then(async () => {
                 try {
-                    const { getAuth, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                    const auth = getAuth(window.__nexusFirebaseApp);
-                    onAuthStateChanged(auth, (u) => {
-                        if (!nexusWebGoogleRedirectPending()) return;
+                    const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                    const auth = authMod.getAuth(window.__nexusFirebaseApp);
+                    authMod.onAuthStateChanged(auth, (u) => {
+                        if (nexusIsManualLogoutBlocked()) return;
+                        if (!nexusWebGoogleRedirectPending() && !window.__nexusUserTriggeredGoogleLogin) return;
                         if (nexusAcceptsGoogleFirebaseUser(u)) {
-                            nexusRouteWebGoogleUserIfPending(u, 'onAuthStateChanged').catch(e => console.warn('[NEXUS] auth listener route', e));
+                            nexusRouteWebGoogleUserIfPending(u, 'onAuthStateChanged').catch(e => console.warn('[NEXUS] auth listener', e));
                         }
                     });
-                    if (nexusWebGoogleRedirectPending() && nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
-                        nexusRouteWebGoogleUserIfPending(auth.currentUser, 'currentUser').catch(e => console.warn('[NEXUS] auth currentUser route', e));
+                } catch (e) { console.warn('[NEXUS] standard auth listener', e); }
+            }).catch(e => console.warn('[NEXUS] initCloud standard listener', e));
+        }
+
+        function nexusInstallWebAuthReturnListener() {
+            nexusInstallStandardFirebaseAuthListener();
+        }
+
+        /** Sesión persistida de Firebase (patrón estándar post-init). */
+        async function nexusBootStandardFirebaseSession() {
+            await initCloud({ skipAnonymous: true });
+            if (!window.__nexusFirebaseApp) return false;
+            const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+            const auth = authMod.getAuth(window.__nexusFirebaseApp);
+
+            if (isNexusWebBrowser() && !window.__nexusRedirectResultHandled) {
+                window.__nexusRedirectResultHandled = true;
+                try {
+                    const result = await authMod.getRedirectResult(auth);
+                    if (result?.user && nexusAcceptsGoogleFirebaseUser(result.user)) {
+                        const u = result.user;
+                        const ok = await nexusEnterAppAfterGoogleAuth(u, u.displayName, u.photoURL);
+                        if (ok) return true;
                     }
-                } catch (e) { console.warn('[NEXUS] web auth listener', e); }
-            }).catch(e => console.warn('[NEXUS] initCloud auth listener', e));
+                } catch (e) {
+                    if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e?.code);
+                }
+            }
+
+            const u = auth.currentUser;
+            if (!nexusAcceptsGoogleFirebaseUser(u) || nexusIsManualLogoutBlocked()) return false;
+            const email = normalizeMemberEmail(u.email);
+            const hasLocal = !!loadLocalProfile(email)
+                || !!localStorage.getItem('nexus_db_' + email)
+                || localStorage.getItem('nexus_system_initialized') === '1';
+            if (!hasLocal) return false;
+            return nexusEnterAppAfterGoogleAuth(u, u.displayName, u.photoURL);
         }
 
         async function nexusHandleGoogleRedirectOnLoad() {
@@ -5141,7 +5176,7 @@
             if (!oauthReturn) nexusSanitizeStaleRedirectFlags();
             nexusRequireAuthScreen();
             nexusSyncGoogleLoginButton();
-            nexusInstallWebAuthReturnListener();
+            nexusInstallStandardFirebaseAuthListener();
             if (!oauthReturn) showInitialLoginChoice();
             nexusWireModalAutoClose();
             installNexusNativeNavigation();
@@ -5187,6 +5222,12 @@
                         showInitialLoginChoice();
                         return;
                     }
+
+                    const autoSession = await nexusBootStandardFirebaseSession().catch(e => {
+                        console.warn('[NEXUS] standard Firebase session', e);
+                        return false;
+                    });
+                    if (autoSession || nexusLoginRoutingIsDone()) return;
 
                     await initCloud({ skipAnonymous: true }).catch(e => console.warn('[NEXUS] initCloud en arranque', e));
                     fetchLoginUsers(false);
@@ -5466,6 +5507,14 @@
             return nexusGetAuthChannel() === 'ios-native';
         }
 
+        function isNexusBundledApp() {
+            if (window.__NEXUS_IOS_BUNDLE === true) return true;
+            if (isNexusNativeContainer()) return true;
+            try {
+                return window.location.protocol === 'file:';
+            } catch (e) { return false; }
+        }
+
         function isNexusWebBrowser() {
             return !isNexusNativeContainer();
         }
@@ -5522,8 +5571,9 @@
         }
 
         function nexusAuthOriginBlocked() {
+            if (isNexusNativeContainer() || isNexusBundledApp()) return null;
             if (window.location.protocol === 'file:') {
-                return 'No puedes iniciar sesión abriendo el archivo .html local (file://).\n\nUsa la URL HTTPS (Vercel) o un servidor local (http://localhost).';
+                return 'Abre NEXUS desde la app iOS o desde web/index.html con un servidor HTTP (no abras app.html como archivo suelto).';
             }
             return null;
         }
@@ -6215,7 +6265,6 @@
 
         async function nexusGoogleAuthViaWebPopup() {
             if (isNexusNativeContainer()) {
-                console.warn('[NEXUS] web-popup en contenedor iOS; delegando a nativo');
                 return nexusGoogleAuthViaNativeRepository();
             }
             let redirectStarted = false;
@@ -6231,11 +6280,9 @@
                     return;
                 }
                 const useRedirectFirst = nexusShouldUseRedirectFirst();
-                console.log('[NEXUS] Auth channel: web-popup', {
+                console.log('[NEXUS] Firebase Auth web:', {
                     origin: window.location.origin,
-                    hostname: window.location.hostname,
-                    useRedirectFirst,
-                    preferRedirect: nexusPreferGoogleRedirect()
+                    useRedirectFirst
                 });
                 const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
 
@@ -6259,7 +6306,7 @@
                     const useRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code)
                         || /popup-blocked|blocked|internal-error/i.test(popupErr?.message || '');
                     if (!useRedirect) throw popupErr;
-                    console.warn('[NEXUS] Popup falló, usando redirect', popupErr?.code, popupErr?.message);
+                    console.warn('[NEXUS] Popup falló, usando signInWithRedirect', popupErr?.code);
                     nexusMarkGoogleRedirectStarted();
                     beginLoginRoutingUI('Redirigiendo a Google…');
                     redirectStarted = true;
@@ -6316,6 +6363,9 @@
         window.nexusHandleGoogleRedirectOnLoad = nexusHandleGoogleRedirectOnLoad;
         window.isNexusNativeContainer = isNexusNativeContainer;
         window.isNexusWebBrowser = isNexusWebBrowser;
+        window.isNexusBundledApp = isNexusBundledApp;
+        window.nexusBootStandardFirebaseSession = nexusBootStandardFirebaseSession;
+        window.nexusInstallStandardFirebaseAuthListener = nexusInstallStandardFirebaseAuthListener;
 
         async function nexusApplyNativeGoogleCredential(payload, expectedEmail) {
             const idToken = payload?.idToken || payload?.token || '';
