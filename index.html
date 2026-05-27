@@ -3965,11 +3965,11 @@
         const NEXUS_APP_VERSION = Object.freeze({
             major: 1,
             minor: 0,
-            patch: 4,
+            patch: 5,
             channel: 'beta',
             codename: 'NEXUS.V1',
-            build: '2026.05.27.4',
-            notes: 'Auth v2: Firebase popup + onAuthStateChanged'
+            build: '2026.05.27.5',
+            notes: 'Logout solo manual en navegador (sin auto-cierre)'
         });
 
         function nexusFormatVersionLabel(v) {
@@ -4891,15 +4891,14 @@
 
         function nexusIsManualLogoutBlocked() {
             try {
-                return sessionStorage.getItem('nexus_manual_logout') === '1'
-                    || localStorage.getItem('nexus_manual_logout') === '1';
+                return sessionStorage.getItem('nexus_manual_logout') === '1';
             } catch (e) { return false; }
         }
 
         function nexusMarkManualLogout() {
             try {
                 sessionStorage.setItem('nexus_manual_logout', '1');
-                localStorage.setItem('nexus_manual_logout', '1');
+                localStorage.removeItem('nexus_manual_logout');
             } catch (e) {}
             window.__nexusAutoResumeDone = true;
             window.__nexusGoogleLoginInFlight = false;
@@ -4911,6 +4910,7 @@
             try {
                 sessionStorage.removeItem('nexus_manual_logout');
                 localStorage.removeItem('nexus_manual_logout');
+                window.__nexusManualLogoutSignOutDone = false;
             } catch (e) {}
         }
 
@@ -5209,7 +5209,7 @@
         }
 
         async function nexusAuthInit() {
-            nexusAuthShowLoginPanel();
+            try { localStorage.removeItem('nexus_manual_logout'); } catch (e) {}
             try {
                 const { authMod, auth } = await nexusAuthGetAuth();
                 if (_nexusAuthUnsubscribe) {
@@ -5225,6 +5225,9 @@
                 } catch (e) {
                     if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e);
                 }
+                if (!nexusLoginRoutingIsDone() && !nexusIsManualLogoutBlocked() && !nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
+                    nexusAuthShowLoginPanel();
+                }
             } catch (e) {
                 console.error('[NEXUS] nexusAuthInit', e);
                 nexusAuthShowLoginPanel();
@@ -5233,16 +5236,19 @@
 
         async function nexusAuthHandleState(user) {
             if (nexusIsManualLogoutBlocked()) {
-                if (nexusAcceptsGoogleFirebaseUser(user)) {
+                nexusAuthShowLoginPanel();
+                if (nexusAcceptsGoogleFirebaseUser(user) && !window.__nexusManualLogoutSignOutDone) {
+                    window.__nexusManualLogoutSignOutDone = true;
                     try {
                         const { authMod, auth } = await nexusAuthGetAuth();
                         await authMod.signOut(auth);
                     } catch (e) {}
                 }
-                nexusAuthShowLoginPanel();
                 return;
             }
+            window.__nexusManualLogoutSignOutDone = false;
             if (!nexusAcceptsGoogleFirebaseUser(user)) {
+                if (nexusLoginRoutingIsDone() && currentUser) return;
                 if (!nexusLoginRoutingIsDone()) nexusAuthShowLoginPanel();
                 return;
             }
@@ -22477,7 +22483,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
-                        } else if (!auth.currentUser && !skipAnonymous && !deferAuthCleanup && !window.__nexusGoogleLoginInFlight && !(sessionUnlocked && currentUser)) {
+                        } else if (!auth.currentUser && !skipAnonymous && !deferAuthCleanup && !window.__nexusGoogleLoginInFlight && !(sessionUnlocked && currentUser) && !isNexusWebBrowser()) {
                             await signInAnonymously(auth);
                         } else if (auth.currentUser) {
                             fbUser = auth.currentUser;
@@ -23101,7 +23107,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
             } catch (e) {
                 console.error('[NEXUS] finishFounderLoginEntry', e);
                 _loginRoutePhase = 'error';
-                showLoginFlow();
+                nexusAuthShowLoginPanel();
                 alert('No se pudo abrir la bóveda. Intenta iniciar sesión de nuevo.');
             }
         }
@@ -23393,7 +23399,10 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
         }
 
         async function processLoginSuccess(email, opts) {
-            if (!email) return showLoginFlow();
+            if (!email) {
+                nexusAuthShowLoginPanel();
+                return;
+            }
             nexusClearManualLogoutBlock();
             const options = opts || {};
             const vaultEmail = String(email).trim().toLowerCase();
