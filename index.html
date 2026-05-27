@@ -856,24 +856,29 @@
             document.documentElement.setAttribute('data-nexus-auth-channel', channel);
             window.__nexusAuthChannel = channel;
             var href = location.href || '';
-            var oauthReturn = /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
+            var oauthReturn = /\/__\/auth\/handler/i.test(href)
+                || /[?&#](?:state|code|apiKey|access_token|id_token)=/i.test(href)
+                || /[?&#]mode=signIn/i.test(href);
             var redirectPending = false;
+            var userTriggered = false;
+            var started = 0;
             try {
-                var started = Number(sessionStorage.getItem('nexus_google_redirect_started_at') || 0);
+                started = Number(sessionStorage.getItem('nexus_google_redirect_started_at') || 0);
                 redirectPending = sessionStorage.getItem('nexus_google_redirect_pending') === '1'
                     && started > 0 && (Date.now() - started) < 180000;
+                userTriggered = sessionStorage.getItem('nexus_google_user_triggered') === '1';
             } catch (e) {}
             if (channel === 'web-popup' && oauthReturn) {
                 try {
                     sessionStorage.setItem('nexus_google_redirect_pending', '1');
                     sessionStorage.setItem('nexus_auth_use_redirect', '1');
-                    sessionStorage.setItem('nexus_google_redirect_started_at', String(Date.now()));
+                    sessionStorage.setItem('nexus_google_user_triggered', '1');
+                    if (!started) sessionStorage.setItem('nexus_google_redirect_started_at', String(Date.now()));
                 } catch (e) {}
-            } else if (!redirectPending) {
+            } else if (!redirectPending && !oauthReturn && !userTriggered) {
                 try {
                     sessionStorage.removeItem('nexus_google_redirect_pending');
                     sessionStorage.removeItem('nexus_auth_use_redirect');
-                    sessionStorage.removeItem('nexus_google_user_triggered');
                     sessionStorage.removeItem('nexus_google_redirect_started_at');
                 } catch (e) {}
             }
@@ -4946,7 +4951,16 @@
 
         function nexusIsOAuthReturnUrl() {
             const href = location.href || '';
-            return /\/__\/auth\/handler/i.test(href) || /[?&#](?:state|code|apiKey)=/i.test(href);
+            return /\/__\/auth\/handler/i.test(href)
+                || /[?&#](?:state|code|apiKey|access_token|id_token)=/i.test(href)
+                || /[?&#]mode=signIn/i.test(href);
+        }
+
+        function nexusWebGoogleLoginIntentActive() {
+            return nexusWebGoogleRedirectPending()
+                || window.__nexusGoogleLoginInFlight === true
+                || window.__nexusUserTriggeredGoogleLogin === true
+                || sessionStorage.getItem('nexus_google_user_triggered') === '1';
         }
 
         function nexusWebGoogleRedirectPending() {
@@ -4974,6 +4988,11 @@
             sessionStorage.removeItem('nexus_auth_use_redirect');
             sessionStorage.removeItem('nexus_google_user_triggered');
             sessionStorage.removeItem('nexus_google_redirect_started_at');
+            window.__nexusRedirectResultConsumed = false;
+            window.__nexusRedirectResultHandled = false;
+            window.__nexusStoredRedirectResult = null;
+            window.__nexusRedirectResultPromise = null;
+            window.__nexusRedirectFetchDone = false;
         }
 
         /** Limpia banderas OAuth huérfanas (causa típica: pantalla gris solo con barra). */
@@ -5004,19 +5023,42 @@
             return best || '';
         }
 
-        async function nexusResolveUserAfterGoogleRedirect(auth) {
-            const { getRedirectResult } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-            let user = null;
-            if (!window.__nexusRedirectResultConsumed) {
-                window.__nexusRedirectResultConsumed = true;
-                try {
-                    const result = await getRedirectResult(auth);
-                    user = result?.user || null;
-                    if (user) console.log('[NEXUS] getRedirectResult OK', user.email);
-                } catch (e) {
-                    if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e?.code, e?.message);
-                }
+        /** Una sola lectura de getRedirectResult por carga (Firebase estándar). */
+        async function nexusFetchGoogleRedirectResult(auth) {
+            if (window.__nexusRedirectFetchDone) {
+                return window.__nexusStoredRedirectResult || null;
             }
+            if (window.__nexusRedirectResultPromise) {
+                return window.__nexusRedirectResultPromise;
+            }
+            window.__nexusRedirectResultPromise = (async () => {
+                const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const a = auth || authMod.getAuth(window.__nexusFirebaseApp);
+                try {
+                    const result = await authMod.getRedirectResult(a);
+                    window.__nexusStoredRedirectResult = result || null;
+                    window.__nexusRedirectFetchDone = true;
+                    if (result?.user) {
+                        window.__nexusRedirectResultConsumed = true;
+                        console.log('[NEXUS] getRedirectResult OK', result.user.email);
+                    }
+                    return result;
+                } catch (e) {
+                    window.__nexusRedirectFetchDone = true;
+                    if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e?.code, e?.message);
+                    window.__nexusStoredRedirectResult = null;
+                    return null;
+                } finally {
+                    window.__nexusRedirectResultPromise = null;
+                }
+            })();
+            return window.__nexusRedirectResultPromise;
+        }
+
+        async function nexusResolveUserAfterGoogleRedirect(auth) {
+            let user = null;
+            const result = await nexusFetchGoogleRedirectResult(auth);
+            user = result?.user || null;
             if (!user && nexusAcceptsGoogleFirebaseUser(auth.currentUser)) user = auth.currentUser;
             if (!user) {
                 try {
@@ -5074,7 +5116,7 @@
             if (!isNexusWebBrowser() || !nexusAcceptsGoogleFirebaseUser(user)) return false;
             if (nexusLoginRoutingIsDone() || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') return true;
             if (_googleWebLoginCompleting) return _googleWebLoginCompleting;
-            if (!nexusWebGoogleRedirectPending() && !window.__nexusGoogleLoginInFlight) return false;
+            if (!nexusWebGoogleLoginIntentActive()) return false;
             if (_nexusWebAuthRouteScheduled) return false;
             _nexusWebAuthRouteScheduled = true;
             window.__nexusGoogleLoginInFlight = true;
@@ -5105,7 +5147,7 @@
                     const auth = authMod.getAuth(window.__nexusFirebaseApp);
                     authMod.onAuthStateChanged(auth, (u) => {
                         if (nexusIsManualLogoutBlocked()) return;
-                        if (!nexusWebGoogleRedirectPending() && !window.__nexusUserTriggeredGoogleLogin) return;
+                        if (!nexusWebGoogleLoginIntentActive()) return;
                         if (nexusAcceptsGoogleFirebaseUser(u)) {
                             nexusRouteWebGoogleUserIfPending(u, 'onAuthStateChanged').catch(e => console.warn('[NEXUS] auth listener', e));
                         }
@@ -5120,25 +5162,11 @@
 
         /** Sesión persistida de Firebase (patrón estándar post-init). */
         async function nexusBootStandardFirebaseSession() {
+            if (nexusWebGoogleLoginIntentActive()) return false;
             await initCloud({ skipAnonymous: true });
             if (!window.__nexusFirebaseApp) return false;
             const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
             const auth = authMod.getAuth(window.__nexusFirebaseApp);
-
-            if (isNexusWebBrowser() && !window.__nexusRedirectResultHandled) {
-                window.__nexusRedirectResultHandled = true;
-                try {
-                    const result = await authMod.getRedirectResult(auth);
-                    if (result?.user && nexusAcceptsGoogleFirebaseUser(result.user)) {
-                        const u = result.user;
-                        const ok = await nexusEnterAppAfterGoogleAuth(u, u.displayName, u.photoURL);
-                        if (ok) return true;
-                    }
-                } catch (e) {
-                    if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult', e?.code);
-                }
-            }
-
             const u = auth.currentUser;
             if (!nexusAcceptsGoogleFirebaseUser(u) || nexusIsManualLogoutBlocked()) return false;
             const email = normalizeMemberEmail(u.email);
@@ -5146,18 +5174,21 @@
                 || !!localStorage.getItem('nexus_db_' + email)
                 || localStorage.getItem('nexus_system_initialized') === '1';
             if (!hasLocal) return false;
-            return nexusEnterAppAfterGoogleAuth(u, u.displayName, u.photoURL);
+            return nexusCompleteGoogleWebLogin(u);
+        }
+
+        function nexusCleanOAuthUrlFromAddressBar() {
+            if (!nexusIsOAuthReturnUrl()) return;
+            try {
+                const clean = location.pathname + (location.search || '').replace(/[?&](?:apiKey|state|code|mode|oobCode|lang)=([^&]*)/gi, '').replace(/^&/, '?').replace(/\?$/, '');
+                history.replaceState(null, '', location.origin + (clean || location.pathname));
+            } catch (e) { /* noop */ }
         }
 
         async function nexusHandleGoogleRedirectOnLoad() {
             if (!isNexusWebBrowser()) return false;
-            if (!nexusIsOAuthReturnUrl() && !nexusWebGoogleRedirectPending()) return false;
-            try {
-                if (nexusIsOAuthReturnUrl()) {
-                    history.replaceState(null, '', location.origin + location.pathname);
-                }
-            } catch (e) { /* noop */ }
-            return nexusWaitForWebGoogleAuthCompletion(18000);
+            if (!nexusWebGoogleLoginIntentActive() && !nexusIsOAuthReturnUrl()) return false;
+            return nexusWaitForWebGoogleAuthCompletion(90000);
         }
 
         function nexusLoginSessionActive() {
@@ -5211,13 +5242,12 @@
                         return;
                     }
 
-                    if (oauthReturn) {
-                        const handled = await nexusWaitForWebGoogleAuthCompletion(60000);
-                        if (handled || nexusLoginRoutingIsDone()) {
-                            nexusClearGoogleRedirectFlags();
+                    if (oauthReturn || nexusWebGoogleLoginIntentActive()) {
+                        const handled = await nexusWaitForWebGoogleAuthCompletion(90000);
+                        if (handled || nexusLoginRoutingIsDone()
+                            || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
                             return;
                         }
-                        nexusSanitizeStaleRedirectFlags();
                         hideLoginRoutingLoading();
                         showInitialLoginChoice();
                         return;
@@ -5381,9 +5411,14 @@
 
                 setLoginRoutingProgress(40, 'Validando acceso…');
                 const entered = await nexusEnterAppAfterGoogleAuth(user, user.displayName || 'Usuario Google', user.photoURL);
-                nexusClearGoogleRedirectFlags();
+                const okPhase = entered || _loginRoutePhase === 'terms' || _loginRoutePhase === 'pin'
+                    || _loginRoutePhase === 'first-setup' || _loginRoutePhase === 'routing' || nexusLoginRoutingIsDone();
+                if (okPhase) {
+                    nexusCleanOAuthUrlFromAddressBar();
+                    nexusClearGoogleRedirectFlags();
+                }
                 if (nexusLoginRoutingIsDone()) nexusFinishLoginRoutingInstant();
-                return entered;
+                return okPhase;
             })();
 
             try {
@@ -5395,42 +5430,35 @@
 
         /** Espera activa tras redirect/popup hasta que Firebase confirme Google (no volver al menú). */
         async function nexusWaitForWebGoogleAuthCompletion(maxMs) {
-            if (!isNexusWebBrowser() || !nexusWebGoogleRedirectPending()) return false;
+            if (!isNexusWebBrowser() || !nexusWebGoogleLoginIntentActive()) return false;
             if (nexusLoginRoutingIsDone()) {
                 nexusFinishLoginRoutingInstant();
                 return true;
             }
-            const deadline = Date.now() + (maxMs || 60000);
+            const deadline = Date.now() + (maxMs || 90000);
             beginLoginRoutingUI('Completando acceso con Google…');
             window.__nexusGoogleLoginInFlight = true;
+            window.__nexusUserTriggeredGoogleLogin = true;
             try {
+                await initCloud({ skipAnonymous: true, deferAuthCleanup: true });
                 const authMod = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
-                const { getAuth, getRedirectResult } = authMod;
-                await initCloud({ skipAnonymous: true });
-                const auth = getAuth(window.__nexusFirebaseApp);
+                const auth = authMod.getAuth(window.__nexusFirebaseApp);
 
-                if (!window.__nexusRedirectResultConsumed) {
-                    window.__nexusRedirectResultConsumed = true;
-                    try {
-                        const result = await getRedirectResult(auth);
-                        if (result?.user) {
-                            const ok = await nexusCompleteGoogleWebLogin(result.user);
-                            if (ok) { nexusFinishLoginRoutingInstant(); return true; }
-                        }
-                    } catch (e) {
-                        if (e?.code !== 'auth/no-auth-event') console.warn('[NEXUS] getRedirectResult early', e?.code);
-                    }
+                const redirectResult = await nexusFetchGoogleRedirectResult(auth);
+                if (redirectResult?.user) {
+                    const ok = await nexusCompleteGoogleWebLogin(redirectResult.user);
+                    if (ok) { nexusFinishLoginRoutingInstant(); return true; }
                 }
 
                 let redirectPolls = 0;
                 while (Date.now() < deadline) {
                     if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser)
-                        || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms') {
+                        || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
                         nexusFinishLoginRoutingInstant();
                         return true;
                     }
 
-                    if (redirectPolls < 3) {
+                    if (redirectPolls < 8) {
                         redirectPolls++;
                         const fromRedirect = await nexusResolveUserAfterGoogleRedirect(auth);
                         if (fromRedirect) {
@@ -5445,24 +5473,30 @@
                     }
 
                     setLoginRoutingProgress(
-                        Math.min(88, 20 + Math.round(((Date.now() - (deadline - (maxMs || 60000))) / (maxMs || 60000)) * 65)),
+                        Math.min(88, 20 + Math.round(((Date.now() - (deadline - (maxMs || 90000))) / (maxMs || 90000)) * 65)),
                         'Completando acceso con Google…'
                     );
-                    await sleepMs(350);
+                    await sleepMs(400);
                 }
                 console.warn('[NEXUS] timeout esperando Google web');
-                if (!nexusLoginRoutingIsDone() && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'terms') {
-                    nexusSanitizeStaleRedirectFlags();
+                if (nexusAcceptsGoogleFirebaseUser(auth.currentUser)) {
+                    const ok = await nexusCompleteGoogleWebLogin(auth.currentUser);
+                    if (ok) return true;
+                }
+                if (!nexusLoginRoutingIsDone() && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'terms' && _loginRoutePhase !== 'first-setup') {
                     hideLoginRoutingLoading();
                     showInitialLoginChoice();
                 }
-                return nexusLoginRoutingIsDone() || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms';
+                return nexusLoginRoutingIsDone() || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup';
             } finally {
                 window.__nexusGoogleLoginInFlight = false;
-                if (!nexusLoginRoutingIsDone() && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'terms') {
+                if (!nexusLoginRoutingIsDone() && _loginRoutePhase !== 'pin' && _loginRoutePhase !== 'terms' && _loginRoutePhase !== 'first-setup') {
                     window.__nexusPendingGoogleUser = null;
+                } else {
+                    nexusCleanOAuthUrlFromAddressBar();
                 }
-                if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser) || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms') {
+                if (nexusLoginRoutingIsDone() || (sessionUnlocked && currentUser)
+                    || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
                     nexusFinishLoginRoutingInstant();
                 }
             }
@@ -5523,13 +5557,19 @@
             return sessionStorage.getItem('nexus_auth_use_redirect') === '1';
         }
 
-        /** Redirect solo en firebaseapp.com; en Vercel/iOS Safari el popup evita perder sesión al volver. */
+        /** Web: redirect por defecto (GitHub Pages, Vercel, móvil); popup solo en desktop si no hay redirect previo. */
         function nexusShouldUseRedirectFirst() {
             if (!isNexusWebBrowser()) return false;
             if (sessionStorage.getItem('nexus_auth_use_popup') === '1') return false;
             if (nexusPreferGoogleRedirect()) return true;
+            if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '')) return true;
             const host = (window.location.hostname || '').toLowerCase();
-            return /\.firebaseapp\.com$/i.test(host) || /localhost|127\.0\.0\.1/.test(host);
+            if (/localhost|127\.0\.0\.1/.test(host)) return true;
+            if (/\.firebaseapp\.com$/i.test(host)) return true;
+            if (/\.github\.io$/i.test(host)) return true;
+            if (/\.vercel\.app$/i.test(host)) return true;
+            if (window.location.protocol === 'https:') return true;
+            return false;
         }
 
         async function nexusPrepareGoogleWebAuth() {
@@ -5705,7 +5745,10 @@
                 const routeKind = await runLoginRoutingWithProgress('Validando acceso con Google…', async () => {
                     const [initialized] = await Promise.all([
                         isSystemInitialized(),
-                        sessionPromise
+                        sessionPromise.catch(e => {
+                            console.warn('[NEXUS] ensureFirestore session (no bloquea términos)', e);
+                            return null;
+                        })
                     ]);
                     if (!initialized) return 'founder';
                     if (await founderNeedsPinSetup(email, fbAuthUser.uid)) return 'founder';
@@ -5744,7 +5787,7 @@
                     hideLoginRoutingLoading();
                     resetGoogleLoginButton();
                     showInitialLoginChoice();
-                } else if (_loginRoutePhase === 'app') {
+                } else if (_loginRoutePhase === 'app' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'first-setup') {
                     hideLoginRoutingLoading();
                 }
             }
@@ -6366,6 +6409,8 @@
         window.isNexusBundledApp = isNexusBundledApp;
         window.nexusBootStandardFirebaseSession = nexusBootStandardFirebaseSession;
         window.nexusInstallStandardFirebaseAuthListener = nexusInstallStandardFirebaseAuthListener;
+        window.nexusWebGoogleLoginIntentActive = nexusWebGoogleLoginIntentActive;
+        window.nexusFetchGoogleRedirectResult = nexusFetchGoogleRedirectResult;
 
         async function nexusApplyNativeGoogleCredential(payload, expectedEmail) {
             const idToken = payload?.idToken || payload?.token || '';
@@ -22525,12 +22570,13 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
 
         async function initCloud(opts) {
             const skipAnonymous = !!(opts && opts.skipAnonymous);
+            const deferAuthCleanup = !!(opts && opts.deferAuthCleanup) || nexusWebGoogleLoginIntentActive();
             if (window.db) {
                 try {
                     const { getAuth, signOut } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
                     const auth = getAuth(window.__nexusFirebaseApp);
                     const u = auth.currentUser;
-                    if (skipAnonymous && u?.isAnonymous) {
+                    if (skipAnonymous && u?.isAnonymous && !deferAuthCleanup) {
                         try { await signOut(auth); } catch (e) { console.warn('[NEXUS] signOut anónimo (initCloud)', e); }
                         const keep = window.__nexusPendingGoogleUser;
                         if (keep && !keep.isAnonymous) fbUser = keep;
@@ -22593,7 +22639,7 @@ Para tarjeta de crédito: paidInstallments = cuotas ya pagadas en el periodo; re
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             await signInWithCustomToken(auth, __initial_auth_token);
-                        } else if (!auth.currentUser && !skipAnonymous && !window.__nexusGoogleLoginInFlight && !(sessionUnlocked && currentUser)) {
+                        } else if (!auth.currentUser && !skipAnonymous && !deferAuthCleanup && !window.__nexusGoogleLoginInFlight && !(sessionUnlocked && currentUser)) {
                             await signInAnonymously(auth);
                         } else if (auth.currentUser) {
                             fbUser = auth.currentUser;
