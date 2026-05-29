@@ -41,52 +41,82 @@
   })();
 </script>
 <style id="nexus-web-shell-css">
-  /* ==== NEXUS Web Shell: contenedor mobile-first centrado en desktop ====
-     iOS NO usa este bundle (recibe app.html puro), por lo que estos
-     estilos solo aplican a navegadores de escritorio/tablet/móvil. */
-  :root { --nexus-web-shell-max: 480px; }
-  html, body {
-    background: #0b1020;
-    min-height: 100vh;
-  }
-  /* En desktop (≥768px) limitamos el ancho del cuerpo y centramos. */
+  /* ==== NEXUS Web Shell v3: contenedor mobile-first centrado en desktop ====
+     iOS NO usa este bundle (recibe app.html puro). Solo aplica a navegadores.
+     Maneja correctamente position:fixed (login screen, modales) con
+     left:50% + translateX(-50%) para evitar que queden pegados a la izquierda. */
+  :root { --nexus-web-shell-max: 560px; }
+  @media (min-width: 1024px) { :root { --nexus-web-shell-max: 600px; } }
+  @media (min-width: 1440px) { :root { --nexus-web-shell-max: 640px; } }
+
+  /* Mobile (<768px): comportamiento idéntico a iOS, full width. */
+  html, body { background: #0b1020; }
+
+  /* Desktop/tablet (≥768px): app centrada con fondo decorativo a los lados. */
   @media (min-width: 768px) {
-    body {
-      max-width: var(--nexus-web-shell-max);
-      margin: 0 auto !important;
-      box-shadow: 0 0 60px rgba(0,0,0,0.45);
-      min-height: 100vh;
-      background: #0f172a;
-      position: relative;
-    }
-    /* Fondo decorativo fuera del shell para que no se vea aburrido. */
-    html::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      z-index: -1;
+    html {
       background:
-        radial-gradient(circle at 20% 20%, rgba(99,102,241,0.18), transparent 40%),
-        radial-gradient(circle at 80% 70%, rgba(168,85,247,0.18), transparent 45%),
-        linear-gradient(135deg, #020617 0%, #0b1020 100%);
+        radial-gradient(circle at 18% 22%, rgba(99,102,241,0.22), transparent 38%),
+        radial-gradient(circle at 82% 78%, rgba(168,85,247,0.22), transparent 42%),
+        radial-gradient(circle at 50% 50%, rgba(56,189,248,0.06), transparent 60%),
+        linear-gradient(135deg, #020617 0%, #0b1020 60%, #0b1020 100%);
+      background-attachment: fixed;
+      min-height: 100vh;
     }
-    /* Login screen también respeta el max-width. */
-    #login-screen {
-      max-width: var(--nexus-web-shell-max);
-      margin: 0 auto;
-      left: auto !important;
-      right: auto !important;
-    }
-    /* Elementos fixed que ocupan todo el ancho: los centramos al shell. */
-    .fixed.inset-x-0, .fixed.left-0.right-0 {
-      max-width: var(--nexus-web-shell-max);
+    body {
+      max-width: var(--nexus-web-shell-max) !important;
+      width: 100% !important;
       margin-left: auto !important;
       margin-right: auto !important;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #0f172a 0%, #0a0f1f 100%);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 20px 60px -10px rgba(0,0,0,0.55),
+        0 40px 120px -20px rgba(99,102,241,0.15);
+      position: relative;
+      overflow-x: hidden;
     }
-  }
-  /* En ≥1280px da más aire al shell. */
-  @media (min-width: 1280px) {
-    :root { --nexus-web-shell-max: 520px; }
+    /* Login screen: position:fixed → centrar con left:50% + translateX. */
+    #login-screen {
+      left: 50% !important;
+      right: auto !important;
+      transform: translateX(-50%) !important;
+      max-width: var(--nexus-web-shell-max) !important;
+      width: 100% !important;
+    }
+    /* Lock screen (PIN re-entry): mismo tratamiento. */
+    #session-lock-screen {
+      left: 50% !important;
+      right: auto !important;
+      transform: translateX(-50%) !important;
+      max-width: var(--nexus-web-shell-max) !important;
+      width: 100% !important;
+    }
+    /* Bottom navigation y elementos fixed inset-x-0 / left-0 right-0:
+       centrar al ancho del shell para que no se peguen al borde izquierdo. */
+    .fixed.inset-x-0,
+    .fixed.left-0.right-0,
+    nav.fixed.bottom-0,
+    div.fixed.bottom-0.left-0,
+    div.fixed.bottom-0.inset-x-0 {
+      left: 50% !important;
+      right: auto !important;
+      transform: translateX(-50%) !important;
+      max-width: var(--nexus-web-shell-max) !important;
+      width: 100% !important;
+    }
+    /* Banners (sync, web auth) fixed top-0 inset-x-0: idem. */
+    div.fixed.top-0.left-0,
+    div.fixed.top-0.inset-x-0,
+    #nexus-cloud-sync-banner,
+    #nexus-web-auth-banner {
+      left: 50% !important;
+      right: auto !important;
+      transform: translateX(-50%) !important;
+      max-width: var(--nexus-web-shell-max) !important;
+      width: 100% !important;
+    }
   }
 </style>
 
@@ -4907,12 +4937,20 @@
         function nexusWebGoogleRedirectPending() {
             if (nexusIsOAuthReturnUrl()) return true;
             if (window.__nexusGoogleLoginInFlight) return true;
-            const startedAt = Number(sessionStorage.getItem('nexus_google_redirect_started_at') || 0);
+            // Solo flags REALES de redirect (no el user_triggered, que se setea también para popup).
             const flagged = sessionStorage.getItem('nexus_google_redirect_pending') === '1'
-                || sessionStorage.getItem('nexus_auth_use_redirect') === '1'
-                || sessionStorage.getItem('nexus_google_user_triggered') === '1';
+                || sessionStorage.getItem('nexus_auth_use_redirect') === '1';
             if (!flagged) return false;
-            if (!startedAt) return flagged;
+            const startedAt = Number(sessionStorage.getItem('nexus_google_redirect_started_at') || 0);
+            if (!startedAt) {
+                // Flag huérfano sin marca temporal: descártalo.
+                try {
+                    sessionStorage.removeItem('nexus_google_redirect_pending');
+                    sessionStorage.removeItem('nexus_auth_use_redirect');
+                } catch (e) {}
+                return false;
+            }
+            // Solo válido durante 3 minutos.
             return (Date.now() - startedAt) < 180000;
         }
 
@@ -5106,17 +5144,21 @@
 
             if (oauthReturn) beginLoginRoutingUI('Completando acceso con Google…');
 
+            // Watchdog v2: arranque rápido (8s) si no hay OAuth real,
+            // y máximo 20s si hay OAuth return pero Firebase no responde.
             const bootWatchdog = setTimeout(() => {
                 if (nexusLoginRoutingIsDone()) return;
                 if (_loginRoutePhase === 'terms' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'routing' || _loginRoutePhase === 'first-setup') return;
                 const loading = $id('login-routing-loading');
                 if (!loading || loading.classList.contains('hidden')) return;
-                if (oauthReturn || nexusWebGoogleRedirectPending()) return;
-                console.warn('[NEXUS] watchdog arranque: liberando pantalla de login');
+                console.warn('[NEXUS] watchdog arranque: liberando pantalla de login (oauthReturn=' + oauthReturn + ')');
+                nexusClearGoogleRedirectFlags();
                 nexusSanitizeStaleRedirectFlags();
+                window.__nexusGoogleLoginInFlight = false;
+                window.__nexusUserTriggeredGoogleLogin = false;
                 hideLoginRoutingLoading();
                 showInitialLoginChoice();
-            }, oauthReturn ? 45000 : 8000);
+            }, oauthReturn ? 20000 : 8000);
 
             (async () => {
                 try {
@@ -5686,6 +5728,32 @@
             nexusSetGoogleLoginButtonBusy(false);
         }
 
+        /**
+         * NEXUS WEB AUTH v8 — Limpieza dura al iniciar un nuevo flujo web.
+         * Borra TODOS los flags huérfanos de intentos previos (sessionStorage + window).
+         * Llamar al principio de nexusGoogleAuthViaWebPopup para empezar limpio.
+         */
+        function nexusResetWebAuthState() {
+            try {
+                sessionStorage.removeItem('nexus_google_redirect_pending');
+                sessionStorage.removeItem('nexus_auth_use_redirect');
+                sessionStorage.removeItem('nexus_google_user_triggered');
+                sessionStorage.removeItem('nexus_google_redirect_started_at');
+                sessionStorage.removeItem('nexus_auth_use_popup');
+            } catch (e) { /* noop */ }
+            window.__nexusGoogleLoginInFlight = false;
+            window.__nexusUserTriggeredGoogleLogin = false;
+            window.__nexusRedirectResultConsumed = false;
+            window.__nexusGoogleNativePending = null;
+            window.__nexusPendingGoogleUser = null;
+            // Si quedó "Completando acceso con Google…" colgado, lo quitamos.
+            try {
+                if (typeof hideLoginRoutingLoading === 'function' && _loginRoutePhase !== 'app') {
+                    hideLoginRoutingLoading();
+                }
+            } catch (e) { /* noop */ }
+        }
+
         async function nexusGoogleAuthViaNativeRepository() {
             nexusClearStaleGoogleInFlight();
             if (!window.__nexusUserTriggeredGoogleLogin) {
@@ -5720,93 +5788,108 @@
 
         async function nexusGoogleAuthViaWebPopup() {
             nexusClearStaleGoogleInFlight();
+            // NEXUS WEB AUTH v8 — Flujo restablecido: simple, directo, con watchdog.
+            // Solo popup. Redirect SOLO si el navegador bloquea popup.
+            // Cualquier error muestra mensaje claro y restaura el botón.
             if (isNexusNativeContainer()) {
                 console.warn('[NEXUS] web-popup en contenedor iOS; delegando a nativo');
                 return nexusGoogleAuthViaNativeRepository();
             }
+            // Limpieza dura: borra flags huérfanos de intentos previos.
+            nexusResetWebAuthState();
             let redirectStarted = false;
             window.__nexusGoogleLoginInFlight = true;
             window.__nexusGoogleLoginStartedAt = Date.now();
             window.__nexusUserTriggeredGoogleLogin = true;
             sessionStorage.setItem('nexus_google_user_triggered', '1');
+            sessionStorage.setItem('nexus_google_redirect_started_at', String(Date.now()));
             nexusSetGoogleLoginButtonBusy(true);
+
+            // Watchdog 45s: si nada pasa, restaura el botón en lugar de quedar colgado.
+            const watchdogStamp = window.__nexusGoogleLoginStartedAt;
+            const watchdogTimer = setTimeout(() => {
+                if (window.__nexusGoogleLoginStartedAt !== watchdogStamp) return;
+                if (_loginRoutePhase === 'app' || sessionUnlocked) return;
+                if (_loginRoutePhase === 'pin' || _loginRoutePhase === 'terms') return;
+                console.warn('[NEXUS] web-popup watchdog 45s → restablecer login');
+                window.__nexusGoogleLoginInFlight = false;
+                window.__nexusUserTriggeredGoogleLogin = false;
+                resetGoogleLoginButton();
+                hideLoginRoutingLoading();
+                showInitialLoginChoice();
+            }, 45000);
+
             try {
                 const originErr = nexusAuthOriginBlocked();
-                if (originErr) {
-                    _loginRoutePhase = 'error';
-                    alert(originErr);
-                    return;
-                }
-                const useRedirectFirst = nexusShouldUseRedirectFirst();
-                console.log('[NEXUS] Auth channel: web-popup', {
-                    origin: window.location.origin,
-                    hostname: window.location.hostname,
-                    useRedirectFirst,
-                    preferRedirect: nexusPreferGoogleRedirect()
-                });
-                const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
+                if (originErr) { alert(originErr); return; }
 
-                if (useRedirectFirst) {
-                    nexusMarkGoogleRedirectStarted();
-                    beginLoginRoutingUI('Redirigiendo a Google…');
-                    redirectStarted = true;
-                    await signInWithRedirect(auth, provider);
-                    return;
-                }
-
-                try {
-                    beginLoginRoutingUI('Esperando confirmación de Google…');
-                    const result = await signInWithPopup(auth, provider);
-                    console.log('[NEXUS] signInWithPopup OK', result.user?.email);
-                    fbUser = await nexusConfirmGoogleAuthReady(auth, result.user, result.user?.email);
-                    beginLoginRoutingUI('Abriendo tu bóveda…');
-                    await nexusCompleteGoogleWebLogin(fbUser);
-                } catch (popupErr) {
-                    if (popupErr?.code === 'auth/popup-closed-by-user') throw popupErr;
-                    const useRedirect = ['auth/popup-blocked', 'auth/cancelled-popup-request', 'auth/internal-error'].includes(popupErr?.code)
-                        || /popup-blocked|blocked|internal-error/i.test(popupErr?.message || '');
-                    if (!useRedirect) throw popupErr;
-                    console.warn('[NEXUS] Popup falló, usando redirect', popupErr?.code, popupErr?.message);
-                    nexusMarkGoogleRedirectStarted();
-                    beginLoginRoutingUI('Redirigiendo a Google…');
-                    redirectStarted = true;
-                    await signInWithRedirect(auth, provider);
-                    return;
-                }
-            } catch (error) {
-                console.error('[NEXUS] Google login web-popup', {
-                    code: error?.code,
-                    message: error?.message,
+                console.log('[NEXUS] web-popup → start', {
                     origin: window.location.origin,
                     hostname: window.location.hostname
                 });
-                _loginRoutePhase = 'error';
-                const txt = nexusFormatAuthError(error);
-                if (error?.code === 'auth/unauthorized-domain') {
-                    const msg = '⚠️ ' + txt;
-                    if (typeof triggerUIConfirm === 'function') triggerUIConfirm(msg, 'mock_google_login');
-                    else alert(msg);
+                beginLoginRoutingUI('Conectando con Google…');
+                const { auth, provider, signInWithPopup, signInWithRedirect } = await nexusPrepareGoogleWebAuth();
+                beginLoginRoutingUI('Esperando confirmación de Google…');
+
+                let result;
+                try {
+                    result = await signInWithPopup(auth, provider);
+                    console.log('[NEXUS] signInWithPopup OK', result?.user?.email);
+                } catch (popupErr) {
+                    const code = popupErr?.code || '';
+                    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+                        console.log('[NEXUS] usuario cerró popup Google');
+                        return;
+                    }
+                    // Popup bloqueado por navegador → fallback a redirect (sin perder estado).
+                    if (code === 'auth/popup-blocked') {
+                        console.warn('[NEXUS] popup bloqueado, usando redirect');
+                        nexusMarkGoogleRedirectStarted();
+                        beginLoginRoutingUI('Redirigiendo a Google…');
+                        redirectStarted = true;
+                        await signInWithRedirect(auth, provider);
+                        return;
+                    }
+                    // Cualquier otro error: mostrar mensaje claro y abortar.
+                    const txt = nexusFormatAuthError(popupErr) || code || 'Error desconocido';
+                    console.error('[NEXUS] signInWithPopup fallo', code, popupErr);
+                    alert('Error al autenticar con Google:\n' + txt);
                     return;
                 }
-                if (error?.code !== 'auth/popup-closed-by-user' && txt && window.__nexusUserTriggeredGoogleLogin) {
-                    alert('Error de autenticación: ' + txt);
+
+                if (!result?.user || !result.user.email) {
+                    alert('Firebase no devolvió un usuario válido. Reintenta.');
+                    return;
                 }
+
+                fbUser = result.user;
+                beginLoginRoutingUI('Abriendo tu bóveda…');
+                // Usa el path oficial con lock interno (evita doble entrada por listener).
+                const entered = await nexusCompleteGoogleWebLogin(fbUser);
+                if (!entered) {
+                    console.warn('[NEXUS] nexusCompleteGoogleWebLogin retornó false');
+                    alert('La app no pudo abrirse tras el login. Recarga la página.');
+                    return;
+                }
+                nexusClearGoogleRedirectFlags();
+                console.log('[NEXUS] login web Google COMPLETO →', fbUser.email);
+            } catch (error) {
+                console.error('[NEXUS] web-popup fatal', error);
+                const txt = nexusFormatAuthError(error) || error?.message || 'Error desconocido';
+                alert('Error de autenticación: ' + txt);
             } finally {
+                clearTimeout(watchdogTimer);
                 if (redirectStarted) return;
                 window.__nexusGoogleLoginInFlight = false;
                 window.__nexusUserTriggeredGoogleLogin = false;
-                if (_loginRoutePhase === 'error') {
-                    window.__nexusPendingGoogleUser = null;
-                    window.__nexusGoogleNativePending = null;
+                // Si llegamos a la app, dejamos todo limpio; si no, restauramos el botón.
+                if (_loginRoutePhase === 'app' || sessionUnlocked) {
+                    resetGoogleLoginButton();
+                    hideLoginRoutingLoading();
+                } else {
                     resetGoogleLoginButton();
                     hideLoginRoutingLoading();
                     showInitialLoginChoice();
-                } else if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') {
-                    window.__nexusPendingGoogleUser = null;
-                    resetGoogleLoginButton();
-                } else if (!redirectStarted) {
-                    window.__nexusPendingGoogleUser = null;
-                    resetGoogleLoginButton();
                 }
             }
         }
@@ -6717,56 +6800,68 @@
         window.nexusRenderLoginAvatars = nexusRenderLoginAvatars;
 
         /** One-tap resume: Google → restore_session con timeout; Local → entrada directa. */
+        /**
+         * NEXUS QUICK-RESUME v3 — Simplificado: sin watchdog de bridge nativo.
+         * - Perfil local → entra directo a la app (sin Firebase).
+         * - Perfil Google → dispara nexusGoogleSignIn() inmediatamente.
+         *   Esto delega al sheet nativo iOS o al popup web según corresponda,
+         *   y respeta el flujo normal. No depende de un bridge restore_session
+         *   (que la app Swift puede no implementar y dejaría el avatar colgado).
+         */
         async function nexusQuickResume(email) {
             const target = String(email || '').trim().toLowerCase();
-            if (!target) return;
-            const profile = loadLocalProfile(target);
-            if (!profile) {
-                console.warn('[NEXUS] quick-resume: perfil no encontrado para', target);
+            if (!target) {
+                console.warn('[NEXUS] quick-resume: email vacío → ir a signin');
                 return nexusGoogleSignIn();
             }
-            console.log('[NEXUS] quick-resume', { email: target, isGoogle: profile.isGoogle });
-            beginLoginRoutingUI(profile.isGoogle ? 'Restaurando sesión Google…' : 'Abriendo bóveda local…');
-
-            if (!profile.isGoogle) {
-                // Bóveda local: entrada directa sin Firebase.
-                return nexusEnterAppLocal(profile);
+            const profile = loadLocalProfile(target);
+            if (!profile) {
+                console.warn('[NEXUS] quick-resume: perfil no encontrado →', target);
+                return nexusGoogleSignIn();
             }
+            console.log('[NEXUS] quick-resume', { email: target, isGoogle: !!profile.isGoogle, isLocal: !!profile.isLocal });
 
-            // Google: intenta restore_session nativo iOS y, si no responde en 4s,
-            // hace fallback automático al flujo completo de signIn (igual que botón).
-            const channel = (typeof nexusGetAuthChannel === 'function') ? nexusGetAuthChannel() : 'web';
-            const hasNativeBridge = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native_google_login);
-
-            if (channel === 'ios-native' && hasNativeBridge) {
-                window.__nexusUserTriggeredGoogleLogin = true;
-                window.__nexusGoogleLoginInFlight = true;
-                window.__nexusGoogleLoginStartedAt = Date.now();
-                const watchdogKey = '_quickResume_' + target + '_' + Date.now();
-                window.__nexusQuickResumeWatchdog = watchdogKey;
+            // Bóveda local: entrada directa sin Firebase.
+            if (profile.isLocal && !profile.isGoogle) {
+                beginLoginRoutingUI('Abriendo bóveda local…');
                 try {
-                    window.webkit.messageHandlers.native_google_login.postMessage({ action: 'restore_session', email: target });
-                    console.log('[NEXUS] quick-resume → bridge nativo enviado');
+                    const ok = await nexusEnterAppLocal(profile);
+                    if (!ok) {
+                        hideLoginRoutingLoading();
+                        showInitialLoginChoice();
+                    }
                 } catch (e) {
-                    console.warn('[NEXUS] quick-resume native postMessage', e);
-                    window.__nexusGoogleLoginInFlight = false;
-                    return nexusGoogleSignIn();
+                    console.error('[NEXUS] quick-resume local fallo', e);
+                    hideLoginRoutingLoading();
+                    showInitialLoginChoice();
+                    alert('No se pudo abrir la bóveda local. Reintenta.');
                 }
-                // Watchdog: si en 4s el bridge no completó el login, fallback al flujo full.
-                setTimeout(() => {
-                    if (window.__nexusQuickResumeWatchdog !== watchdogKey) return;
-                    if (nexusLoginSessionActive && nexusLoginSessionActive()) return;
-                    if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms') return;
-                    console.warn('[NEXUS] quick-resume timeout 4s → fallback a Google sign-in completo');
-                    window.__nexusGoogleLoginInFlight = false;
-                    window.__nexusQuickResumeWatchdog = null;
-                    nexusSetLoginStatusText && nexusSetLoginStatusText('Abriendo selector de cuenta…');
-                    nexusGoogleSignIn();
-                }, 4000);
                 return;
             }
-            // No hay bridge nativo (navegador o iOS sin bridge): flujo Google estándar.
-            return nexusGoogleSignIn();
+
+            // Perfil Google → preseleccionar email para el sheet nativo y disparar signin.
+            loginSelectedEmail = target;
+            window.__nexusPreferredGoogleEmail = target;
+            beginLoginRoutingUI('Conectando con Google…');
+            // Watchdog independiente del quick-resume: si en 30s no pasa nada, restaurar.
+            const stamp = Date.now();
+            window.__nexusQuickResumeStamp = stamp;
+            setTimeout(() => {
+                if (window.__nexusQuickResumeStamp !== stamp) return;
+                if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms' || _loginRoutePhase === 'first-setup') return;
+                if (sessionUnlocked) return;
+                console.warn('[NEXUS] quick-resume watchdog 30s → restaurar pantalla login');
+                window.__nexusGoogleLoginInFlight = false;
+                hideLoginRoutingLoading();
+                showInitialLoginChoice();
+            }, 30000);
+            try {
+                await nexusGoogleSignIn();
+            } catch (e) {
+                console.error('[NEXUS] quick-resume signin fallo', e);
+                hideLoginRoutingLoading();
+                showInitialLoginChoice();
+            }
         }
         window.nexusQuickResume = nexusQuickResume;
 
