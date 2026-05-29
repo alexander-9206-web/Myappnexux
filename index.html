@@ -2,8 +2,9 @@
 <html lang="es">
 <head>
 <!-- ================================================================
-     NEXUS WEB AUTOPATCH (auto-generado por sync-web-bundle.sh)
+     NEXUS WEB AUTOPATCH v2 (auto-generado por sync-web-bundle.sh)
      Bundle: appwebnavegador.html · Canal: navegador (signInWithPopup)
+     Layout: contenedor centrado max 480px desktop, full-width mobile.
      No modificar manualmente — se sobrescribe en cada sync.
      ================================================================ -->
 <script>
@@ -18,7 +19,7 @@
         el = document.createElement('div');
         el.id = 'nexus-web-auth-banner';
         el.textContent = msg;
-        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:10px 14px;font:600 13px/1.4 system-ui,sans-serif;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:10px 14px;font:600 13px/1.4 system-ui,sans-serif;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
         (document.body || document.documentElement).appendChild(el);
       } catch (e) { console.error('[NEXUS-WEB] banner', e, msg); }
     }
@@ -36,9 +37,58 @@
         }
       }
     });
-    console.log('[NEXUS-WEB] Bundle navegador v1 listo · host=' + location.hostname);
+    console.log('[NEXUS-WEB] Bundle navegador v2 listo · host=' + location.hostname);
   })();
 </script>
+<style id="nexus-web-shell-css">
+  /* ==== NEXUS Web Shell: contenedor mobile-first centrado en desktop ====
+     iOS NO usa este bundle (recibe app.html puro), por lo que estos
+     estilos solo aplican a navegadores de escritorio/tablet/móvil. */
+  :root { --nexus-web-shell-max: 480px; }
+  html, body {
+    background: #0b1020;
+    min-height: 100vh;
+  }
+  /* En desktop (≥768px) limitamos el ancho del cuerpo y centramos. */
+  @media (min-width: 768px) {
+    body {
+      max-width: var(--nexus-web-shell-max);
+      margin: 0 auto !important;
+      box-shadow: 0 0 60px rgba(0,0,0,0.45);
+      min-height: 100vh;
+      background: #0f172a;
+      position: relative;
+    }
+    /* Fondo decorativo fuera del shell para que no se vea aburrido. */
+    html::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(99,102,241,0.18), transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(168,85,247,0.18), transparent 45%),
+        linear-gradient(135deg, #020617 0%, #0b1020 100%);
+    }
+    /* Login screen también respeta el max-width. */
+    #login-screen {
+      max-width: var(--nexus-web-shell-max);
+      margin: 0 auto;
+      left: auto !important;
+      right: auto !important;
+    }
+    /* Elementos fixed que ocupan todo el ancho: los centramos al shell. */
+    .fixed.inset-x-0, .fixed.left-0.right-0 {
+      max-width: var(--nexus-web-shell-max);
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+  }
+  /* En ≥1280px da más aire al shell. */
+  @media (min-width: 1280px) {
+    :root { --nexus-web-shell-max: 520px; }
+  }
+</style>
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
@@ -4809,6 +4859,13 @@
         }
 
         function nexusEnsureLoginScreenVisible() {
+            // BLINDAJE: si ya estamos dentro de la app (shell liberado y sesión desbloqueada),
+            // NO regresar al login pase lo que pase. Esto evita que un listener tardío
+            // de Firebase/native bridge reabra el login después de entrar.
+            if (_loginRoutePhase === 'app' && sessionUnlocked && currentUser && window.__nexusAppShellReady) {
+                console.log('[NEXUS] ensureLoginScreenVisible bloqueado: ya estamos en la app');
+                return;
+            }
             document.documentElement.classList.add('nexus-auth-pending');
             window.__nexusAppShellReady = false;
             const ls = $id('login-screen');
@@ -6055,14 +6112,18 @@
             }
         }
 
-        /** Usuario canceló Google o falló el puente nativo → arranque limpio total. */
+        /** Usuario canceló Google o falló el puente nativo → arranque limpio total.
+         *  BLINDAJE: si ya entramos a la app (phase 'app' + sessionUnlocked + shell ready),
+         *  NO regresar al login. Solo limpia flags transitorios. */
         function nexusAbortGoogleLogin(reason) {
+            const alreadyInApp = (_loginRoutePhase === 'app' && sessionUnlocked && currentUser && window.__nexusAppShellReady);
             window.__nexusGoogleNativePending = null;
             window.__nexusGoogleLoginInFlight = false;
             window.__nexusGoogleLoginStartedAt = 0;
             window.__nexusUserTriggeredGoogleLogin = false;
             window.__nexusPendingGoogleUser = null;
             window.__nexusGoogleNativeAbortTimer = null;
+            window.__nexusQuickResumeWatchdog = null;
             // Limpia TODOS los flags de sesión (sino, guards en showInitialLoginChoice quedan colgados)
             if (typeof nexusClearGoogleRedirectFlags === 'function') {
                 nexusClearGoogleRedirectFlags();
@@ -6071,6 +6132,12 @@
                 sessionStorage.removeItem('nexus_auth_use_redirect');
                 sessionStorage.removeItem('nexus_google_user_triggered');
                 sessionStorage.removeItem('nexus_google_redirect_started_at');
+            }
+            if (alreadyInApp) {
+                // Ya estamos en la app — solo limpieza de spinners, no redirigir al login.
+                hideLoginRoutingLoading();
+                console.log('[NEXUS] abortGoogleLogin ignorado: ya estamos en la app', reason || '');
+                return;
             }
             if (_loginRoutePhase !== 'app') _loginRoutePhase = null;
             hideLoginRoutingLoading();
@@ -6649,7 +6716,7 @@
         }
         window.nexusRenderLoginAvatars = nexusRenderLoginAvatars;
 
-        /** One-tap resume: Google → restore_session silenciosa; Local → entrada directa. */
+        /** One-tap resume: Google → restore_session con timeout; Local → entrada directa. */
         async function nexusQuickResume(email) {
             const target = String(email || '').trim().toLowerCase();
             if (!target) return;
@@ -6658,25 +6725,48 @@
                 console.warn('[NEXUS] quick-resume: perfil no encontrado para', target);
                 return nexusGoogleSignIn();
             }
+            console.log('[NEXUS] quick-resume', { email: target, isGoogle: profile.isGoogle });
             beginLoginRoutingUI(profile.isGoogle ? 'Restaurando sesión Google…' : 'Abriendo bóveda local…');
-            if (profile.isGoogle) {
-                // Reutiliza el camino de Google nativo (iOS) o popup web. El bridge
-                // de iOS soporta `restore_session` con email hint.
-                const channel = (typeof nexusGetAuthChannel === 'function') ? nexusGetAuthChannel() : 'web';
-                if (channel === 'ios-native') {
-                    try {
-                        window.__nexusUserTriggeredGoogleLogin = true;
-                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native_google_login) {
-                            window.webkit.messageHandlers.native_google_login.postMessage({ action: 'restore_session', email: target });
-                            return;
-                        }
-                    } catch (e) { console.warn('[NEXUS] quick-resume native', e); }
-                }
-                // Fallback web: signIn estándar (el usuario completa selección si toca).
-                return nexusGoogleSignIn();
+
+            if (!profile.isGoogle) {
+                // Bóveda local: entrada directa sin Firebase.
+                return nexusEnterAppLocal(profile);
             }
-            // Bóveda local: entrada directa sin Firebase.
-            return nexusEnterAppLocal(profile);
+
+            // Google: intenta restore_session nativo iOS y, si no responde en 4s,
+            // hace fallback automático al flujo completo de signIn (igual que botón).
+            const channel = (typeof nexusGetAuthChannel === 'function') ? nexusGetAuthChannel() : 'web';
+            const hasNativeBridge = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native_google_login);
+
+            if (channel === 'ios-native' && hasNativeBridge) {
+                window.__nexusUserTriggeredGoogleLogin = true;
+                window.__nexusGoogleLoginInFlight = true;
+                window.__nexusGoogleLoginStartedAt = Date.now();
+                const watchdogKey = '_quickResume_' + target + '_' + Date.now();
+                window.__nexusQuickResumeWatchdog = watchdogKey;
+                try {
+                    window.webkit.messageHandlers.native_google_login.postMessage({ action: 'restore_session', email: target });
+                    console.log('[NEXUS] quick-resume → bridge nativo enviado');
+                } catch (e) {
+                    console.warn('[NEXUS] quick-resume native postMessage', e);
+                    window.__nexusGoogleLoginInFlight = false;
+                    return nexusGoogleSignIn();
+                }
+                // Watchdog: si en 4s el bridge no completó el login, fallback al flujo full.
+                setTimeout(() => {
+                    if (window.__nexusQuickResumeWatchdog !== watchdogKey) return;
+                    if (nexusLoginSessionActive && nexusLoginSessionActive()) return;
+                    if (_loginRoutePhase === 'app' || _loginRoutePhase === 'pin' || _loginRoutePhase === 'terms') return;
+                    console.warn('[NEXUS] quick-resume timeout 4s → fallback a Google sign-in completo');
+                    window.__nexusGoogleLoginInFlight = false;
+                    window.__nexusQuickResumeWatchdog = null;
+                    nexusSetLoginStatusText && nexusSetLoginStatusText('Abriendo selector de cuenta…');
+                    nexusGoogleSignIn();
+                }, 4000);
+                return;
+            }
+            // No hay bridge nativo (navegador o iOS sin bridge): flujo Google estándar.
+            return nexusGoogleSignIn();
         }
         window.nexusQuickResume = nexusQuickResume;
 
