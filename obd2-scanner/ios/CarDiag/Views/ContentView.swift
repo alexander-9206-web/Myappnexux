@@ -14,13 +14,17 @@ struct ContentView: View {
                 .tabItem { Label("Módulos", systemImage: "square.grid.2x2") }
                 .tag(1)
 
+            TachometerView()
+                .tabItem { Label("Tacómetro", systemImage: "gauge.with.needle") }
+                .tag(2)
+
             LiveDataView()
                 .tabItem { Label("En vivo", systemImage: "gauge.with.dots.needle.67percent") }
-                .tag(2)
+                .tag(3)
 
             VehicleView()
                 .tabItem { Label("Vehículo", systemImage: "car") }
-                .tag(3)
+                .tag(4)
         }
         .environmentObject(obd)
         .tint(Color.cyan)

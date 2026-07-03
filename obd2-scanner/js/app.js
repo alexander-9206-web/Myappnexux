@@ -18,6 +18,7 @@
     clearTimeout(el._t);
     el._t = setTimeout(function () { el.hidden = true; }, 3200);
   }
+  window.__tachoToast = toast;
 
   function setConn(state, label) {
     $('conn-badge').dataset.state = state;
@@ -33,6 +34,7 @@
       if (id === 'btn-disconnect') el.hidden = !on;
     });
     document.querySelectorAll('.connect-btn').forEach(function (b) { b.disabled = on; });
+    if (window.TachometerModule) TachometerModule.setConnected(on);
   }
 
   function showInitLog(lines) {
@@ -194,6 +196,7 @@
 
   async function disconnect() {
     stopLive();
+    if (window.TachometerModule) TachometerModule.stop();
     scanResults = {};
     buildModuleGrid();
     updateSummary();
@@ -389,6 +392,9 @@
 
   buildGauges();
   buildModuleGrid();
+  if (window.TachometerModule) {
+    TachometerModule.init(function () { return elm; });
+  }
 
   if (isIOS()) {
     $('ios-banner').hidden = false;

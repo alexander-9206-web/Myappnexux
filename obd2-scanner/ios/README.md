@@ -23,6 +23,13 @@ ECM, TCM, ABS, SRS, BCM, HVAC, TPMS, EPS, IC, Gateway, SKIM, BMS, PAM, Radio
 
 Cada módulo lee códigos **almacenados**, **pendientes** y **permanentes** vía headers CAN (`AT SH`).
 
+## Tacómetro y odómetro
+
+- **Tacómetro**: lectura RPM en vivo (PID 0C) con aguja animada
+- **Edición**: escala máxima, redline, zona de advertencia, calibración y tema visual
+- **Odómetro**: lectura vía PID A6 y UDS (tablero IC · CAN 720)
+- **Escritura odómetro**: UDS `2E` con DID configurable (solo recalibración legítima)
+
 ## MY327 Bluetooth Classic
 
 iOS no permite BT Classic desde apps sin certificación MFi. Opciones:

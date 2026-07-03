@@ -1,4 +1,4 @@
-var CACHE = 'obd2-v2';
+var CACHE = 'obd2-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ var ASSETS = [
   './js/dtc.js',
   './js/elm327.js',
   './js/connectors.js',
+  './js/tachometer.js',
   './js/app.js',
   './manifest.json',
   './icons/icon.svg'

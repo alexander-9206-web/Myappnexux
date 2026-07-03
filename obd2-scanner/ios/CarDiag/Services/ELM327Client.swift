@@ -160,6 +160,104 @@ final class ELM327Client: ObservableObject {
         liveTask = nil
     }
 
+    private var tachTask: Task<Void, Never>?
+
+    func startTachometer(onUpdate: @escaping (Double) -> Void) {
+        tachTask?.cancel()
+        tachTask = Task {
+            while !Task.isCancelled && isConnected {
+                if let rpm = try? await readRPM() {
+                    onUpdate(rpm)
+                }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+        }
+    }
+
+    func stopTachometer() {
+        tachTask?.cancel()
+        tachTask = nil
+    }
+
+    func readRPM() async throws -> Double {
+        let resp = try await send("010C", timeout: 4)
+        let hex = resp.uppercased().filter { "0123456789ABCDEF".contains($0) }
+        guard let range = hex.range(of: "410C"), hex.distance(from: range.upperBound, to: hex.endIndex) >= 4 else {
+            throw URLError(.cannotParseResponse)
+        }
+        let data = hex[range.upperBound...]
+        let b0 = Int(data.prefix(2), radix: 16) ?? 0
+        let b1 = Int(data.dropFirst(2).prefix(2), radix: 16) ?? 0
+        return Double(b0 * 256 + b1) / 4.0
+    }
+
+    struct OdometerReading {
+        let km: Double
+        let source: String
+    }
+
+    func readOdometer() async -> OdometerReading? {
+        if let km = try? await readOdometerPID() {
+            return OdometerReading(km: km, source: "PID 01A6 (OBD)")
+        }
+        let udsAttempts: [(String, String, String)] = [
+            ("720", "F190", "UDS F190 (Tablero IC)"),
+            ("720", "DD01", "UDS DD01 (Tablero)"),
+            ("720", "B012", "UDS B012 (Tablero)"),
+            ("7E0", "F190", "UDS F190 (ECM)")
+        ]
+        for (header, did, label) in udsAttempts {
+            if let km = try? await readOdometerUDS(header: header, did: did) {
+                return OdometerReading(km: km, source: label)
+            }
+        }
+        return nil
+    }
+
+    func writeOdometer(km: Double, did: String) async throws {
+        let didClean = did.uppercased().filter { "0123456789ABCDEF".contains($0) }
+        let tenths = Int(km * 10)
+        let bytes = String(format: "%02X%02X%02X", (tenths >> 16) & 0xFF, (tenths >> 8) & 0xFF, tenths & 0xFF)
+        try await setHeader("720")
+        let resp = try await send("2E\(didClean)\(bytes)", timeout: 10)
+        try await resetHeader()
+        if resp.uppercased().contains("NO DATA") || resp.uppercased().contains("ERROR") {
+            throw URLError(.cannotWriteToFile)
+        }
+    }
+
+    private func readOdometerPID() async throws -> Double {
+        let resp = try await send("01A6", timeout: 4)
+        let hex = resp.uppercased().filter { "0123456789ABCDEF".contains($0) }
+        guard let range = hex.range(of: "41A6"), hex.distance(from: range.upperBound, to: hex.endIndex) >= 6 else {
+            throw URLError(.cannotParseResponse)
+        }
+        let data = hex[range.upperBound...]
+        let b0 = Int(data.prefix(2), radix: 16) ?? 0
+        let b1 = Int(data.dropFirst(2).prefix(2), radix: 16) ?? 0
+        let b2 = Int(data.dropFirst(4).prefix(2), radix: 16) ?? 0
+        return Double(b0 * 65536 + b1 * 256 + b2) / 10.0
+    }
+
+    private func readOdometerUDS(header: String, did: String) async throws -> Double {
+        try await setHeader(header)
+        let resp = try await send("22\(did)", timeout: 6)
+        try await resetHeader()
+        let hex = resp.uppercased().filter { "0123456789ABCDEF".contains($0) }
+        let marker = "62\(did.uppercased())"
+        guard let range = hex.range(of: marker), hex.distance(from: range.upperBound, to: hex.endIndex) >= 6 else {
+            throw URLError(.cannotParseResponse)
+        }
+        let data = hex[range.upperBound...]
+        let b0 = Int(data.prefix(2), radix: 16) ?? 0
+        let b1 = Int(data.dropFirst(2).prefix(2), radix: 16) ?? 0
+        let b2 = Int(data.dropFirst(4).prefix(2), radix: 16) ?? 0
+        if did.uppercased() == "F190" || did.uppercased() == "DD01" {
+            return Double(b0 * 65536 + b1 * 256 + b2) / 10.0
+        }
+        return Double(b0 * 65536 + b1 * 256 + b2)
+    }
+
     private func readPID(_ pid: String) async throws -> String {
         let resp = try await send("01\(pid)", timeout: 4)
         return formatPID(resp, pid: pid) ?? "—"

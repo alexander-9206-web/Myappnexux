@@ -9,6 +9,10 @@ window.OBD_PIDS = [
   { pid: '10', name: 'Flujo MAF', unit: 'g/s', fmt: function (b) { return ((b[0] * 256 + b[1]) / 100); }, max: 300 },
   { pid: '42', name: 'Voltaje', unit: 'V', fmt: function (b) { return ((b[0] * 256 + b[1]) / 1000); }, max: 16 },
   { pid: '2F', name: 'Combustible', unit: '%', fmt: function (b) { return (b[0] * 100 / 255); }, max: 100 },
+  { pid: 'A6', name: 'Odómetro', unit: 'km', fmt: function (b) {
+    if (b.length < 3) return b[0];
+    return ((b[0] * 65536) + (b[1] * 256) + b[2]) / 10;
+  }, max: 999999 },
   { pid: '06', name: 'Mezcla STFT', unit: '%', fmt: function (b) { return ((b[0] - 128) * 100 / 128); }, max: 25, signed: true },
   { pid: '07', name: 'Mezcla LTFT', unit: '%', fmt: function (b) { return ((b[0] - 128) * 100 / 128); }, max: 25, signed: true }
 ];

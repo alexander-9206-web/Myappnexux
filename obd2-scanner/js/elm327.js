@@ -176,6 +176,84 @@
     return info;
   };
 
+  Elm327.prototype.readRPM = async function () {
+    var r = await this.readPID('0C');
+    return r ? r.value : null;
+  };
+
+  Elm327.prototype.readOdometer = async function () {
+    var attempts = [
+      { fn: readOdometerPID.bind(null, this), source: 'PID 01A6 (OBD)' },
+      { fn: readOdometerUDS.bind(null, this, '720', 'F190'), source: 'UDS F190 (Tablero IC)' },
+      { fn: readOdometerUDS.bind(null, this, '720', 'DD01'), source: 'UDS DD01 (Tablero)' },
+      { fn: readOdometerUDS.bind(null, this, '720', 'B012'), source: 'UDS B012 (Tablero)' },
+      { fn: readOdometerUDS.bind(null, this, '7E0', 'F190'), source: 'UDS F190 (ECM)' }
+    ];
+    for (var i = 0; i < attempts.length; i++) {
+      try {
+        var km = await attempts[i].fn();
+        if (km != null && km >= 0) return { km: km, source: attempts[i].source };
+      } catch (e) { /* next */ }
+    }
+    return null;
+  };
+
+  Elm327.prototype.writeOdometer = async function (km, did) {
+    did = (did || 'F190').toUpperCase().replace(/[^0-9A-F]/g, '');
+    var kmInt = Math.round(km);
+    var bytes = encodeOdometerKm(kmInt);
+    await this.setHeader('720');
+    var cmd = '2E' + did + bytes;
+    var resp = await this.send(cmd, 10000);
+    await this.resetHeader();
+    if (/NO DATA|ERROR|UNABLE/i.test(resp)) throw new Error('ECU rechazó escritura: ' + resp.split('\n')[0]);
+    return resp;
+  };
+
+  function readOdometerPID(elm) {
+    return elm.readPID('A6').then(function (r) {
+      if (!r || r.raw.length < 3) return null;
+      var b = r.raw;
+      return ((b[0] * 65536) + (b[1] * 256) + b[2]) / 10;
+    });
+  }
+
+  async function readOdometerUDS(elm, header, did) {
+    await elm.setHeader(header);
+    var resp = await elm.send('22' + did, 6000);
+    await elm.resetHeader();
+    return parseOdometerUDS(resp, did);
+  }
+
+  function parseOdometerUDS(raw, did) {
+    var hex = raw.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+    var marker = '62' + did.toUpperCase();
+    var idx = hex.indexOf(marker);
+    if (idx < 0) return null;
+    var data = hex.slice(idx + marker.length);
+    if (data.length < 6) return null;
+    var b0 = parseInt(data.slice(0, 2), 16);
+    var b1 = parseInt(data.slice(2, 4), 16);
+    var b2 = parseInt(data.slice(4, 6), 16);
+    if (did.toUpperCase() === 'F190' || did.toUpperCase() === 'DD01') {
+      return (b0 * 65536 + b1 * 256 + b2) / 10;
+    }
+    return b0 * 65536 + b1 * 256 + b2;
+  }
+
+  function encodeOdometerKm(km) {
+    var tenths = Math.round(km * 10);
+    var b0 = (tenths >> 16) & 0xFF;
+    var b1 = (tenths >> 8) & 0xFF;
+    var b2 = tenths & 0xFF;
+    return padHex(b0) + padHex(b1) + padHex(b2);
+  }
+
+  function padHex(n) {
+    var s = n.toString(16).toUpperCase();
+    return s.length < 2 ? '0' + s : s;
+  }
+
   function parsePIDResponse(raw, pid) {
     var hex = raw.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
     var marker = '41' + pid.toUpperCase();
