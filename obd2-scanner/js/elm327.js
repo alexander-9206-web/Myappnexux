@@ -113,6 +113,69 @@
     return parseVIN(resp);
   };
 
+  Elm327.prototype.setHeader = async function (header) {
+    await this.send('AT SH ' + header, 2000);
+  };
+
+  Elm327.prototype.resetHeader = async function () {
+    await this.send('AT AR', 2000);
+  };
+
+  Elm327.prototype.readModuleDTCs = async function (mod, modeKey) {
+    modeKey = modeKey || 'stored';
+    var mode = global.DTC_MODES[modeKey];
+    if (!mode) throw new Error('Modo DTC inválido');
+    await this.setHeader(mod.header);
+    var resp = await this.send(mode.cmd, 8000);
+    var codes = parseDTCResponse(resp);
+    await this.resetHeader();
+    return codes;
+  };
+
+  Elm327.prototype.clearModuleDTCs = async function (mod) {
+    await this.setHeader(mod.header);
+    var resp = await this.send(mod.clearMode || '04', 5000);
+    await this.resetHeader();
+    return resp;
+  };
+
+  Elm327.prototype.scanAllModules = async function (onProgress) {
+    var results = [];
+    for (var i = 0; i < global.OBD_MODULES.length; i++) {
+      var mod = global.OBD_MODULES[i];
+      if (onProgress) onProgress(mod, i + 1, global.OBD_MODULES.length);
+      var entry = { module: mod, stored: [], pending: [], permanent: [], error: null };
+      try {
+        entry.stored = await this.readModuleDTCs(mod, 'stored');
+        await sleep(80);
+        entry.pending = await this.readModuleDTCs(mod, 'pending');
+        await sleep(80);
+        try {
+          entry.permanent = await this.readModuleDTCs(mod, 'permanent');
+        } catch (e) { /* no todos soportan 0A */ }
+      } catch (e) {
+        entry.error = e.message;
+      }
+      results.push(entry);
+      await sleep(100);
+    }
+    return results;
+  };
+
+  Elm327.prototype.readModuleInfo = async function (mod) {
+    await this.setHeader(mod.header);
+    var info = { module: mod, pids: {} };
+    var sample = ['0C', '0D', '05'];
+    for (var i = 0; i < sample.length; i++) {
+      try {
+        var r = await this.readPID(sample[i]);
+        if (r) info.pids[sample[i]] = r.value;
+      } catch (e) { /* skip */ }
+    }
+    await this.resetHeader();
+    return info;
+  };
+
   function parsePIDResponse(raw, pid) {
     var hex = raw.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
     var marker = '41' + pid.toUpperCase();

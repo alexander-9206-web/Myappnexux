@@ -2,12 +2,15 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#0a1628">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="description" content="Escáner OBD2 compatible con ELM327 / MY327 — datos en vivo, códigos DTC y VIN">
-  <title>OBD2 Scanner · ELM327</title>
+  <meta name="apple-mobile-web-app-title" content="CarDiag">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="description" content="Diagnóstico OBD2 iOS — todos los módulos ECU, códigos DTC y datos en vivo. ELM327 / MY327">
+  <title>CarDiag · OBD2 iOS</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon.svg">
@@ -19,8 +22,8 @@
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">⬡</span>
         <div>
-          <h1>OBD2 Scanner</h1>
-          <p class="subtitle">ELM327 · MY327</p>
+          <h1>CarDiag</h1>
+          <p class="subtitle">Diagnóstico completo · iOS</p>
         </div>
       </div>
       <div class="conn-badge" id="conn-badge" data-state="off">
@@ -29,46 +32,50 @@
       </div>
     </header>
 
+    <div class="ios-banner" id="ios-banner" hidden>
+      <strong>iPhone/iPad:</strong> Para MY327 WiFi usa la app nativa en <code>ios/CarDiag</code>. Para BT Classic, conecta vía puente WebSocket.
+    </div>
+
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="connect" role="tab">Conectar</button>
+      <button class="tab" data-tab="modules" role="tab">Módulos</button>
       <button class="tab" data-tab="live" role="tab">En vivo</button>
       <button class="tab" data-tab="dtc" role="tab">Códigos</button>
       <button class="tab" data-tab="info" role="tab">Vehículo</button>
     </nav>
 
     <main>
-      <!-- CONECTAR -->
       <section id="panel-connect" class="panel active">
         <div class="card">
           <h2>Adaptador OBD2</h2>
-          <p class="hint">Compatible con dongles ELM327, MY327 y clones v1.5+ vía USB, BLE o puente local.</p>
+          <p class="hint">ELM327 / MY327 v1.5+. Enciende el contacto del vehículo antes de conectar.</p>
         </div>
 
         <div class="connect-grid">
+          <button class="connect-btn ios-highlight" id="btn-bridge" type="button">
+            <span class="connect-icon">📱</span>
+            <strong>Puente iOS / MY327</strong>
+            <small>Recomendado en iPhone · WiFi / BT</small>
+          </button>
+          <button class="connect-btn" id="btn-ble" type="button">
+            <span class="connect-icon">📶</span>
+            <strong>Bluetooth BLE</strong>
+            <small>ELM327 BLE · Android / Chrome</small>
+          </button>
           <button class="connect-btn" id="btn-serial" type="button">
             <span class="connect-icon">🔌</span>
             <strong>USB / Serial</strong>
             <small>Chrome · Edge · Android</small>
           </button>
-          <button class="connect-btn" id="btn-ble" type="button">
-            <span class="connect-icon">📶</span>
-            <strong>Bluetooth BLE</strong>
-            <small>ELM327 BLE · nRF</small>
-          </button>
-          <button class="connect-btn" id="btn-bridge" type="button">
-            <span class="connect-icon">🌐</span>
-            <strong>Puente MY327</strong>
-            <small>BT Classic · WiFi</small>
-          </button>
         </div>
 
-        <div class="card bridge-config" id="bridge-config" hidden>
+        <div class="card bridge-config" id="bridge-config">
           <label for="bridge-url">URL WebSocket del puente</label>
           <div class="row">
-            <input id="bridge-url" type="url" value="ws://localhost:8765" spellcheck="false">
+            <input id="bridge-url" type="url" value="ws://localhost:8765" spellcheck="false" autocapitalize="off">
             <button class="btn primary" id="btn-bridge-connect" type="button">Conectar</button>
           </div>
-          <p class="hint">Ejecuta <code>node bridge/server.js</code> en tu PC con el MY327 emparejado.</p>
+          <p class="hint">Puente local: <code>npm run bridge</code> (BT) o <code>npm run bridge:wifi</code></p>
         </div>
 
         <div class="card" id="init-log-card" hidden>
@@ -79,7 +86,32 @@
         <button class="btn danger full" id="btn-disconnect" type="button" hidden>Desconectar</button>
       </section>
 
-      <!-- EN VIVO -->
+      <section id="panel-modules" class="panel">
+        <div class="module-actions">
+          <button class="btn primary" id="btn-scan-all" type="button" disabled>Escanear todos</button>
+          <span class="scan-progress" id="scan-progress"></span>
+        </div>
+        <div class="summary-bar" id="module-summary" hidden>
+          <span id="summary-total">0 códigos</span>
+          <span id="summary-modules">0 módulos con fallos</span>
+        </div>
+        <div class="module-grid" id="module-grid"></div>
+        <div id="module-detail" class="module-detail" hidden>
+          <div class="module-detail-head">
+            <button class="btn-back" id="btn-module-back" type="button" aria-label="Volver">←</button>
+            <div>
+              <h3 id="detail-name">—</h3>
+              <p id="detail-header" class="hint">—</p>
+            </div>
+          </div>
+          <div class="dtc-actions">
+            <button class="btn primary" id="btn-read-module" type="button">Leer módulo</button>
+            <button class="btn danger" id="btn-clear-module" type="button">Borrar módulo</button>
+          </div>
+          <div id="module-dtc-list" class="dtc-list"></div>
+        </div>
+      </section>
+
       <section id="panel-live" class="panel">
         <div class="live-controls">
           <button class="btn primary" id="btn-start-live" type="button" disabled>Iniciar lectura</button>
@@ -89,18 +121,21 @@
         <div class="gauge-grid" id="gauge-grid"></div>
       </section>
 
-      <!-- DTC -->
       <section id="panel-dtc" class="panel">
+        <div class="mode-tabs">
+          <button class="mode-tab active" data-dtc-mode="stored">Almacenados</button>
+          <button class="mode-tab" data-dtc-mode="pending">Pendientes</button>
+          <button class="mode-tab" data-dtc-mode="permanent">Permanentes</button>
+        </div>
         <div class="dtc-actions">
-          <button class="btn primary" id="btn-read-dtc" type="button" disabled>Leer códigos</button>
-          <button class="btn danger" id="btn-clear-dtc" type="button" disabled>Borrar códigos</button>
+          <button class="btn primary" id="btn-read-dtc" type="button" disabled>Leer motor (ECM)</button>
+          <button class="btn danger" id="btn-clear-dtc" type="button" disabled>Borrar ECM</button>
         </div>
         <div id="dtc-list" class="dtc-list">
-          <p class="empty">Conecta el adaptador y pulsa «Leer códigos».</p>
+          <p class="empty">Conecta el adaptador y escanea módulos o lee códigos del motor.</p>
         </div>
       </section>
 
-      <!-- INFO -->
       <section id="panel-info" class="panel">
         <div class="card">
           <button class="btn primary full" id="btn-read-vin" type="button" disabled>Leer VIN</button>
@@ -110,18 +145,20 @@
           <div><dt>VIN</dt><dd id="info-vin">—</dd></div>
           <div><dt>ECU</dt><dd id="info-ecu">—</dd></div>
           <div><dt>Adaptador</dt><dd id="info-adapter">—</dd></div>
+          <div><dt>Módulos</dt><dd id="info-modules">14 ECU</dd></div>
         </dl>
       </section>
     </main>
 
     <footer class="footer">
-      <span>OBD-II ISO 15765 · SAE J1979</span>
+      <span>OBD-II · ISO 15765 · UDS multi-ECU</span>
     </footer>
   </div>
 
   <div id="toast" class="toast" hidden></div>
 
   <script src="js/pids.js"></script>
+  <script src="js/modules.js"></script>
   <script src="js/dtc.js"></script>
   <script src="js/elm327.js"></script>
   <script src="js/connectors.js"></script>

@@ -1,9 +1,10 @@
-var CACHE = 'obd2-v1';
+var CACHE = 'obd2-v2';
 var ASSETS = [
   './',
   './index.html',
   './css/app.css',
   './js/pids.js',
+  './js/modules.js',
   './js/dtc.js',
   './js/elm327.js',
   './js/connectors.js',

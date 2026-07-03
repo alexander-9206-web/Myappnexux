@@ -35,9 +35,27 @@ window.DTC_DB = {
   P0700: 'Transmisión — fallo general',
   P0715: 'Sensor RPM entrada transmisión',
   P0720: 'Sensor RPM salida transmisión',
-  C1201: 'Fallo sistema motor (CAN)',
+  P0730: 'Relación de marchas incorrecta',
+  P0741: 'Embrague convertidor TCC — circuito',
+  C0035: 'Sensor velocidad rueda delantera izq.',
+  C0040: 'Sensor velocidad rueda delantera der.',
+  C0045: 'Sensor velocidad rueda trasera izq.',
+  C0050: 'Sensor velocidad rueda trasera der.',
+  C0200: 'Módulo ABS — fallo interno',
+  B1000: 'Módulo carrocería — fallo ECU',
+  B1342: 'ECM no programada / inmovilizador',
+  B1600: 'Airbag — luz de advertencia',
+  B1620: 'Airbag conductor — circuito',
+  B1650: 'Airbag acompañante — circuito',
   U0100: 'Pérdida comunicación ECM/PCM',
-  U0121: 'Pérdida comunicación ABS'
+  U0101: 'Pérdida comunicación TCM',
+  U0121: 'Pérdida comunicación ABS',
+  U0126: 'Pérdida comunicación sensor de ángulo',
+  U0140: 'Pérdida comunicación BCM',
+  U0151: 'Pérdida comunicación restraints/airbag',
+  U0155: 'Pérdida comunicación tablero',
+  U0164: 'Pérdida comunicación HVAC',
+  U0401: 'Datos inválidos del ECM'
 };
 
 window.describeDTC = function (code) {
@@ -50,8 +68,11 @@ window.parseDTCResponse = function (hex) {
   if (clean.length < 4) return [];
   var codes = [];
   var data = clean;
-  if (data.indexOf('43') === 0 || data.indexOf('47') === 0) data = data.slice(2);
-  if (data.indexOf('03') === 0) data = data.slice(2);
+  ['43', '47', '4A'].forEach(function (pfx) {
+    var i = data.indexOf(pfx);
+    if (i >= 0) { data = data.slice(i + 2); return; }
+  });
+  if (data.indexOf('03') === 0 || data.indexOf('07') === 0) data = data.slice(2);
   var i = 0;
   while (i + 3 < data.length) {
     var b1 = parseInt(data.slice(i, i + 2), 16);
