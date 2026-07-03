@@ -1,0 +1,43 @@
+var CACHE = 'obd2-v4';
+var ASSETS = [
+  './',
+  './index.html',
+  './css/app.css',
+  './js/pids.js',
+  './js/modules.js',
+  './js/dtc.js',
+  './js/elm327.js',
+  './js/security-access.js',
+  './js/connectors.js',
+  './js/tachometer.js',
+  './js/app.js',
+  './manifest.json',
+  './icons/icon.svg'
+];
+
+self.addEventListener('install', function (ev) {
+  ev.waitUntil(
+    caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); })
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function (ev) {
+  ev.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) {
+        return caches.delete(k);
+      }));
+    })
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', function (ev) {
+  if (ev.request.method !== 'GET') return;
+  ev.respondWith(
+    caches.match(ev.request).then(function (hit) {
+      return hit || fetch(ev.request);
+    })
+  );
+});

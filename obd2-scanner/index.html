@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0a1628">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CarDiag">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="description" content="Diagnóstico OBD2 iOS — todos los módulos ECU, códigos DTC y datos en vivo. ELM327 / MY327">
+  <title>CarDiag · OBD2 iOS</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top-bar">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">⬡</span>
+        <div>
+          <h1>CarDiag</h1>
+          <p class="subtitle">Diagnóstico completo · iOS</p>
+        </div>
+      </div>
+      <div class="conn-badge" id="conn-badge" data-state="off">
+        <span class="dot"></span>
+        <span id="conn-label">Desconectado</span>
+      </div>
+    </header>
+
+    <div class="ios-banner" id="ios-banner" hidden>
+      <strong>iPhone/iPad:</strong> Para MY327 WiFi usa la app nativa en <code>ios/CarDiag</code>. Para BT Classic, conecta vía puente WebSocket.
+    </div>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="connect" role="tab">Conectar</button>
+      <button class="tab" data-tab="modules" role="tab">Módulos</button>
+      <button class="tab" data-tab="tacho" role="tab">Tacómetro</button>
+      <button class="tab" data-tab="live" role="tab">En vivo</button>
+      <button class="tab" data-tab="dtc" role="tab">Códigos</button>
+      <button class="tab" data-tab="info" role="tab">Vehículo</button>
+    </nav>
+
+    <main>
+      <section id="panel-connect" class="panel active">
+        <div class="card">
+          <h2>Adaptador OBD2</h2>
+          <p class="hint">ELM327 / MY327 v1.5+. Enciende el contacto del vehículo antes de conectar.</p>
+        </div>
+
+        <div class="connect-grid">
+          <button class="connect-btn ios-highlight" id="btn-bridge" type="button">
+            <span class="connect-icon">📱</span>
+            <strong>Puente iOS / MY327</strong>
+            <small>Recomendado en iPhone · WiFi / BT</small>
+          </button>
+          <button class="connect-btn" id="btn-ble" type="button">
+            <span class="connect-icon">📶</span>
+            <strong>Bluetooth BLE</strong>
+            <small>ELM327 BLE · Android / Chrome</small>
+          </button>
+          <button class="connect-btn" id="btn-serial" type="button">
+            <span class="connect-icon">🔌</span>
+            <strong>USB / Serial</strong>
+            <small>Chrome · Edge · Android</small>
+          </button>
+        </div>
+
+        <div class="card bridge-config" id="bridge-config">
+          <label for="bridge-url">URL WebSocket del puente</label>
+          <div class="row">
+            <input id="bridge-url" type="url" value="ws://localhost:8765" spellcheck="false" autocapitalize="off">
+            <button class="btn primary" id="btn-bridge-connect" type="button">Conectar</button>
+          </div>
+          <p class="hint">Puente local: <code>npm run bridge</code> (BT) o <code>npm run bridge:wifi</code></p>
+        </div>
+
+        <div class="card" id="init-log-card" hidden>
+          <h3>Inicialización ELM327</h3>
+          <pre id="init-log" class="log"></pre>
+        </div>
+
+        <button class="btn danger full" id="btn-disconnect" type="button" hidden>Desconectar</button>
+      </section>
+
+      <section id="panel-modules" class="panel">
+        <div class="module-actions">
+          <button class="btn primary" id="btn-scan-all" type="button" disabled>Escanear todos</button>
+          <span class="scan-progress" id="scan-progress"></span>
+        </div>
+        <div class="summary-bar" id="module-summary" hidden>
+          <span id="summary-total">0 códigos</span>
+          <span id="summary-modules">0 módulos con fallos</span>
+        </div>
+        <div class="module-grid" id="module-grid"></div>
+        <div id="module-detail" class="module-detail" hidden>
+          <div class="module-detail-head">
+            <button class="btn-back" id="btn-module-back" type="button" aria-label="Volver">←</button>
+            <div>
+              <h3 id="detail-name">—</h3>
+              <p id="detail-header" class="hint">—</p>
+            </div>
+          </div>
+          <div class="dtc-actions">
+            <button class="btn primary" id="btn-read-module" type="button">Leer módulo</button>
+            <button class="btn danger" id="btn-clear-module" type="button">Borrar módulo</button>
+          </div>
+          <div id="module-dtc-list" class="dtc-list"></div>
+        </div>
+      </section>
+
+      <section id="panel-tacho" class="panel">
+        <div id="tacho-display">
+          <div class="tacho-wrap">
+            <svg id="tacho-svg" viewBox="0 0 240 240" class="tacho-svg" aria-label="Tacómetro RPM"></svg>
+            <div class="tacho-digital">
+              <span id="tacho-rpm-value" class="tacho-rpm-num">0</span>
+              <span class="tacho-rpm-unit">RPM</span>
+            </div>
+          </div>
+          <div class="tacho-meta">
+            <span id="tacho-status" data-state="off">Detenido</span>
+            <span>Max <strong id="tacho-max-label">8000</strong> · Redline <strong id="tacho-redline-label">6500</strong></span>
+          </div>
+          <div class="tacho-controls">
+            <button class="btn primary" id="btn-tacho-start" type="button" disabled>Iniciar</button>
+            <button class="btn" id="btn-tacho-stop" type="button" hidden>Detener</button>
+            <button class="btn" id="btn-tacho-edit" type="button">Editar</button>
+          </div>
+
+          <div class="card odo-card">
+            <h3>Odómetro (Tablero IC)</h3>
+            <p class="hint">Lectura y programación vía módulo tablero · CAN 720</p>
+            <div class="odo-readout">
+              <span id="odo-value" class="odo-value">—</span>
+              <span id="odo-source" class="odo-source"></span>
+            </div>
+            <div class="odo-edit row">
+              <input id="odo-input" type="number" min="0" step="1" placeholder="Kilometraje km" inputmode="numeric">
+              <select id="odo-did" aria-label="Identificador DID">
+                <option value="F190">DID F190 (VAG/BMW)</option>
+                <option value="DD01">DID DD01 (Generic)</option>
+                <option value="B012">DID B012 (Alternativo)</option>
+              </select>
+            </div>
+            <div class="row odo-actions">
+              <button class="btn primary" id="btn-odo-read" type="button" disabled>Leer</button>
+              <button class="btn danger" id="btn-odo-write" type="button" disabled>Escribir</button>
+            </div>
+            <div class="workshop-panel">
+              <label class="workshop-toggle">
+                <input type="checkbox" id="workshop-mode" checked>
+                <span>Modo taller autorizado — Security Access UDS (0x27)</span>
+              </label>
+              <input id="workshop-order" type="text" placeholder="Orden de trabajo / cliente (opcional)" autocapitalize="sentences">
+              <pre id="workshop-log" class="log" hidden></pre>
+            </div>
+            <p class="legal-hint">Desbloqueo UDS estándar ISO 14229 para recalibración con orden del cliente (cambio tablero, reparación).</p>
+          </div>
+        </div>
+
+        <div id="tacho-editor" class="card" hidden>
+          <h3>Editar tacómetro</h3>
+          <div class="edit-grid">
+            <label>RPM máximo<input id="cfg-max-rpm" type="range" min="4000" max="10000" step="500" value="8000"></label>
+            <label>Zona roja (redline)<input id="cfg-redline" type="range" min="3000" max="9000" step="100" value="6500"></label>
+            <label>Advertencia desde<input id="cfg-warn" type="range" min="2000" max="8000" step="100" value="5500"></label>
+            <label>Calibración RPM<input id="cfg-calibration" type="range" min="-500" max="500" step="10" value="0"></label>
+            <label>Tema visual
+              <select id="cfg-theme">
+                <option value="sport">Sport</option>
+                <option value="classic">Classic</option>
+                <option value="neon">Neon</option>
+              </select>
+            </label>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="btn-tacho-save" type="button">Guardar</button>
+            <button class="btn" id="btn-tacho-cancel" type="button">Cancelar</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-live" class="panel">
+        <div class="live-controls">
+          <button class="btn primary" id="btn-start-live" type="button" disabled>Iniciar lectura</button>
+          <button class="btn" id="btn-stop-live" type="button" hidden>Detener</button>
+          <span class="poll-rate" id="poll-rate"></span>
+        </div>
+        <div class="gauge-grid" id="gauge-grid"></div>
+      </section>
+
+      <section id="panel-dtc" class="panel">
+        <div class="mode-tabs">
+          <button class="mode-tab active" data-dtc-mode="stored">Almacenados</button>
+          <button class="mode-tab" data-dtc-mode="pending">Pendientes</button>
+          <button class="mode-tab" data-dtc-mode="permanent">Permanentes</button>
+        </div>
+        <div class="dtc-actions">
+          <button class="btn primary" id="btn-read-dtc" type="button" disabled>Leer motor (ECM)</button>
+          <button class="btn danger" id="btn-clear-dtc" type="button" disabled>Borrar ECM</button>
+        </div>
+        <div id="dtc-list" class="dtc-list">
+          <p class="empty">Conecta el adaptador y escanea módulos o lee códigos del motor.</p>
+        </div>
+      </section>
+
+      <section id="panel-info" class="panel">
+        <div class="card">
+          <button class="btn primary full" id="btn-read-vin" type="button" disabled>Leer VIN</button>
+        </div>
+        <dl class="info-list" id="vehicle-info">
+          <div><dt>Protocolo</dt><dd id="info-protocol">—</dd></div>
+          <div><dt>VIN</dt><dd id="info-vin">—</dd></div>
+          <div><dt>ECU</dt><dd id="info-ecu">—</dd></div>
+          <div><dt>Adaptador</dt><dd id="info-adapter">—</dd></div>
+          <div><dt>Módulos</dt><dd id="info-modules">14 ECU</dd></div>
+        </dl>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>OBD-II · ISO 15765 · UDS multi-ECU</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/pids.js"></script>
+  <script src="js/modules.js"></script>
+  <script src="js/dtc.js"></script>
+  <script src="js/elm327.js"></script>
+  <script src="js/security-access.js"></script>
+  <script src="js/connectors.js"></script>
+  <script src="js/tachometer.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+  </script>
+</body>
+</html>
