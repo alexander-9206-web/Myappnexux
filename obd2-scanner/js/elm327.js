@@ -198,16 +198,94 @@
     return null;
   };
 
-  Elm327.prototype.writeOdometer = async function (km, did) {
+  Elm327.prototype.writeOdometer = async function (km, did, options) {
+    options = options || {};
     did = (did || 'F190').toUpperCase().replace(/[^0-9A-F]/g, '');
-    var kmInt = Math.round(km);
-    var bytes = encodeOdometerKm(kmInt);
-    await this.setHeader('720');
-    var cmd = '2E' + did + bytes;
-    var resp = await this.send(cmd, 10000);
-    await this.resetHeader();
-    if (/NO DATA|ERROR|UNABLE/i.test(resp)) throw new Error('ECU rechazó escritura: ' + resp.split('\n')[0]);
-    return resp;
+    var header = options.header || '720';
+    var bytes = encodeOdometerKm(Math.round(km));
+    var log = [];
+
+    await this.setHeader(header);
+
+    try {
+      await this.send('1003', 4000);
+      log.push('Sesión diagnóstico extendida (10 03)');
+
+      if (options.workshopUnlock !== false) {
+        var unlock = await this.securityAccessUnlock(header, options.levels);
+        log.push('Security Access OK — ' + unlock.method + ' · nivel ' + unlock.level);
+      }
+
+      await this.send('3E00', 2000);
+      var resp = await this.send('2E' + did + bytes, 12000);
+      log.push('Write 2E' + did + ' → ' + (resp.split('\n')[0] || 'OK'));
+
+      if (/NO DATA|ERROR|7F2E/i.test(resp)) {
+        throw new Error('ECU rechazó escritura: ' + resp.split('\n')[0]);
+      }
+
+      var verify = await this.send('22' + did, 6000);
+      log.push('Verificación 22' + did + ' OK');
+
+      await this.send('1001', 2000);
+      return { resp: resp, verify: verify, log: log };
+    } finally {
+      await this.resetHeader();
+    }
+  };
+
+  Elm327.prototype.securityAccessUnlock = async function (header, levels) {
+    levels = levels || global.UDSSecurity.DEFAULT_LEVELS;
+    var lastErr = 'Sin respuesta del ECU';
+
+    for (var li = 0; li < levels.length; li++) {
+      var level = levels[li];
+      var reqSub = level * 2 - 1;
+      var resSub = level * 2;
+
+      try {
+        await this.send('1003', 3000);
+        var seedResp = await this.send('27' + padHex(reqSub), 6000);
+        var seed = global.UDSSecurity.parseSeed(seedResp, reqSub);
+
+        if (!seed) {
+          lastErr = 'Nivel ' + level + ': seed no recibido';
+          continue;
+        }
+
+        var candidates = global.UDSSecurity.keyCandidates(seed);
+        for (var ci = 0; ci < candidates.length; ci++) {
+          var cand = candidates[ci];
+          var keyHex = global.UDSSecurity.bytesToHex(cand.key);
+          var keyResp = await this.send('27' + padHex(resSub) + keyHex, 6000);
+          if (global.UDSSecurity.isUnlocked(keyResp, resSub)) {
+            return { level: level, method: cand.name, seed: seed };
+          }
+          await sleep(60);
+        }
+        lastErr = 'Nivel ' + level + ': ningún algoritmo coincidió';
+      } catch (e) {
+        lastErr = e.message;
+      }
+      await sleep(100);
+    }
+
+    throw new Error('Security Access UDS falló — ' + lastErr);
+  };
+
+  Elm327.prototype.clearModuleDTCsProtected = async function (mod) {
+    await this.setHeader(mod.header);
+    try {
+      await this.send('1003', 3000);
+      try {
+        await this.securityAccessUnlock(mod.header, [1, 3, 5]);
+      } catch (e) { /* algunos módulos no requieren unlock para 04 */ }
+      var resp = await this.send(mod.clearMode || '04', 5000);
+      await this.send('1001', 2000);
+      return resp;
+    } finally {
+      await this.resetHeader();
+    }
   };
 
   function readOdometerPID(elm) {

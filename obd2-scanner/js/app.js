@@ -260,7 +260,7 @@
     if (!confirm('¿Borrar códigos del módulo ' + mod.name + '?')) return;
     setConn('busy', 'Borrando…');
     try {
-      await elm.clearModuleDTCs(mod);
+      await elm.clearModuleDTCsProtected(mod);
       scanResults[activeModuleId] = { module: mod, stored: [], pending: [], permanent: [], error: null };
       renderModuleDtcList(scanResults[activeModuleId]);
       buildModuleGrid();

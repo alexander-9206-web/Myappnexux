@@ -250,14 +250,29 @@
         return;
       }
       var did = document.getElementById('odo-did').value;
+      var workshop = document.getElementById('workshop-mode').checked;
+      var order = document.getElementById('workshop-order').value.trim();
+      var logEl = document.getElementById('workshop-log');
+
       if (!confirm(
-        '⚠️ ADVERTENCIA LEGAL\n\nModificar el odómetro puede ser ILEGAL en tu país si se usa para fraude.\n\nSolo procede para recalibración legítima (cambio de tablero, reparación autorizada).\n\n¿Escribir ' + km + ' km en el tablero (DID ' + did + ')?'
+        'Modo taller autorizado\n\n' +
+        'Se ejecutará Security Access UDS (0x27) + sesión extendida + escritura 2E.\n\n' +
+        (order ? 'Orden: ' + order + '\n\n' : '') +
+        '¿Escribir ' + km + ' km (DID ' + did + ')?'
       )) return;
+
+      logEl.hidden = false;
+      logEl.textContent = 'Desbloqueando ECU tablero…\n';
+
       try {
-        await elm.writeOdometer(km, did);
+        var result = await elm.writeOdometer(km, did, { workshopUnlock: workshop });
         document.getElementById('odo-value').textContent = km.toLocaleString('es') + ' km';
-        if (global.__tachoToast) global.__tachoToast('Comando enviado — verifica en tablero', 'ok');
+        logEl.textContent = (result.log || []).join('\n');
+        if (order) logEl.textContent += '\nOrden: ' + order;
+        if (global.__tachoToast) global.__tachoToast('Odómetro programado — verifica tablero', 'ok');
+        await this.readOdometer();
       } catch (e) {
+        logEl.textContent += '\nERROR: ' + e.message;
         if (global.__tachoToast) global.__tachoToast(e.message, 'error');
       }
     }

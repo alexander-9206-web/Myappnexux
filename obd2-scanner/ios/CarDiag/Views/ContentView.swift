@@ -214,7 +214,7 @@ struct ModuleDetailView: View {
                 Button("Borrar códigos del módulo", role: .destructive) {
                     clearing = true
                     Task {
-                        try? await obd.clearModule(result.module)
+                        try? await obd.clearModuleProtected(result.module)
                         clearing = false
                     }
                 }

@@ -214,16 +214,79 @@ final class ELM327Client: ObservableObject {
         return nil
     }
 
-    func writeOdometer(km: Double, did: String) async throws {
+    func writeOdometer(km: Double, did: String, workshopUnlock: Bool = true) async throws -> [String] {
         let didClean = did.uppercased().filter { "0123456789ABCDEF".contains($0) }
         let tenths = Int(km * 10)
         let bytes = String(format: "%02X%02X%02X", (tenths >> 16) & 0xFF, (tenths >> 8) & 0xFF, tenths & 0xFF)
+        var log: [String] = []
+
         try await setHeader("720")
-        let resp = try await send("2E\(didClean)\(bytes)", timeout: 10)
-        try await resetHeader()
-        if resp.uppercased().contains("NO DATA") || resp.uppercased().contains("ERROR") {
+        defer { Task { try? await resetHeader() } }
+
+        _ = try await send("1003", timeout: 4)
+        log.append("Sesión extendida (10 03)")
+
+        if workshopUnlock {
+            let unlock = try await securityAccessUnlock(header: "720")
+            log.append("Security Access OK — \(unlock.method) · nivel \(unlock.level)")
+        }
+
+        _ = try await send("3E00", timeout: 2)
+        let resp = try await send("2E\(didClean)\(bytes)", timeout: 12)
+        log.append("Write 2E\(didClean)")
+
+        if resp.uppercased().contains("NO DATA") || resp.uppercased().contains("7F2E") {
             throw URLError(.cannotWriteToFile)
         }
+
+        _ = try await send("22\(didClean)", timeout: 6)
+        log.append("Verificación 22\(didClean)")
+        _ = try await send("1001", timeout: 2)
+        return log
+    }
+
+    struct UnlockResult {
+        let level: Int
+        let method: String
+    }
+
+    func securityAccessUnlock(header: String, levels: [Int] = UDSSecurityAccess.defaultLevels) async throws -> UnlockResult {
+        var lastError = "Sin respuesta"
+
+        for level in levels {
+            let reqSub = level * 2 - 1
+            let resSub = level * 2
+            do {
+                _ = try await send("1003", timeout: 3)
+                let seedResp = try await send(String(format: "27%02X", reqSub), timeout: 6)
+                guard let seed = UDSSecurityAccess.parseSeed(seedResp, requestSub: reqSub) else {
+                    lastError = "Nivel \(level): sin seed"
+                    continue
+                }
+                for cand in UDSSecurityAccess.keyCandidates(seed: seed) {
+                    let keyHex = UDSSecurityAccess.bytesToHex(cand.key)
+                    let keyResp = try await send(String(format: "27%02X", resSub) + keyHex, timeout: 6)
+                    if UDSSecurityAccess.isUnlocked(keyResp, responseSub: resSub) {
+                        return UnlockResult(level: level, method: cand.name)
+                    }
+                    try? await Task.sleep(nanoseconds: 60_000_000)
+                }
+                lastError = "Nivel \(level): algoritmos agotados"
+            } catch {
+                lastError = error.localizedDescription
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        throw NSError(domain: "CarDiag", code: 403, userInfo: [NSLocalizedDescriptionKey: "Security Access UDS falló — \(lastError)"])
+    }
+
+    func clearModuleProtected(_ module: ECUModule) async throws {
+        try await setHeader(module.header)
+        defer { Task { try? await resetHeader() } }
+        _ = try await send("1003", timeout: 3)
+        try? await securityAccessUnlock(header: module.header, levels: [1, 3, 5])
+        _ = try await send("04", timeout: 5)
+        _ = try await send("1001", timeout: 2)
     }
 
     private func readOdometerPID() async throws -> Double {

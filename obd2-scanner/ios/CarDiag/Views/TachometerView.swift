@@ -34,6 +34,9 @@ struct TachometerView: View {
     @State private var odometerInput = ""
     @State private var odometerSource = ""
     @State private var selectedDID = "F190"
+    @State private var workshopMode = true
+    @State private var workOrder = ""
+    @State private var workshopLog = ""
     @State private var showWriteAlert = false
 
     private let didOptions = ["F190", "DD01", "B012"]
@@ -102,9 +105,16 @@ struct TachometerView: View {
                                 }
                                 .disabled(!obd.isConnected || odometerInput.isEmpty)
                             }
-                            Text("⚠️ Modificar el odómetro puede ser ilegal si se usa para fraude.")
+                            Text("Desbloqueo UDS ISO 14229 para recalibración con orden del cliente.")
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(.secondary)
+                            Toggle("Modo taller — Security Access UDS", isOn: $workshopMode)
+                            TextField("Orden de trabajo / cliente", text: $workOrder)
+                            if !workshopLog.isEmpty {
+                                Text(workshopLog)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.green)
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -122,13 +132,19 @@ struct TachometerView: View {
                 Button("Escribir", role: .destructive) {
                     Task {
                         if let km = Double(odometerInput) {
-                            try? await obd.writeOdometer(km: km, did: selectedDID)
-                            odometerKm = String(format: "%.0f km", km)
+                            do {
+                                let log = try await obd.writeOdometer(km: km, did: selectedDID, workshopUnlock: workshopMode)
+                                workshopLog = log.joined(separator: "\n")
+                                if !workOrder.isEmpty { workshopLog += "\nOrden: \(workOrder)" }
+                                odometerKm = String(format: "%.0f km", km)
+                            } catch {
+                                workshopLog = "ERROR: \(error.localizedDescription)"
+                            }
                         }
                     }
                 }
             } message: {
-                Text("¿Escribir \(odometerInput) km en el tablero (DID \(selectedDID))? Solo para recalibración legítima.")
+                Text("Security Access UDS + escritura \(odometerInput) km (DID \(selectedDID)).\(workOrder.isEmpty ? "" : "\nOrden: \(workOrder)")")
             }
             .onDisappear {
                 running = false
